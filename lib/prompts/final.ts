@@ -1,5 +1,3 @@
-// lib/prompts/final.ts
-
 import { z } from 'zod';
 import { PromptTemplate } from '../../types';
 
