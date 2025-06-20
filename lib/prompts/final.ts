@@ -1,7 +1,7 @@
 // lib/prompts/final.ts
 
 import { z } from 'zod';
-import { PromptTemplate } from '@/lib/types';
+import { PromptTemplate } from '../types';
 
 export const finalInputSchema = z.object({
   lead: z.string(),
