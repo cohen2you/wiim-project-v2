@@ -1,7 +1,7 @@
 // lib/prompts/primary.ts
 
 import { z } from 'zod';
-import { PromptTemplate } from '@/lib/types';
+import { PromptTemplate } from '../../types';
 
 export const primaryInputSchema = z.object({
   ticker: z.string(),
