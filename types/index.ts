@@ -12,7 +12,9 @@ export interface StockData {
   oneYearChange: number;
 }
 
-export interface PromptTemplate {
-  prompt: string;
-  variables: Record<string, any>;
+export interface PromptTemplate<InputSchema = any> {
+  name: string;
+  inputSchema: InputSchema;
+  system: string;
+  prompt: (input: InputSchema) => string;
 }
