@@ -1,43 +1,44 @@
-// lib/prompts/primary.ts
+export const getPrimaryPrompt = {
+  prompt: ({
+    sourceUrl,
+    ticker,
+    articleText,
+  }: {
+    sourceUrl: string;
+    ticker?: string;
+    articleText: string;
+  }) => `
+You are a professional financial journalist.
 
-import { z } from 'zod';
-import { PromptTemplate } from '../../types';
+Generate a stock movement article with two sections: Lead and What Happened.
 
-export const primaryInputSchema = z.object({
-  ticker: z.string(),
-  sourceUrl: z.string(),
-  articleText: z.string(),
-});
+Strict rules and enforcement:
 
-export const getPrimaryPrompt: PromptTemplate<typeof primaryInputSchema> = {
-  name: 'getPrimaryPrompt',
-  inputSchema: primaryInputSchema,
-  system: 'You are a financial journalist writing the Lead and What Happened sections of a stock movement article.',
-  prompt: ({ ticker, sourceUrl, articleText }) => `
-Write the **Lead** and **What Happened** sections for a stock movement article about ${ticker}.
+1. Lead paragraph:
+- Must begin with the most recent, newsworthy development from the article.
+- Must include exactly one natural, sequential three-word phrase that matches a Benzinga topic or landing page (e.g., "China trade war").
+- This phrase must be hyperlinked directly in the Lead paragraph.
+- The hyperlink cannot link to the source URL.
+- The Lead must contain only this one hyperlink and only one occurrence.
+- If this cannot be done, respond exactly with:
+"Cannot generate article. One or more required hyperlink rules cannot be fulfilled with the provided content."
 
-Instructions:
-- Use a concise, journalistic tone following AP style.
-- Begin with a Lead paragraph that introduces the stock's movement and the news driving it.
-- Include a hyperlink to the source using this format: "according to [Benzinga](${sourceUrl})".
-- In the "What Happened" section, expand on the key developments — including timing, context, stock impact, and industry relevance.
-- Ensure the combined length of both sections is between **200 and 250 words**.
-- Break into paragraphs every **two sentences** for readability.
-- The output should be formatted like this:
+2. What Happened section (~200 words):
+- Begins immediately after the Lead.
+- The first sentence must include a three-word anchor linking to the source URL.
+- The anchor text must use the source name as clickable text (e.g., "according to [Benzinga](${sourceUrl})").
+- Use short paragraphs of no more than two sentences each.
+- Summarize all key developments factually and chronologically.
+- Mention the source name once more in the section (not hyperlinked).
+- Use active voice and AP style.
+- Do not copy more than two consecutive words except for quotes or technical terms.
+- Do not add background, speculation, or analysis.
 
-**Lead**
-
-[Two-sentence paragraph]  
-[Two-sentence paragraph]
-
-**What Happened**
-
-[Two-sentence paragraph]  
-[Two-sentence paragraph]  
-[Two-sentence paragraph]  
-[Two-sentence paragraph]
+---
 
 Here is the article content for reference:
 ${articleText}
+
+Begin the article now.
 `,
 };

@@ -1,20 +1,32 @@
-// app/api/generate/final/route.ts
-
 import { NextResponse } from 'next/server';
 import { generateFinalStory } from '@/lib/api';
 
 export async function POST(req: Request) {
   try {
     const body = await req.json();
+
     console.log('Final API received body:', body);
 
+    const { lead, whatHappened, whyItMatters, priceAction } = body;
+
+    if (!lead || !whatHappened || !whyItMatters) {
+      console.warn('Missing required fields in final generation:', { lead, whatHappened, whyItMatters });
+      return NextResponse.json(
+        { error: 'Missing required fields: lead, whatHappened, whyItMatters.' },
+        { status: 400 }
+      );
+    }
+
     const result = await generateFinalStory({
-      lead: body.leadAndWhatHappened,
-      whatHappened: '', // if your function needs it separately, else omit or parse it
-      whyItMatters: body.whyItMatters,
+      lead,
+      whatHappened,
+      whyItMatters,
+      priceAction: priceAction || '',
     });
 
-    return NextResponse.json({ output: result });
+    console.log('Final generation result:', result);
+
+    return NextResponse.json({ result });
   } catch (error: any) {
     console.error('Error in /api/generate/final:', error);
     return NextResponse.json(

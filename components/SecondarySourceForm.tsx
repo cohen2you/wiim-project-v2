@@ -1,38 +1,32 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 
 interface SecondarySourceFormProps {
-  initialPrimaryText?: string;
-  onComplete?: (output: string) => void;
+  primaryOutput: string;
+  onComplete: (output: string) => void;
+  onBack?: () => void;
 }
 
-export default function SecondarySourceForm({ initialPrimaryText = '', onComplete }: SecondarySourceFormProps) {
-  const [secondaryUrl, setSecondaryUrl] = useState('');
-  const [outletName, setOutletName] = useState('');
-  const [primaryText, setPrimaryText] = useState(initialPrimaryText);
-  const [secondaryText, setSecondaryText] = useState('');
-  const [output, setOutput] = useState('');
+export default function SecondarySourceForm({ primaryOutput, onComplete, onBack }: SecondarySourceFormProps) {
+  const [sourceUrl, setSourceUrl] = useState('');
+  const [articleText, setArticleText] = useState('');
   const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    setPrimaryText(initialPrimaryText);
-  }, [initialPrimaryText]);
+  const [error, setError] = useState('');
 
   const handleGenerate = async () => {
+    setError('');
     setLoading(true);
-    setOutput('');
 
-    // ADD THIS LOG
-    console.log('Secondary generate clicked with data:', {
-      secondaryUrl,
-      outletName,
-      primaryText,
-      secondaryText,
+    console.log('Sending to /api/generate/secondary:', {
+      sourceUrl,
+      primaryText: primaryOutput,
+      articleText,
+      outletName: 'Benzinga',
     });
 
-    if (!primaryText.trim()) {
-      setOutput('Primary Output Text is empty. Please fill it in before generating.');
+    if (!sourceUrl.trim() && !articleText.trim()) {
+      setError('Please provide either a Secondary Article URL or the full Secondary Article Text.');
       setLoading(false);
       return;
     }
@@ -42,89 +36,74 @@ export default function SecondarySourceForm({ initialPrimaryText = '', onComplet
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          secondaryUrl,
-          outletName,
-          primaryText,
-          secondaryText,
+          sourceUrl,
+          primaryText: primaryOutput,
+          articleText,
+          outletName: 'Benzinga',
         }),
       });
 
-      const data = await res.json();
-      const generated = data.result || 'No result returned.';
-      setOutput(generated);
-
-      if (onComplete) {
-        onComplete(generated);
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.error || 'Server error');
       }
-    } catch (err) {
-      console.error(err);
-      setOutput('An error occurred.');
+
+      const data = await res.json();
+      onComplete(data.result);
+    } catch (err: any) {
+      setError(err.message || 'Error generating secondary output.');
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="max-w-3xl mx-auto py-12 px-6 space-y-6">
-      <h1 className="text-2xl font-bold">Generate Secondary Article Section</h1>
+    <div className="bg-white shadow-lg rounded-2xl p-10 max-w-full space-y-6">
+      <label htmlFor="source-url" className="block font-semibold text-xl text-gray-800">
+        Secondary Article URL
+      </label>
+      <input
+        id="source-url"
+        type="text"
+        placeholder="Paste secondary source URL"
+        value={sourceUrl}
+        onChange={(e) => setSourceUrl(e.target.value)}
+        className="w-full rounded-lg border-2 border-gray-300 px-6 py-4 text-lg focus:outline-none focus:ring-4 focus:ring-blue-400 focus:border-blue-600"
+      />
 
-      <div className="space-y-2">
-        <label className="block text-sm font-medium">Secondary URL</label>
-        <input
-          type="text"
-          placeholder="Paste secondary source URL"
-          value={secondaryUrl}
-          onChange={(e) => setSecondaryUrl(e.target.value)}
-          className="border rounded px-3 py-2 w-full"
-        />
+      <label htmlFor="article-text" className="block font-semibold text-xl text-gray-800 mt-8">
+        Secondary Article Text
+      </label>
+      <textarea
+        id="article-text"
+        rows={12}
+        placeholder="Paste full secondary article text"
+        value={articleText}
+        onChange={(e) => setArticleText(e.target.value)}
+        className="w-full rounded-lg border-2 border-gray-300 px-6 py-4 text-lg font-mono resize-none focus:outline-none focus:ring-4 focus:ring-blue-400 focus:border-blue-600"
+      />
+
+      {error && <p className="text-red-600 font-semibold">{error}</p>}
+
+      <div className="flex justify-end space-x-4 mt-4">
+        {onBack && (
+          <button
+            type="button"
+            onClick={onBack}
+            className="rounded-lg border border-gray-400 px-6 py-3 font-semibold hover:bg-gray-100"
+          >
+            Back
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={handleGenerate}
+          disabled={loading}
+          className="rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-3 text-white font-bold hover:from-blue-700 hover:to-indigo-700 disabled:opacity-60"
+        >
+          {loading ? 'Generating...' : 'Generate Step 2 Output'}
+        </button>
       </div>
-
-      <div className="space-y-2">
-        <label className="block text-sm font-medium">Outlet Name</label>
-        <input
-          type="text"
-          placeholder="e.g., Benzinga"
-          value={outletName}
-          onChange={(e) => setOutletName(e.target.value)}
-          className="border rounded px-3 py-2 w-full"
-        />
-      </div>
-
-      <div className="space-y-2">
-        <label className="block text-sm font-medium">Primary Output Text</label>
-        <textarea
-          placeholder="Paste output from Primary section"
-          value={primaryText}
-          onChange={(e) => setPrimaryText(e.target.value)}
-          rows={6}
-          className="border rounded px-3 py-2 w-full font-mono"
-        />
-      </div>
-
-      <div className="space-y-2">
-        <label className="block text-sm font-medium">Secondary Article Text</label>
-        <textarea
-          placeholder="Paste full secondary article text"
-          value={secondaryText}
-          onChange={(e) => setSecondaryText(e.target.value)}
-          rows={10}
-          className="border rounded px-3 py-2 w-full font-mono"
-        />
-      </div>
-
-      <button
-        onClick={handleGenerate}
-        disabled={loading}
-        className="bg-blue-600 text-white px-6 py-2 rounded hover:bg-blue-700 disabled:opacity-50"
-      >
-        {loading ? 'Generating...' : 'Generate Step 2 Output'}
-      </button>
-
-      {output && (
-        <div className="bg-gray-50 border rounded p-6 mt-6 space-y-4 whitespace-pre-wrap">
-          {output}
-        </div>
-      )}
     </div>
   );
 }

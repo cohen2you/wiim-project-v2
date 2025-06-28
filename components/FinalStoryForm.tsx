@@ -1,99 +1,153 @@
-// components/FinalStoryForm.tsx
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useForm } from 'react-hook-form';
-
-function Button({ children, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement>) {
-  return (
-    <button {...props} className="bg-blue-600 text-white py-2 px-4 rounded hover:bg-blue-700">
-      {children}
-    </button>
-  );
-}
-
-function Textarea(props: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
-  return <textarea {...props} className="border p-2 rounded w-full" />;
-}
-
-function Loader() {
-  return <span className="animate-spin h-5 w-5 border-2 border-t-transparent border-white rounded-full inline-block"></span>;
-}
 
 interface FinalStoryFormProps {
-  leadAndWhatHappened: string;
-  whyItMatters: string;
+  primaryOutput: string;
+  secondaryOutput: string;
+  priceActionText: string; // <-- Receive price action text as prop
+  onComplete: (output: string) => void;
+  onBack: () => void;
 }
 
-export default function FinalStoryForm({ leadAndWhatHappened, whyItMatters }: FinalStoryFormProps) {
+export default function FinalStoryForm({
+  primaryOutput,
+  secondaryOutput,
+  priceActionText,
+  onComplete,
+  onBack,
+}: FinalStoryFormProps) {
+  const [lead, setLead] = useState('');
+  const [whyItMatters, setWhyItMatters] = useState('');
+  const [priceAction, setPriceAction] = useState('');
   const [output, setOutput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [leadInitialized, setLeadInitialized] = useState(false);
+  const [whyInitialized, setWhyInitialized] = useState(false);
 
-  const { register, handleSubmit, reset } = useForm({
-    defaultValues: {
-      leadAndWhatHappened: '',
-      whyItMatters: '',
-    },
-  });
+  // Initialize lead and whyItMatters text once from props
+  useEffect(() => {
+    if (!leadInitialized && primaryOutput?.trim()) {
+      setLead(primaryOutput);
+      setLeadInitialized(true);
+    }
+  }, [primaryOutput, leadInitialized]);
 
   useEffect(() => {
-    console.log('Resetting form with:', { leadAndWhatHappened, whyItMatters });
-    reset({
-      leadAndWhatHappened: leadAndWhatHappened || '',
-      whyItMatters: whyItMatters || '',
-    });
-  }, [leadAndWhatHappened, whyItMatters, reset]);
-
-  const onSubmit = async (data: any) => {
-    console.log('Final form submitted with data:', data);
-    if (!data.leadAndWhatHappened?.trim()) {
-      setOutput('Please provide the Lead & What Happened section before submitting.');
-      return;
+    if (!whyInitialized && secondaryOutput?.trim()) {
+      setWhyItMatters(secondaryOutput);
+      setWhyInitialized(true);
     }
+  }, [secondaryOutput, whyInitialized]);
 
+  // Set priceAction from prop, no API call here!
+  useEffect(() => {
+    setPriceAction(priceActionText || '');
+  }, [priceActionText]);
+
+  const handleGenerate = async () => {
+    setError('');
     setLoading(true);
     setOutput('');
 
+    if (!lead.trim() || !whyItMatters.trim()) {
+      setError('Lead and Why It Matters sections cannot be empty.');
+      setLoading(false);
+      return;
+    }
+
     try {
-      const response = await fetch('/api/generate/final', {
+      const res = await fetch('/api/generate/final', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
+        body: JSON.stringify({
+          lead,
+          whatHappened: lead,
+          whyItMatters,
+          priceAction,
+        }),
       });
-      const result = await response.json();
-      console.log('API response:', result);
-      setOutput(result.output || 'No output returned.');
-    } catch (error) {
-      console.error('Error generating final story:', error);
-      setOutput('Error generating final story.');
+
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.error || 'Server error');
+      }
+
+      const data = await res.json();
+      setOutput(data.result);
+      onComplete(data.result);
+    } catch (err: any) {
+      setError(err.message || 'Error generating final story.');
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <form onSubmit={handleSubmit(onSubmit)} className="space-y-8 p-6 bg-white rounded-lg shadow-md max-w-3xl mx-auto">
-      <div className="space-y-2">
-        <label className="block font-semibold text-gray-700">Lead & What Happened</label>
-        <Textarea {...register('leadAndWhatHappened')} rows={9} className="w-full border p-2 rounded" />
-      </div>
+    <div className="bg-white shadow-lg rounded-2xl p-10 max-w-full space-y-8">
+      <label className="block font-semibold text-xl text-gray-800" htmlFor="lead-text">
+        Lead and What Happened
+      </label>
+      <textarea
+        id="lead-text"
+        rows={10}
+        value={lead}
+        onChange={(e) => setLead(e.target.value)}
+        className="w-full rounded-lg border-2 border-gray-300 px-6 py-4 text-lg font-mono resize-none focus:outline-none focus:ring-4 focus:ring-blue-400 focus:border-blue-600"
+      />
 
-      <div className="space-y-2">
-        <label className="block font-semibold text-gray-700">Why It Matters</label>
-        <Textarea {...register('whyItMatters')} rows={6} className="w-full border p-2 rounded" />
-      </div>
+      <label className="block font-semibold text-xl text-gray-800" htmlFor="why-text">
+        Why It Matters
+      </label>
+      <textarea
+        id="why-text"
+        rows={10}
+        value={whyItMatters}
+        onChange={(e) => setWhyItMatters(e.target.value)}
+        className="w-full rounded-lg border-2 border-gray-300 px-6 py-4 text-lg font-mono resize-none focus:outline-none focus:ring-4 focus:ring-blue-400 focus:border-blue-600"
+      />
 
-      <div className="pt-4">
-        <Button type="submit" disabled={loading} className="w-full">
-          {loading ? <Loader /> : 'Generate Final Story'}
-        </Button>
+      <label className="block font-semibold text-xl text-gray-800 mt-6" htmlFor="price-action-text">
+        Stock Price Action
+      </label>
+      <textarea
+        id="price-action-text"
+        rows={4}
+        value={priceAction}
+        readOnly
+        className="w-full rounded-lg border-2 border-gray-300 px-6 py-4 text-lg font-mono resize-none bg-gray-100 cursor-not-allowed"
+      />
+
+      {error && <p className="text-red-600 font-semibold">{error}</p>}
+
+      <div className="flex justify-between">
+        <button
+          type="button"
+          onClick={onBack}
+          className="rounded-lg border border-gray-400 px-6 py-3 font-semibold hover:bg-gray-100"
+        >
+          Back
+        </button>
+
+        <button
+          type="button"
+          onClick={handleGenerate}
+          disabled={loading}
+          className="rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-3 text-white font-bold hover:from-blue-700 hover:to-indigo-700 disabled:opacity-60"
+        >
+          {loading ? 'Generating...' : 'Generate Final Story'}
+        </button>
       </div>
 
       {output && (
-        <div className="mt-12 p-6 bg-white border border-gray-300 rounded shadow text-gray-900 text-base leading-6 whitespace-pre-line">
+        <pre
+          aria-live="polite"
+          className="mt-6 whitespace-pre-wrap rounded-lg bg-gray-50 p-6 text-gray-900 text-lg shadow"
+        >
           {output}
-        </div>
+        </pre>
       )}
-    </form>
+    </div>
   );
 }

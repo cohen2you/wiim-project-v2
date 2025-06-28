@@ -1,9 +1,3 @@
-// lib/api.ts
-
-import { getPrimaryPrompt } from './prompts/primary';
-import { getSecondaryPrompt } from './prompts/secondary';
-import { getFinalAssemblyPrompt } from './prompts/final';
-
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY!;
 const OPENAI_API_URL = 'https://api.openai.com/v1/chat/completions';
 const MODEL = 'gpt-4o';
@@ -19,6 +13,7 @@ async function callOpenAI(prompt: string) {
       model: MODEL,
       messages: [{ role: 'user', content: prompt }],
       temperature: 0.5,
+      max_tokens: 4000,  // Increased max tokens for longer completions
     }),
   });
 
@@ -32,21 +27,20 @@ async function callOpenAI(prompt: string) {
   return data.choices[0].message.content.trim();
 }
 
-// Step 1: Primary
 export async function generatePrimaryArticle({
   sourceUrl,
   ticker,
   articleText,
 }: {
   sourceUrl: string;
-  ticker: string;
+  ticker?: string;
   articleText: string;
 }) {
-  const prompt = getPrimaryPrompt.prompt({ sourceUrl, ticker, articleText });
+  const { getPrimaryPrompt } = await import('./prompts/primary');
+  const prompt = getPrimaryPrompt.prompt({ sourceUrl, ticker: ticker || '', articleText });
   return await callOpenAI(prompt);
 }
 
-// Step 2: Secondary
 export async function generateSecondarySection({
   secondaryUrl,
   outletName,
@@ -58,6 +52,7 @@ export async function generateSecondarySection({
   primaryText: string;
   secondaryText: string;
 }) {
+  const { getSecondaryPrompt } = await import('./prompts/secondary');
   const prompt = getSecondaryPrompt.prompt({
     secondaryUrl,
     outletName,
@@ -67,20 +62,23 @@ export async function generateSecondarySection({
   return await callOpenAI(prompt);
 }
 
-// Step 3: Final
 export async function generateFinalStory({
   lead,
   whatHappened,
   whyItMatters,
+  priceAction,
 }: {
   lead: string;
   whatHappened: string;
   whyItMatters: string;
+  priceAction: string;
 }) {
+  const { getFinalAssemblyPrompt } = await import('./prompts/final');
   const prompt = getFinalAssemblyPrompt.prompt({
     lead,
     whatHappened,
     whyItMatters,
+    priceAction,
   });
   return await callOpenAI(prompt);
 }
