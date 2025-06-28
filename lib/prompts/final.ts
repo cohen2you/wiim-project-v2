@@ -1,7 +1,14 @@
+interface FinalPromptParams {
+  lead: string;
+  whatHappened: string;
+  whyItMatters: string;
+  priceAction: string;
+}
+
 export const getFinalAssemblyPrompt = {
   name: 'getFinalAssemblyPrompt',
   // optionally add zod inputSchema here for validation
-  prompt: ({ lead, whatHappened, whyItMatters, priceAction }) => `
+  prompt: ({ lead, whatHappened, whyItMatters, priceAction }: FinalPromptParams) => `
 You are an experienced financial editor assembling a concise news article from the given sections.
 
 Lead:
