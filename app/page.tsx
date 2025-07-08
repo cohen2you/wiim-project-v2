@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import ReactMarkdown from 'react-markdown';
 
 export default function MarketStoryPage() {
   const [ticker, setTicker] = useState('');
@@ -15,11 +16,42 @@ export default function MarketStoryPage() {
   const [loadingPrimary, setLoadingPrimary] = useState(false);
   const [loadingSecondary, setLoadingSecondary] = useState(false);
   const [loadingFinal, setLoadingFinal] = useState(false);
+  const [loadingNarratives, setLoadingNarratives] = useState(false);
+  const [loadingNarrativeStory, setLoadingNarrativeStory] = useState(false);
+  const [loadingHyperlinks, setLoadingHyperlinks] = useState(false);
   const [error, setError] = useState('');
   const [finalOutput, setFinalOutput] = useState('');
+  const [hyperlinkedOutput, setHyperlinkedOutput] = useState('');
+
+  // New state for narrative options and selected narrative
+  const [narrativeOptions, setNarrativeOptions] = useState<string[]>([]);
+  const [selectedNarrativeIndex, setSelectedNarrativeIndex] = useState<number | null>(null);
+  const [narrativeStory, setNarrativeStory] = useState('');
+
+  // New states for Lead Generator
+  const [lead, setLead] = useState('');
+  const [leadLoading, setLeadLoading] = useState(false);
+  const [leadError, setLeadError] = useState('');
+
+  // Helper to detect outlet name from URL
+  function detectOutletName(url: string): string | null {
+    try {
+      const hostname = new URL(url).hostname.replace('www.', '').toLowerCase();
+      if (hostname.includes('cnbc')) return 'CNBC';
+      if (hostname.includes('wsj')) return 'The Wall Street Journal';
+      if (hostname.includes('bloomberg')) return 'Bloomberg';
+      if (hostname.includes('benzinga')) return 'Benzinga';
+      if (hostname.includes('reuters')) return 'Reuters';
+      const firstPart = hostname.split('.')[0];
+      return firstPart.charAt(0).toUpperCase() + firstPart.slice(1);
+    } catch {
+      return null;
+    }
+  }
 
   async function fetchPriceAction(tickerSymbol: string) {
     setLoadingPriceAction(true);
+    setError('');
     try {
       const res = await fetch('/api/generate/priceaction', {
         method: 'POST',
@@ -74,7 +106,7 @@ export default function MarketStoryPage() {
           sourceUrl: secondaryUrl.trim() || undefined,
           articleText: secondaryText.trim() || undefined,
           primaryText: primaryOutput,
-          outletName: 'Benzinga',
+          outletName: '', // Let backend derive outlet dynamically
         }),
       });
       const data = await res.json();
@@ -90,6 +122,10 @@ export default function MarketStoryPage() {
   async function generateFinalStory() {
     setError('');
     setFinalOutput('');
+    setHyperlinkedOutput('');
+    setNarrativeOptions([]);
+    setSelectedNarrativeIndex(null);
+    setNarrativeStory('');
     if (!ticker.trim()) {
       setError('Please enter ticker symbol');
       return;
@@ -104,6 +140,9 @@ export default function MarketStoryPage() {
     }
     setLoadingFinal(true);
 
+    const primaryOutlet = detectOutletName(primaryUrl) || 'Primary Source';
+    const secondaryOutlet = detectOutletName(secondaryUrl) || 'Secondary Source';
+
     try {
       const res = await fetch('/api/generate/final', {
         method: 'POST',
@@ -113,6 +152,10 @@ export default function MarketStoryPage() {
           whatHappened: primaryOutput,
           whyItMatters: secondaryOutput,
           priceAction,
+          primaryUrl: primaryUrl.trim(),
+          secondaryUrl: secondaryUrl.trim(),
+          primaryOutlet,
+          secondaryOutlet,
         }),
       });
       const data = await res.json();
@@ -125,18 +168,127 @@ export default function MarketStoryPage() {
     }
   }
 
-  // Copy final output text to clipboard
+  // New: Generate Narrative Options
+  async function generateNarrativeOptions() {
+    setError('');
+    setNarrativeOptions([]);
+    setSelectedNarrativeIndex(null);
+    setNarrativeStory('');
+    if (!finalOutput.trim()) {
+      setError('Generate the final story first.');
+      return;
+    }
+    setLoadingNarratives(true);
+    try {
+      const res = await fetch('/api/generate/narratives', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ storyText: finalOutput }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to generate narrative options');
+      setNarrativeOptions(data.options || []);
+    } catch (e: any) {
+      setError(e.message || 'Failed to generate narrative options');
+    } finally {
+      setLoadingNarratives(false);
+    }
+  }
+
+  // New: Generate narrative story based on selected option
+  async function generateNarrativeStory(index: number) {
+    setError('');
+    setNarrativeStory('');
+    setLoadingNarrativeStory(true);
+    try {
+      const optionText = narrativeOptions[index];
+      const res = await fetch('/api/generate/narrative-story', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ finalStory: finalOutput, narrativeOption: optionText }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to generate narrative story');
+      setNarrativeStory(data.narrative || '');
+      setSelectedNarrativeIndex(index);
+    } catch (e: any) {
+      setError(e.message || 'Failed to generate narrative story');
+    } finally {
+      setLoadingNarrativeStory(false);
+    }
+  }
+
+  async function addHyperlinks() {
+    if (!finalOutput.trim()) {
+      setError('No final story to add hyperlinks to.');
+      return;
+    }
+    setLoadingHyperlinks(true);
+    setError('');
+    try {
+      const res = await fetch('/api/add-hyperlinks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: narrativeStory || finalOutput,
+          primaryUrl: primaryUrl.trim(),
+          secondaryUrl: secondaryUrl.trim(),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to add hyperlinks');
+      setHyperlinkedOutput(data.result || '');
+    } catch (e: any) {
+      setError(e.message || 'Failed to add hyperlinks');
+    } finally {
+      setLoadingHyperlinks(false);
+    }
+  }
+
+  // Copy plain final output
   const copyFinalOutput = () => {
     if (!finalOutput) return;
     navigator.clipboard.writeText(finalOutput);
     alert('Final output copied to clipboard!');
   };
 
+  // Copy hyperlinked output (rendered markdown)
+  const copyHyperlinkedOutput = () => {
+    if (!hyperlinkedOutput) return;
+    navigator.clipboard.writeText(hyperlinkedOutput);
+    alert('Hyperlinked output copied to clipboard!');
+  };
+
+  // Lead generator function
+  async function generateLead(style: string) {
+    if (!primaryText.trim()) {
+      setLeadError('Please enter primary article text first.');
+      return;
+    }
+    setLead('');
+    setLeadError('');
+    setLeadLoading(true);
+    try {
+      const res = await fetch('/api/generate/lead', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ articleText: primaryText, style }),
+      });
+      if (!res.ok) throw new Error('Failed to generate lead');
+      const data = await res.json();
+      setLead(data.lead);
+    } catch (error: any) {
+      setLeadError(error.message);
+    } finally {
+      setLeadLoading(false);
+    }
+  };
+
   return (
     <div style={{ maxWidth: 700, margin: 'auto', padding: 20, fontFamily: 'Arial, sans-serif' }}>
       <h1>Market Story Generator</h1>
 
-      {/* Ticker Input + Fetch Price Action Button */}
+      {/* Ticker Input */}
       <div style={{ marginBottom: 20 }}>
         <label>
           Stock Ticker:{' '}
@@ -158,7 +310,7 @@ export default function MarketStoryPage() {
         </button>
       </div>
 
-      {/* Primary Article URL + Text + Generate Primary Button */}
+      {/* Primary Article */}
       <div style={{ marginBottom: 20 }}>
         <label>
           Primary Article URL:
@@ -171,6 +323,9 @@ export default function MarketStoryPage() {
             disabled={loadingFinal || loadingPrimary}
           />
         </label>
+        <div style={{ marginTop: 8, fontSize: 12, color: '#666' }}>
+          Current Primary URL: {primaryUrl || <i>None entered</i>}
+        </div>
         <label style={{ display: 'block', marginTop: 10 }}>
           Primary Article Text:
           <textarea
@@ -191,7 +346,7 @@ export default function MarketStoryPage() {
         </button>
       </div>
 
-      {/* Secondary Article URL + Text + Generate Secondary Button */}
+      {/* Secondary Article */}
       <div style={{ marginBottom: 20 }}>
         <label>
           Secondary Article URL:
@@ -204,6 +359,9 @@ export default function MarketStoryPage() {
             disabled={loadingFinal || loadingSecondary}
           />
         </label>
+        <div style={{ marginTop: 8, fontSize: 12, color: '#666' }}>
+          Current Secondary URL: {secondaryUrl || <i>None entered</i>}
+        </div>
         <label style={{ display: 'block', marginTop: 10 }}>
           Secondary Article Text:
           <textarea
@@ -268,7 +426,83 @@ export default function MarketStoryPage() {
         </button>
       </div>
 
-      {/* Final Generate Button at the bottom */}
+      {/* Narrative Options */}
+      {narrativeOptions.length > 0 && (
+        <div style={{ marginTop: 30 }}>
+          <h2>Narrative Options</h2>
+          <p>Select one to generate a Narrative Story:</p>
+          {narrativeOptions.map((option, i) => (
+            <button
+              key={i}
+              onClick={() => generateNarrativeStory(i)}
+              disabled={loadingNarrativeStory}
+              style={{
+                display: 'block',
+                margin: '8px 0',
+                padding: '8px 12px',
+                width: '100%',
+                backgroundColor: i === selectedNarrativeIndex ? '#0070f3' : '#eee',
+                color: i === selectedNarrativeIndex ? '#fff' : '#000',
+                border: 'none',
+                borderRadius: 4,
+                cursor: 'pointer',
+              }}
+            >
+              {option}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Narrative Story Output */}
+      {narrativeStory && (
+        <div style={{ marginTop: 30 }}>
+          <h2>Narrative Story</h2>
+          <textarea
+            readOnly
+            value={narrativeStory}
+            rows={15}
+            style={{ width: '100%', fontFamily: 'monospace', fontSize: 14, marginTop: 10 }}
+          />
+        </div>
+      )}
+
+      {/* Add Hyperlinks Button */}
+      <button
+        onClick={addHyperlinks}
+        disabled={loadingHyperlinks || (!finalOutput.trim() && !narrativeStory.trim())}
+        style={{ marginTop: 20, padding: '10px 20px', fontSize: 16, width: '100%' }}
+      >
+        {loadingHyperlinks ? 'Adding Hyperlinks...' : 'Add Hyperlinks'}
+      </button>
+
+      {/* Render Hyperlinked Output as clickable Markdown */}
+      {hyperlinkedOutput && (
+        <div style={{ marginTop: 30 }}>
+          <h2>Final Output With Hyperlinks</h2>
+          <div
+            style={{
+              border: '1px solid #ccc',
+              padding: 10,
+              fontFamily: 'monospace',
+              fontSize: 14,
+              whiteSpace: 'pre-wrap',
+              marginTop: 10,
+            }}
+          >
+            <ReactMarkdown>{hyperlinkedOutput}</ReactMarkdown>
+          </div>
+          <button
+            onClick={copyHyperlinkedOutput}
+            disabled={!hyperlinkedOutput}
+            style={{ marginTop: 6, padding: '6px 12px', fontWeight: 'bold' }}
+          >
+            Copy Hyperlinked Output
+          </button>
+        </div>
+      )}
+
+      {/* Final Generate Story button */}
       <button
         onClick={generateFinalStory}
         disabled={loadingFinal}
@@ -276,6 +510,48 @@ export default function MarketStoryPage() {
       >
         {loadingFinal ? 'Generating Full Story...' : 'Generate Final Story'}
       </button>
+
+      {/* Generate Narrative Options button */}
+      <button
+        onClick={generateNarrativeOptions}
+        disabled={loadingNarratives || !finalOutput.trim()}
+        style={{ marginTop: 20, padding: '10px 20px', fontSize: 16, width: '100%' }}
+      >
+        {loadingNarratives ? 'Generating Narrative Options...' : 'Provide Narrative Options'}
+      </button>
+
+      {/* Lead Generator Section */}
+      <div style={{ marginTop: 30, padding: 10, border: '1px solid #4caf50', borderRadius: 6 }}>
+        <h2 style={{ marginBottom: 10, color: '#4caf50' }}>Lead Generator</h2>
+        <div style={{ display: 'flex', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
+          {['longer', 'shorter', 'more narrative', 'more context'].map((style) => (
+            <button
+              key={style}
+              onClick={() => generateLead(style)}
+              disabled={leadLoading}
+              style={{
+                backgroundColor: '#4caf50',
+                color: 'white',
+                padding: '8px 16px',
+                borderRadius: 4,
+                border: 'none',
+                cursor: leadLoading ? 'not-allowed' : 'pointer',
+              }}
+            >
+              {leadLoading ? 'Generating...' : style.charAt(0).toUpperCase() + style.slice(1)}
+            </button>
+          ))}
+        </div>
+        {leadError && <p style={{ color: 'red', marginBottom: 10 }}>{leadError}</p>}
+        {lead && (
+          <textarea
+            readOnly
+            value={lead}
+            rows={6}
+            style={{ width: '100%', fontFamily: 'monospace', fontSize: 14, padding: 10, borderRadius: 4, borderColor: '#4caf50' }}
+          />
+        )}
+      </div>
     </div>
   );
 }

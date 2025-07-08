@@ -1,8 +1,18 @@
+import { getFinalAssemblyPrompt } from './prompts/final';
+import { getSecondaryPrompt } from './prompts/secondary';
+
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY!;
 const OPENAI_API_URL = 'https://api.openai.com/v1/chat/completions';
 const MODEL = 'gpt-4o';
 
 async function callOpenAI(prompt: string) {
+  if (!OPENAI_API_KEY) {
+    console.error('OPENAI_API_KEY not set!');
+    throw new Error('Missing OpenAI API key');
+  }
+
+  console.log('Calling OpenAI with prompt:', prompt.substring(0, 200));
+
   const res = await fetch(OPENAI_API_URL, {
     method: 'POST',
     headers: {
@@ -13,7 +23,7 @@ async function callOpenAI(prompt: string) {
       model: MODEL,
       messages: [{ role: 'user', content: prompt }],
       temperature: 0.5,
-      max_tokens: 4000,  // Increased max tokens for longer completions
+      max_tokens: 800,
     }),
   });
 
@@ -24,20 +34,33 @@ async function callOpenAI(prompt: string) {
   }
 
   const data = await res.json();
+  console.log('OpenAI response received');
   return data.choices[0].message.content.trim();
 }
 
-export async function generatePrimaryArticle({
-  sourceUrl,
-  ticker,
-  articleText,
+export async function generateFinalStory({
+  lead,
+  whatHappened,
+  whyItMatters,
+  priceAction,
+  primaryOutlet,
+  secondaryOutlet,
 }: {
-  sourceUrl: string;
-  ticker?: string;
-  articleText: string;
+  lead: string;
+  whatHappened: string;
+  whyItMatters: string;
+  priceAction: string;
+  primaryOutlet: string;
+  secondaryOutlet: string;
 }) {
-  const { getPrimaryPrompt } = await import('./prompts/primary');
-  const prompt = getPrimaryPrompt.prompt({ sourceUrl, ticker: ticker || '', articleText });
+  const prompt = getFinalAssemblyPrompt.prompt({
+    lead,
+    whatHappened,
+    whyItMatters,
+    priceAction,
+    primaryOutlet,
+    secondaryOutlet,
+  });
   return await callOpenAI(prompt);
 }
 
@@ -52,33 +75,11 @@ export async function generateSecondarySection({
   primaryText: string;
   secondaryText: string;
 }) {
-  const { getSecondaryPrompt } = await import('./prompts/secondary');
   const prompt = getSecondaryPrompt.prompt({
     secondaryUrl,
     outletName,
     primaryText,
     secondaryText,
-  });
-  return await callOpenAI(prompt);
-}
-
-export async function generateFinalStory({
-  lead,
-  whatHappened,
-  whyItMatters,
-  priceAction,
-}: {
-  lead: string;
-  whatHappened: string;
-  whyItMatters: string;
-  priceAction: string;
-}) {
-  const { getFinalAssemblyPrompt } = await import('./prompts/final');
-  const prompt = getFinalAssemblyPrompt.prompt({
-    lead,
-    whatHappened,
-    whyItMatters,
-    priceAction,
   });
   return await callOpenAI(prompt);
 }
