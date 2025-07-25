@@ -22,6 +22,8 @@ export default function PRStoryGeneratorPage() {
   const [analystSummary, setAnalystSummary] = useState('');
   const [priceSummary, setPriceSummary] = useState('');
   const [loadingStory, setLoadingStory] = useState(false);
+  const [prFetchAttempted, setPrFetchAttempted] = useState(false);
+  const [lastPrTicker, setLastPrTicker] = useState('');
 
   // Client-only: Convert PR or Article HTML body to plain text when selected
   useEffect(() => {
@@ -55,6 +57,8 @@ export default function PRStoryGeneratorPage() {
     setArticle('');
     setTenNewestArticles([]); // Clear articles
     setSelectedArticle(null); // Clear article selection
+    setPrFetchAttempted(true); // Mark that fetch has been attempted
+    setLastPrTicker(ticker); // Store the last attempted ticker
     try {
       const res = await fetch('/api/bz/prs', {
         method: 'POST',
@@ -174,6 +178,31 @@ export default function PRStoryGeneratorPage() {
     setPriceSummary(price);
 
     try {
+      // Calculate storyDay and storyDate for the selected PR or article
+      let storyDay = '';
+      let storyDate = '';
+      let createdDateStr = selectedPR?.created || selectedArticle?.created || null;
+      let dateReference = '';
+      let sourceDateFormatted = '';
+      if (createdDateStr) {
+        const createdDate = new Date(createdDateStr);
+        const now = new Date();
+        const daysOld = Math.floor((now.getTime() - createdDate.getTime()) / (1000 * 60 * 60 * 24));
+        if (daysOld < 7) {
+          // Day of week (e.g., Thursday)
+          const day = createdDate.toLocaleDateString('en-US', { weekday: 'long' });
+          dateReference = `on ${day}`;
+        } else {
+          // Month Day (e.g., July 12)
+          const dateStr = createdDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric' });
+          dateReference = `on ${dateStr}`;
+        }
+        // Format the actual date for reference in paragraphs
+        sourceDateFormatted = createdDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric' });
+      }
+      // Calculate priceActionDay for today
+      const today = new Date();
+      const priceActionDay = `on ${today.toLocaleDateString('en-US', { weekday: 'long' })}`;
       const res = await fetch('/api/generate/story', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -182,6 +211,13 @@ export default function PRStoryGeneratorPage() {
           sourceText: primaryText,
           analystSummary: analyst,
           priceSummary: price,
+          sourceDate: createdDateStr,
+          storyDay,
+          storyDate,
+          dateReference,
+          priceActionDay,
+          sourceUrl: selectedPR?.url || selectedArticle?.url || '',
+          sourceDateFormatted,
         }),
       });
       const data = await res.json();
@@ -203,6 +239,8 @@ export default function PRStoryGeneratorPage() {
     setSelectedArticle(null);
     setPRs([]); // Clear PRs
     setSelectedPR(null); // Clear PR selection
+    setPrFetchAttempted(false); // Clear PR fetch attempt state
+    setLastPrTicker(''); // Clear last PR ticker
     try {
       const res = await fetch('/api/bz/articles', {
         method: 'POST',
@@ -224,6 +262,20 @@ export default function PRStoryGeneratorPage() {
     setSelectedPR(pr);
     setArticle('');
     await fetchPriceAction();
+  };
+
+  const handleClearAll = () => {
+    setTicker('');
+    setPRs([]);
+    setSelectedPR(null);
+    setArticle('');
+    setTenNewestArticles([]);
+    setSelectedArticle(null);
+    setAnalystSummary('');
+    setPriceSummary('');
+    setGenError('');
+    setPrFetchAttempted(false);
+    setLastPrTicker('');
   };
 
   const articleRef = useRef<HTMLDivElement>(null);
@@ -266,8 +318,19 @@ export default function PRStoryGeneratorPage() {
         >
           {loadingTenArticles ? 'Fetching Posts...' : 'Fetch 10 Newest Posts'}
         </button>
+        <button
+          onClick={handleClearAll}
+          style={{ marginLeft: 10, padding: '6px 12px', background: '#b91c1c', color: 'white', border: 'none', borderRadius: 4 }}
+        >
+          Clear All Data
+        </button>
       </div>
       {prError && <div style={{ color: 'red', marginBottom: 10 }}>{prError}</div>}
+      {prs.length === 0 && !loadingPRs && lastPrTicker && prFetchAttempted && (
+        <div style={{ color: '#b91c1c', marginBottom: 20 }}>
+          No press releases found for the past 7 days for {lastPrTicker}.
+        </div>
+      )}
       {prs.length > 0 && (
         <div style={{ marginBottom: 20 }}>
           <h2>Select a Press Release</h2>
