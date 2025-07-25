@@ -42,6 +42,10 @@ export default function PRStoryGeneratorPage() {
     }
   }, [selectedPR, selectedArticle]);
 
+  useEffect(() => {
+    console.log('Ticker:', ticker); // Debug log for ticker state
+  }, [ticker]);
+
   // Fetch PRs for ticker
   const fetchPRs = async () => {
     setLoadingPRs(true);
@@ -250,14 +254,14 @@ export default function PRStoryGeneratorPage() {
         </label>
         <button
           onClick={fetchPRs}
-          disabled={loadingPRs || !ticker.trim()}
+          /* disabled={loadingPRs || !ticker.trim()} */
           style={{ marginLeft: 10, padding: '6px 12px' }}
         >
           {loadingPRs ? 'Fetching PRs...' : 'Fetch PRs'}
         </button>
         <button
           onClick={fetchTenNewestArticles}
-          disabled={loadingTenArticles || !ticker.trim()}
+          /* disabled={loadingTenArticles || !ticker.trim()} */
           style={{ marginLeft: 10, padding: '6px 12px' }}
         >
           {loadingTenArticles ? 'Fetching Posts...' : 'Fetch 10 Newest Posts'}
