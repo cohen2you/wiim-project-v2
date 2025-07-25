@@ -32,7 +32,7 @@ Provide the three narrative options as a numbered list, each a single sentence o
 
     // Parse the numbered list into an array of strings
     // Simple parsing: split by lines, filter lines that start with 1. 2. 3.
-    const lines = rawOutput.split('\n').map(line => line.trim());
+    const lines = (rawOutput ?? '').split('\n').map(line => line.trim());
     const options: string[] = [];
     for (const line of lines) {
       const match = line.match(/^\d+\.\s*(.*)/);
