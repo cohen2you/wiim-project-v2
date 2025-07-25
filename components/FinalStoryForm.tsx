@@ -5,7 +5,6 @@ import { useState, useEffect } from 'react';
 interface FinalStoryFormProps {
   primaryOutput: string;
   secondaryOutput: string;
-  priceActionText: string; // <-- Receive price action text as prop
   onComplete: (output: string) => void;
   onBack: () => void;
 }
@@ -13,13 +12,11 @@ interface FinalStoryFormProps {
 export default function FinalStoryForm({
   primaryOutput,
   secondaryOutput,
-  priceActionText,
   onComplete,
   onBack,
 }: FinalStoryFormProps) {
   const [lead, setLead] = useState('');
   const [whyItMatters, setWhyItMatters] = useState('');
-  const [priceAction, setPriceAction] = useState('');
   const [output, setOutput] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -41,11 +38,6 @@ export default function FinalStoryForm({
     }
   }, [secondaryOutput, whyInitialized]);
 
-  // Set priceAction from prop, no API call here!
-  useEffect(() => {
-    setPriceAction(priceActionText || '');
-  }, [priceActionText]);
-
   const handleGenerate = async () => {
     setError('');
     setLoading(true);
@@ -65,7 +57,6 @@ export default function FinalStoryForm({
           lead,
           whatHappened: lead,
           whyItMatters,
-          priceAction,
         }),
       });
 
@@ -106,17 +97,6 @@ export default function FinalStoryForm({
         value={whyItMatters}
         onChange={(e) => setWhyItMatters(e.target.value)}
         className="w-full rounded-lg border-2 border-gray-300 px-6 py-4 text-lg font-mono resize-none focus:outline-none focus:ring-4 focus:ring-blue-400 focus:border-blue-600"
-      />
-
-      <label className="block font-semibold text-xl text-gray-800 mt-6" htmlFor="price-action-text">
-        Stock Price Action
-      </label>
-      <textarea
-        id="price-action-text"
-        rows={4}
-        value={priceAction}
-        readOnly
-        className="w-full rounded-lg border-2 border-gray-300 px-6 py-4 text-lg font-mono resize-none bg-gray-100 cursor-not-allowed"
       />
 
       {error && <p className="text-red-600 font-semibold">{error}</p>}

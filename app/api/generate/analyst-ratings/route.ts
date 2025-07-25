@@ -1,67 +1,87 @@
 import { NextResponse } from 'next/server';
 
 interface AnalystRating {
-  analystFirm: string;
-  ratingAction: string;
-  ratingCurrent: string;
-  ratingPrior: string;
-  priceTargetCurrent?: number;
-  priceTargetPrior?: number;
   ticker: string;
-  companyName?: string;
-  researchDate: string;
+  analyst: string;
+  action_company: string;
+  action_pt?: string;
+  rating_current: string;
+  rating_prior?: string;
+  date: string;
+  pt_current?: string;
+  pt_prior?: string;
+}
+
+async function fetchAnalystRatings(ticker: string): Promise<AnalystRating[]> {
+  const url = 'https://api.benzinga.com/api/v2.1/calendar/ratings' +
+    `?token=${process.env.BENZINGA_API_KEY}` +
+    `&parameters[tickers]=${encodeURIComponent(ticker)}` +
+    `&parameters[range]=6m`;
+
+  const res = await fetch(url, { headers: { accept: 'application/json' } });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(
+      `Benzinga API error ${res.status} ${res.statusText}: ${body || '<no body>'}`
+    );
+  }
+
+  const raw = await res.text();
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw.trim());
+  } catch {
+    throw new Error('Invalid JSON from Benzinga');
+  }
+
+  const ratingsArray: AnalystRating[] = Array.isArray(parsed)
+    ? (parsed as AnalystRating[])
+    : ((parsed as { ratings?: AnalystRating[] }).ratings ?? []);
+
+  return ratingsArray;
+}
+
+function formatRatingsBlock(ratings: AnalystRating[]): string {
+  return ratings
+    .sort((a, b) => Date.parse(b.date) - Date.parse(a.date))
+    .slice(0, 5)
+    .map(r => {
+      const date = new Date(r.date).toLocaleDateString('en-US', { month: 'long', day: 'numeric' });
+      let line = `${date}: ${r.analyst} rated ${r.ticker} ${r.action_company} ${r.rating_current}`;
+      if (r.rating_prior && r.rating_prior !== r.rating_current) {
+        line += ` (prior ${r.rating_prior})`;
+      }
+      if (r.pt_current) {
+        line += ` and set a $${parseFloat(r.pt_current).toFixed(2)} target`;
+        if (r.pt_prior && parseFloat(r.pt_prior) !== parseFloat(r.pt_current)) {
+          line += ` (prior $${parseFloat(r.pt_prior).toFixed(2)})`;
+        }
+      }
+      return line;
+    })
+    .join('\n');
 }
 
 export async function POST(request: Request) {
   try {
-    const { ticker } = await request.json();
-
-    if (!ticker || typeof ticker !== 'string' || !ticker.trim()) {
-      return NextResponse.json({ ratings: [], error: 'Ticker is required.' });
+    const { ticker } = (await request.json()) as { ticker?: string };
+    const symbol = (ticker ?? '').trim().toUpperCase();
+    if (!symbol) {
+      return NextResponse.json({ ratings: [], error: 'Ticker parameter is required.' }, { status: 400 });
     }
 
-    const url = `https://api.benzinga.com/api/v1/analyst-ratings?symbols=${ticker.trim().toUpperCase()}&token=${process.env.BENZINGA_API_KEY}`;
-
-    const res = await fetch(url);
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`Benzinga API error: ${text}`);
+    const ratings = await fetchAnalystRatings(symbol);
+    if (ratings.length === 0) {
+      return NextResponse.json({ ratings: [], error: `No recent analyst ratings found for ${symbol}.` });
     }
 
-    const data: AnalystRating[] = await res.json();
-
-    if (!Array.isArray(data)) {
-      return NextResponse.json({ ratings: [], error: 'Invalid response format' });
-    }
-
-    // Format the ratings into readable summaries
-    const ratings = data.slice(0, 10).map((item) => {
-      const firm = item.analystFirm;
-      const action = item.ratingAction;
-      const curr = item.ratingCurrent;
-      const prior = item.ratingPrior;
-      const priceFrom = item.priceTargetPrior !== undefined ? `$${item.priceTargetPrior}` : null;
-      const priceTo = item.priceTargetCurrent !== undefined ? `$${item.priceTargetCurrent}` : null;
-      const company = item.companyName ?? item.ticker;
-      const date = new Date(item.researchDate).toLocaleDateString('en-US', {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-      });
-
-      let summary = `${firm} ${action.toLowerCase()} ${company}`;
-      if (prior && curr) summary += ` from ${prior} to ${curr}`;
-      if (priceFrom && priceTo) summary += `, raising target from ${priceFrom} to ${priceTo}`;
-      summary += ` on ${date}.`;
-
-      return summary;
-    });
-
-    return NextResponse.json({ ratings });
-  } catch (error) {
-    console.error('Error fetching analyst ratings:', error);
+    const block = formatRatingsBlock(ratings);
+    return NextResponse.json({ ratings: [block] });
+  } catch (err: unknown) {
+    console.error('Error in /api/generate/analyst-ratings:', err);
+    const message = err instanceof Error ? err.message : String(err);
     return NextResponse.json(
-      { ratings: [], error: 'Failed to fetch analyst ratings.' },
+      { ratings: [], error: message },
       { status: 500 }
     );
   }
