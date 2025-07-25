@@ -43,7 +43,7 @@ Provide the three narrative options as a numbered list, each a single sentence o
 
     if (options.length === 0) {
       // fallback: if parsing fails, just send whole raw text as one option
-      options.push(rawOutput);
+      options.push(rawOutput ?? '');
     }
 
     return NextResponse.json({ options });
