@@ -2,6 +2,8 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import LocalDate from '../components/LocalDate';
+import AnalystNoteUpload from '../components/AnalystNoteUpload';
+import StockChart from '../components/StockChart';
 
 export default function PRStoryGeneratorPage() {
   const [ticker, setTicker] = useState('');
@@ -24,6 +26,8 @@ export default function PRStoryGeneratorPage() {
   const [loadingStory, setLoadingStory] = useState(false);
   const [prFetchAttempted, setPrFetchAttempted] = useState(false);
   const [lastPrTicker, setLastPrTicker] = useState('');
+  const [showUploadSection, setShowUploadSection] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   // Client-only: Convert PR or Article HTML body to plain text when selected
   useEffect(() => {
@@ -59,6 +63,7 @@ export default function PRStoryGeneratorPage() {
     setSelectedArticle(null); // Clear article selection
     setPrFetchAttempted(true); // Mark that fetch has been attempted
     setLastPrTicker(ticker); // Store the last attempted ticker
+    setShowUploadSection(false); // Close analyst note input
     try {
       const res = await fetch('/api/bz/prs', {
         method: 'POST',
@@ -79,6 +84,7 @@ export default function PRStoryGeneratorPage() {
   const fetchPriceAction = async () => {
     setLoadingPrice(true);
     setPriceAction(null);
+    setShowUploadSection(false); // Close analyst note input
     try {
       const res = await fetch('/api/bz/priceaction', {
         method: 'POST',
@@ -178,12 +184,13 @@ export default function PRStoryGeneratorPage() {
     setPriceSummary(price);
 
     try {
-      // Calculate storyDay and storyDate for the selected PR or article
+      // Calculate storyDay and storyDate for the selected PR, article, or analyst note
       let storyDay = '';
       let storyDate = '';
       let createdDateStr = selectedPR?.created || selectedArticle?.created || null;
       let dateReference = '';
       let sourceDateFormatted = '';
+      
       if (createdDateStr) {
         const createdDate = new Date(createdDateStr);
         const now = new Date();
@@ -199,7 +206,24 @@ export default function PRStoryGeneratorPage() {
         }
         // Format the actual date for reference in paragraphs
         sourceDateFormatted = createdDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric' });
+      } else if (primaryText && ticker && !selectedPR && !selectedArticle) {
+        // For analyst notes, try to extract date from the text first
+        const dateMatch = primaryText.match(/(\d{1,2})\s+(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{4})/i);
+        if (dateMatch) {
+          const [_, day, month, year] = dateMatch;
+          const analystDate = new Date(`${month} ${day}, ${year}`);
+          const dayName = analystDate.toLocaleDateString('en-US', { weekday: 'long' });
+          dateReference = `on ${dayName}`;
+          sourceDateFormatted = analystDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric' });
+        } else {
+          // Fallback to today's date if no date found in text
+          const today = new Date();
+          const day = today.toLocaleDateString('en-US', { weekday: 'long' });
+          dateReference = `on ${day}`;
+          sourceDateFormatted = today.toLocaleDateString('en-US', { month: 'long', day: 'numeric' });
+        }
       }
+      
       // Calculate priceActionDay for today
       const today = new Date();
       const priceActionDay = `on ${today.toLocaleDateString('en-US', { weekday: 'long' })}`;
@@ -241,6 +265,7 @@ export default function PRStoryGeneratorPage() {
     setSelectedPR(null); // Clear PR selection
     setPrFetchAttempted(false); // Clear PR fetch attempt state
     setLastPrTicker(''); // Clear last PR ticker
+    setShowUploadSection(false); // Close analyst note input
     try {
       const res = await fetch('/api/bz/articles', {
         method: 'POST',
@@ -276,22 +301,110 @@ export default function PRStoryGeneratorPage() {
     setGenError('');
     setPrFetchAttempted(false);
     setLastPrTicker('');
+    setShowUploadSection(false);
+  };
+
+  const handleAnalystNoteTextExtracted = (text: string, noteTicker: string) => {
+    if (text && noteTicker) {
+      setTicker(noteTicker);
+      setPrimaryText(text);
+      setSelectedPR(null);
+      setSelectedArticle(null);
+      setArticle('');
+      setPRs([]);
+      setTenNewestArticles([]);
+      setPrFetchAttempted(false);
+      setLastPrTicker('');
+    } else if (!text && !noteTicker) {
+      // Clear everything when manual text input is requested
+      setTicker('');
+      setPrimaryText('');
+      setSelectedPR(null);
+      setSelectedArticle(null);
+      setArticle('');
+      setPRs([]);
+      setTenNewestArticles([]);
+      setPrFetchAttempted(false);
+      setLastPrTicker('');
+    }
   };
 
   const articleRef = useRef<HTMLDivElement>(null);
 
-  const handleCopyArticle = () => {
+  const handleCopyArticle = async () => {
     if (articleRef.current) {
-      // Copy the innerText (plain text) or innerHTML (HTML) as needed
-      const text = articleRef.current.innerText;
-      navigator.clipboard.writeText(text);
-      alert('Article copied to clipboard!');
+      // Get the article HTML content
+      let htmlContent = articleRef.current.innerHTML;
+      
+            // Generate a static chart image if ticker exists
+      if (ticker) {
+        try {
+          // Use TradingView's static chart API
+          const chartUrl = `https://s3.tradingview.com/external-embedding/embed-widget-mini-symbol-overview.html?symbol=${ticker}&interval=D&symbols=${ticker}&colorTheme=light&isTransparent=false&autosize=true&largeChartUrl=https%3A%2F%2Fwww.tradingview.com%2Fsymbol%2F${ticker}%2F`;
+          
+          // Use a simple chart image from a reliable source
+          const chartImage = `
+            <div style="text-align: center; margin: 20px 0;">
+              <img src="https://finviz.com/chart.ashx?t=${ticker}&ty=c&ta=1&p=d&s=l" alt="5-Day Stock Chart for ${ticker}" style="max-width: 100%; height: auto; border: 1px solid #e5e7eb; border-radius: 8px;" />
+              <p style="font-size: 12px; color: #666; margin-top: 10px;">5-Day Stock Chart for ${ticker}</p>
+            </div>
+          `;
+          
+          const finalHtmlContent = htmlContent + chartImage;
+          
+          // Create a clipboard item with both HTML and text formats
+          const clipboardItem = new ClipboardItem({
+            'text/html': new Blob([finalHtmlContent], { type: 'text/html' }),
+            'text/plain': new Blob([articleRef.current?.innerText || ''], { type: 'text/plain' })
+          });
+          
+          navigator.clipboard.write([clipboardItem]);
+          setCopied(true);
+          setTimeout(() => setCopied(false), 2000);
+          return;
+        } catch (error) {
+          console.log('Failed to generate chart image:', error);
+        }
+      }
+      
+      // Fallback: Add chart placeholder if image capture failed
+      if (ticker) {
+        const chartPlaceholder = `
+          <div style="text-align: center; margin: 20px 0;">
+            <p style="font-size: 14px; color: #666; margin-bottom: 10px;">
+              [5-Day Stock Chart for ${ticker} - Chart will be embedded when pasted into WordPress]
+            </p>
+          </div>
+        `;
+        htmlContent += chartPlaceholder;
+      }
+      
+      // Get text content with proper line breaks
+      const textContent = articleRef.current.innerText;
+      
+      // Create a clipboard item with both HTML and text formats
+      const clipboardItem = new ClipboardItem({
+        'text/html': new Blob([htmlContent], { type: 'text/html' }),
+        'text/plain': new Blob([textContent], { type: 'text/plain' })
+      });
+      
+      navigator.clipboard.write([clipboardItem]);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000); // Reset after 2 seconds
     }
   };
 
   return (
     <div style={{ maxWidth: 700, margin: 'auto', padding: 20, fontFamily: 'Arial, sans-serif' }}>
-      <h1>Benzinga PR Story Generator</h1>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+        <h1>Benzinga PR Story Generator</h1>
+        <button
+          onClick={handleClearAll}
+          style={{ padding: '6px 12px', background: '#b91c1c', color: 'white', border: 'none', borderRadius: 4 }}
+        >
+          Clear All Data
+        </button>
+      </div>
       <div style={{ marginBottom: 20 }}>
         <label>
           Stock Ticker:{' '}
@@ -304,27 +417,35 @@ export default function PRStoryGeneratorPage() {
             disabled={loadingPRs}
           />
         </label>
+      </div>
+      
+      <div style={{ marginBottom: 20 }}>
         <button
           onClick={fetchPRs}
           /* disabled={loadingPRs || !ticker.trim()} */
-          style={{ marginLeft: 10, padding: '6px 12px' }}
+          style={{ marginRight: 10, padding: '6px 12px' }}
         >
           {loadingPRs ? 'Fetching PRs...' : 'Fetch PRs'}
         </button>
         <button
           onClick={fetchTenNewestArticles}
           /* disabled={loadingTenArticles || !ticker.trim()} */
-          style={{ marginLeft: 10, padding: '6px 12px' }}
+          style={{ marginRight: 10, padding: '6px 12px' }}
         >
           {loadingTenArticles ? 'Fetching Posts...' : 'Fetch 10 Newest Posts'}
         </button>
         <button
-          onClick={handleClearAll}
-          style={{ marginLeft: 10, padding: '6px 12px', background: '#b91c1c', color: 'white', border: 'none', borderRadius: 4 }}
+          onClick={() => setShowUploadSection(!showUploadSection)}
+          style={{ padding: '6px 12px' }}
         >
-          Clear All Data
+          Analyst Note Upload
         </button>
       </div>
+      
+      {showUploadSection && (
+        <AnalystNoteUpload onTextExtracted={handleAnalystNoteTextExtracted} ticker={ticker} />
+      )}
+      
       {prError && <div style={{ color: 'red', marginBottom: 10 }}>{prError}</div>}
       {prs.length === 0 && !loadingPRs && lastPrTicker && prFetchAttempted && (
         <div style={{ color: '#b91c1c', marginBottom: 20 }}>
@@ -422,21 +543,39 @@ export default function PRStoryGeneratorPage() {
           </ul>
         </div>
       )}
-      {/* Show textarea and generate button for selected PR or article */}
-      {(selectedPR || selectedArticle) && (
+      {/* Show textarea and generate button for selected PR, article, or analyst note */}
+      {(selectedPR || selectedArticle || (primaryText && ticker)) && (
         <div style={{ marginBottom: 20 }}>
-          <h2>{selectedPR ? 'Selected PR' : 'Selected Article'}</h2>
+          <h2>
+            {selectedPR ? 'Selected PR' : 
+             selectedArticle ? 'Selected Article' : 
+             'Analyst Note Content'}
+          </h2>
           <div style={{ background: '#f9fafb', padding: 10, borderRadius: 4, marginBottom: 10 }}>
-            <strong>{selectedPR ? selectedPR.headline : selectedArticle.headline}</strong>
-            <br />
-            <LocalDate dateString={selectedPR ? selectedPR.created : selectedArticle.created} />
+            {selectedPR && (
+              <>
+                <strong>{selectedPR.headline}</strong>
+                <br />
+                <LocalDate dateString={selectedPR.created} />
+              </>
+            )}
+            {selectedArticle && (
+              <>
+                <strong>{selectedArticle.headline}</strong>
+                <br />
+                <LocalDate dateString={selectedArticle.created} />
+              </>
+            )}
+            {!selectedPR && !selectedArticle && primaryText && ticker && (
+              <strong>Analyst Note for {ticker}</strong>
+            )}
             <textarea
               value={primaryText}
               onChange={e => setPrimaryText(e.target.value)}
               rows={16}
               style={{ width: '100%', fontFamily: 'monospace', fontSize: 14, marginTop: 10 }}
             />
-            {(selectedPR ? selectedPR.url : selectedArticle.url) && (
+            {(selectedPR ? selectedPR.url : selectedArticle?.url) && (
               <div style={{ marginTop: 8 }}>
                 <a
                   href={selectedPR ? selectedPR.url : selectedArticle.url}
@@ -474,13 +613,35 @@ export default function PRStoryGeneratorPage() {
               marginTop: 10,
               whiteSpace: 'pre-wrap',
             }}
-            dangerouslySetInnerHTML={{ __html: article }}
+            dangerouslySetInnerHTML={{ 
+              __html: article.replace('[STOCK_CHART_PLACEHOLDER]', 
+                ticker ? `
+                  <div style="text-align: center; margin: 20px 0;">
+                    <p style="font-size: 14px; color: #666; margin-bottom: 10px;">
+                      [5-Day Stock Chart for ${ticker} - Chart will be embedded when pasted into WordPress]
+                    </p>
+                  </div>
+                ` : ''
+              ) 
+            }}
           />
+          {ticker && (
+            <div style={{ marginTop: 20, textAlign: 'center' }}>
+              <StockChart ticker={ticker} width={600} height={400} />
+            </div>
+          )}
           <button
             onClick={handleCopyArticle}
-            style={{ marginTop: 10, padding: '8px 16px', background: '#2563eb', color: 'white', border: 'none', borderRadius: 4 }}
+            style={{ 
+              marginTop: 10, 
+              padding: '8px 16px', 
+              background: copied ? '#059669' : '#2563eb', 
+              color: 'white', 
+              border: 'none', 
+              borderRadius: 4 
+            }}
           >
-            Copy Article
+            {copied ? 'Copied!' : 'Copy Article'}
           </button>
         </div>
       )}

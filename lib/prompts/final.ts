@@ -40,6 +40,12 @@ Instructions:
 - Remove emojis and special formatting.
 - Use a neutral, professional tone.
 - Keep the article concise, between 300-400 words.
+- After the Price Action section, add a placeholder for the stock chart: [STOCK_CHART_PLACEHOLDER]
+- IMPORTANT: Format the output with proper HTML paragraph tags. Each paragraph should be wrapped in <p> tags.
+- Example format:
+  <p>First paragraph content.</p>
+  <p>Second paragraph content.</p>
+  <p>Third paragraph content.</p>
 
 Make sure the output flows naturally and only attributes the sources you provide.
 `,

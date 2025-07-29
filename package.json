@@ -16,12 +16,17 @@
     "@hookform/resolvers": "^5.1.1",
     "cheerio": "^1.1.2",
     "dotenv": "^17.0.0",
+    "html2canvas": "^1.4.1",
+    "multer": "^1.4.5-lts.1",
     "next": "^15.3.3",
     "openai": "^5.8.2",
+    "pdf-lib": "^1.17.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-hook-form": "^7.58.1",
     "react-markdown": "^10.1.0",
+    "sharp": "^0.34.3",
+    "supports-color": "^10.0.0",
     "zod": "^3.25.67"
   },
   "devDependencies": {
