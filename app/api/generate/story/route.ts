@@ -60,10 +60,11 @@ async function fetchRelatedArticles(ticker: string, excludeUrl?: string): Promis
   }
 }
 
-function buildPrompt({ ticker, sourceText, analystSummary, priceSummary, priceActionDay, sourceUrl, sourceDateFormatted, relatedArticles }: { ticker: string; sourceText: string; analystSummary: string; priceSummary: string; priceActionDay?: string; sourceUrl?: string; sourceDateFormatted?: string; relatedArticles?: any[] }) {
+function buildPrompt({ ticker, sourceText, analystSummary, priceSummary, priceActionDay, sourceUrl, sourceDateFormatted, relatedArticles, includeCTA, ctaText, includeSubheads, subheadTexts }: { ticker: string; sourceText: string; analystSummary: string; priceSummary: string; priceActionDay?: string; sourceUrl?: string; sourceDateFormatted?: string; relatedArticles?: any[]; includeCTA?: boolean; ctaText?: string; includeSubheads?: boolean; subheadTexts?: string[] }) {
   
-  // Check if this is an analyst note
-  const isAnalystNote = sourceText.includes('analyst') || sourceText.includes('J P M O R G A N') || sourceText.includes('Samik Chatterjee') || sourceText.includes('Overweight') || sourceText.includes('Price Target');
+  // Check if this is an analyst note - make detection more specific
+  const isAnalystNote = (sourceText.includes('Samik Chatterjee') && sourceText.includes('J P M O R G A N')) || 
+                       (sourceText.includes('analyst') && sourceText.includes('J.P. Morgan') && sourceText.includes('Overweight'));
   
   // Extract key analyst information if this is an analyst note
   let analystInfo = '';
@@ -139,7 +140,7 @@ Structure your article as follows:
   - C3 AI Stock Is Tumbling Thursday: What's Going On?
   - What's Going On With Oklo Stock?
 
-- Lead paragraph: Start with a sentence describing the price movement of the stock (e.g., "rose modestly," "traded higher," "slipped," "declined," etc.) using the full company name and ticker in this format: <strong>Company Name</strong> (NYSE: TICKER). The company name should be bolded using HTML <strong> tags. Do not use markdown bold (**) or asterisks elsewhere. Do not include the specific price or percentage in the lead; reserve that for the price action line at the bottom. Then state what happened and why it matters for ${ticker}. CRITICAL: Do NOT include analyst names (like "Samik Chatterjee" or "J.P. Morgan analyst") in the lead paragraph. The lead should focus on the stock movement and the general news event, not specific analyst details. 
+- Lead paragraph: Start with a sentence describing the ACTUAL price movement of the stock based on the price data provided. Use the exact movement from the price summary (e.g., if price summary shows "down 1.61%", say "traded lower" or "declined"; if it shows "up 2.5%", say "rose" or "traded higher"). Use the full company name and ticker in this format: <strong>Company Name</strong> (NYSE: TICKER). The company name should be bolded using HTML <strong> tags. Do not use markdown bold (**) or asterisks elsewhere. Do not include the specific price or percentage in the lead; reserve that for the price action line at the bottom. Then state what happened and why it matters for ${ticker}. CRITICAL: Do NOT include analyst names (like "Samik Chatterjee" or "J.P. Morgan analyst") in the lead paragraph. The lead should focus on the stock movement and the general news event, not specific analyst details. 
 
 MANDATORY HYPERLINK RULE: If sourceUrl is provided and not empty, you MUST include exactly one hyperlink in the lead paragraph. Wrap exactly three consecutive words in <a href="${sourceUrl}"> and </a> tags. Choose any three consecutive words that fit naturally. If sourceUrl is empty, do not include any hyperlinks. EXAMPLE: "Apple Inc (NASDAQ: AAPL) traded lower on Tuesday following <a href="${sourceUrl}">reports that JPMorgan</a> Chase & Co. is in advanced discussions"
 
@@ -148,6 +149,18 @@ CRITICAL: The lead paragraph must be exactly 2 sentences maximum. If you have mo
 - IMPORTANT: In your lead, use this exact phrase to reference the timing of the price movement: "${priceActionDay || '[Day not provided]'}". Do not use or infer any other day or date, even if the source text or PR/article date mentions a different day.
 
 - Additional paragraphs: Provide factual details, context, and any relevant quotes about ${ticker}. When referencing the source material, mention the actual date: "${sourceDateFormatted || '[Date not provided]'}" (e.g., "In a press release dated ${sourceDateFormatted}" or "According to the ${sourceDateFormatted} announcement"). If the source is an analyst note, include specific details about earnings forecasts, financial estimates, market analysis, and investment reasoning from the note. CRITICAL: Each paragraph must be no longer than 2 sentences. If you have more information, create additional paragraphs.
+
+${includeCTA && ctaText ? `
+- CTA Integration: After the lead paragraph, insert the following CTA exactly as provided:
+  ${ctaText}
+` : ''}
+
+${includeSubheads && subheadTexts && subheadTexts.length > 0 ? `
+- Subhead Integration: Insert the following subheads at strategic points throughout the article (after approximately 20%, 50%, and 80% of the content):
+  ${subheadTexts.map((subhead, index) => `${index + 1}. ${subhead}`).join('\n  ')}
+  
+  Format each subhead as a standalone line with proper spacing before and after.
+` : ''}
 
 ${relatedArticles && relatedArticles.length > 0 ? `
 - After the second paragraph of additional content (not the lead paragraph), insert the "Also Read:" section with this exact format:
@@ -208,17 +221,19 @@ Write the article now.`;
 
 export async function POST(req: Request) {
   try {
-    const { ticker, sourceText, analystSummary, priceSummary, priceActionDay, sourceUrl, sourceDateFormatted } = await req.json();
-    if (!ticker || !sourceText) return NextResponse.json({ error: 'Ticker and source text are required.' }, { status: 400 });
+    const { ticker, sourceText, analystSummary, priceSummary, priceActionDay, sourceUrl, sourceDateFormatted, includeCTA, ctaText, includeSubheads, subheadTexts } = await req.json();
+    if (!sourceText) return NextResponse.json({ error: 'Source text is required.' }, { status: 400 });
+    if (!ticker) return NextResponse.json({ error: 'Ticker is required.' }, { status: 400 });
     console.log('Prompt priceSummary:', priceSummary); // Log the priceSummary
     console.log('Source text length:', sourceText.length);
     console.log('Source text preview:', sourceText.substring(0, 200));
-    console.log('Contains analyst note indicators:', sourceText.includes('Samik Chatterjee') || sourceText.includes('J P M O R G A N') || sourceText.includes('Overweight'));
+    console.log('Is analyst note:', (sourceText.includes('Samik Chatterjee') && sourceText.includes('J P M O R G A N')) || 
+                                   (sourceText.includes('analyst') && sourceText.includes('J.P. Morgan') && sourceText.includes('Overweight')));
     
     // Fetch related articles
     const relatedArticles = await fetchRelatedArticles(ticker, sourceUrl);
     
-    const prompt = buildPrompt({ ticker, sourceText, analystSummary: analystSummary || '', priceSummary: priceSummary || '', priceActionDay, sourceUrl, sourceDateFormatted, relatedArticles });
+    const prompt = buildPrompt({ ticker, sourceText, analystSummary: analystSummary || '', priceSummary: priceSummary || '', priceActionDay, sourceUrl, sourceDateFormatted, relatedArticles, includeCTA, ctaText, includeSubheads, subheadTexts });
     const res = await fetch(OPENAI_API_URL, {
       method: 'POST',
       headers: {
