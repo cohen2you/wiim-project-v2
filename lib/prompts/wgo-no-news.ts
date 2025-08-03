@@ -15,7 +15,7 @@ STORY REQUIREMENTS:
 1. HEADLINE: Use format "[Company] Stock Is Trending [Day]: What's Going On?" or "[Company] Stock Launches To New All-Time Highs: What's Going On?" for new highs
 
 2. ARTICLE STRUCTURE:
-- Opening paragraph: Stock movement summary + momentum context
+- Opening paragraph: Compelling hook that draws readers in + engaging narrative about what's driving the stock
 - "What To Know" section: Key data points (momentum scores, growth rankings, revenue metrics)
 - Recent events/partnerships/announcements
 - Analyst commentary and price target updates
@@ -33,6 +33,13 @@ STORY REQUIREMENTS:
 - Avoid phrases like "despite the absence of," "in the absence of," "without specific news catalysts," etc.
 - Keep paragraphs short and impactful
 - Include current session price movement
+- LEAD PARAGRAPH REQUIREMENTS:
+  * Start with a compelling hook that makes readers want to continue
+  * Avoid robotic language like "is experiencing notable volatility" or "recently trading down"
+  * Use engaging, human language that tells a story
+  * Focus on the narrative - what's happening and why it matters
+  * Include the stock movement naturally within the story, not as a dry report
+  * Make it sound like a real journalist wrote it, not an AI
 
 4. DATA INTEGRATION:
 - Use Benzinga momentum scores and rankings
