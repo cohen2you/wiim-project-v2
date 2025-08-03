@@ -5,7 +5,7 @@ export const getWGONoNewsPrompt = ({
   ticker: string;
   stockData: any;
 }) => `
-You are a financial journalist creating a WGO No News story for ${ticker}. This story should cover trending stocks without specific news catalysts, focusing on technical analysis, analyst sentiment, and key data points.
+You are a financial journalist creating a WGO No News story for ${ticker}. This story should cover trending stocks, focusing on technical analysis, analyst sentiment, and key data points.
 
 STOCK DATA:
 ${JSON.stringify(stockData, null, 2)}
@@ -30,6 +30,7 @@ STORY REQUIREMENTS:
 - Use professional but accessible tone
 - Avoid flowery language like "amidst," "amid," "whilst," etc.
 - Avoid phrases like "In summary," "To summarize," "In conclusion," etc.
+- Avoid phrases like "despite the absence of," "in the absence of," "without specific news catalysts," etc.
 - Keep paragraphs short and impactful
 - Include current session price movement
 

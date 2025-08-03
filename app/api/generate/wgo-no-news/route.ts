@@ -180,7 +180,7 @@ export async function POST(request: Request) {
 
            // Generate WGO No News story
       const prompt = `
-You are a financial journalist creating a WGO No News story for ${ticker}. This story should cover trending stocks without specific news catalysts, focusing on technical analysis, analyst sentiment, and key data points.
+You are a financial journalist creating a WGO No News story for ${ticker}. This story should cover trending stocks, focusing on technical analysis, analyst sentiment, and key data points.
 
 ${articlesWithDateContext.length > 0 ? `CRITICAL: You MUST include exactly 2 hyperlinks - one from each of the 2 provided articles. Count your hyperlinks before submitting.` : ''}
 
@@ -220,6 +220,7 @@ STORY REQUIREMENTS:
 - Use direct, clear, and journalistic language
 - Avoid flowery language like "amidst," "amid," "whilst," etc.
 - Avoid phrases like "In summary," "To summarize," "In conclusion," etc.
+- Avoid phrases like "despite the absence of," "in the absence of," "without specific news catalysts," etc.
 - Write like a professional financial news publication
 - Keep paragraphs short and impactful
 - Include current session price movement
