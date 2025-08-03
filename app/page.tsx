@@ -14,7 +14,9 @@ export default function PRStoryGeneratorPage() {
   const [priceAction, setPriceAction] = useState<any | null>(null);
   const [loadingPrice, setLoadingPrice] = useState(false);
   const [article, setArticle] = useState('');
-  const [generating, setGenerating] = useState(false);
+  const [generatingWIIM, setGeneratingWIIM] = useState(false);
+  const [generatingWGO, setGeneratingWGO] = useState(false);
+  const [generatingWGONoNews, setGeneratingWGONoNews] = useState(false);
   const [genError, setGenError] = useState('');
   const [tenNewestArticles, setTenNewestArticles] = useState<any[]>([]);
   const [loadingTenArticles, setLoadingTenArticles] = useState(false);
@@ -166,8 +168,45 @@ export default function PRStoryGeneratorPage() {
   };
 
   // Generate article (stub OpenAI call)
+  const generateWGOStory = async () => {
+    setGeneratingWGO(true);
+    setGenError('');
+    setArticle('');
+    setLoadingStory(true);
+    
+    // TODO: Implement WGO story generation
+    // This will be implemented based on your WGO story structure requirements
+    
+    setGeneratingWGO(false);
+    setLoadingStory(false);
+  };
+
+  const generateWGONoNewsStory = async () => {
+    setGeneratingWGONoNews(true);
+    setGenError('');
+    setArticle('');
+    setLoadingStory(true);
+    
+    try {
+      const res = await fetch('/api/generate/wgo-no-news', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ticker }),
+      });
+      
+      const data = await res.json();
+      if (!res.ok || !data.story) throw new Error(data.error || 'Failed to generate WGO No News story');
+      setArticle(data.story);
+    } catch (err: any) {
+      setGenError(err.message || 'Failed to generate WGO No News story');
+    } finally {
+      setGeneratingWGONoNews(false);
+      setLoadingStory(false);
+    }
+  };
+
   const generateArticle = async () => {
-    setGenerating(true);
+    setGeneratingWIIM(true);
     setGenError('');
     setArticle('');
     setLoadingStory(true);
@@ -343,7 +382,7 @@ export default function PRStoryGeneratorPage() {
     } catch (err: any) {
       setGenError(err.message || 'Failed to generate story');
     } finally {
-      setGenerating(false);
+      setGeneratingWIIM(false);
       setLoadingStory(false);
     }
   };
@@ -875,21 +914,56 @@ export default function PRStoryGeneratorPage() {
               Include Subheads
             </label>
           </div>
-          <button
-            onClick={generateArticle}
-            disabled={generating || !ticker.trim() || !primaryText.trim()}
-            style={{ 
-              padding: '8px 16px', 
-              background: '#2563eb', 
-              color: 'white', 
-              border: 'none', 
-              borderRadius: 4,
-              fontSize: 16,
-              cursor: generating ? 'not-allowed' : 'pointer'
-            }}
-          >
-            {generating ? 'Generating Story...' : 'Generate Story'}
-          </button>
+          <div style={{ display: 'flex', gap: '10px' }}>
+            <button
+              onClick={generateArticle}
+              disabled={generatingWIIM || generatingWGO || generatingWGONoNews || !ticker.trim() || !primaryText.trim()}
+              style={{ 
+                padding: '8px 16px', 
+                background: '#2563eb', 
+                color: 'white', 
+                border: 'none', 
+                borderRadius: 4,
+                fontSize: 16,
+                cursor: generatingWIIM ? 'not-allowed' : 'pointer',
+                flex: 1
+              }}
+            >
+              {generatingWIIM ? 'Generating WIIM Story...' : 'WIIM Story'}
+            </button>
+            <button
+              onClick={() => generateWGOStory()}
+              disabled={generatingWIIM || generatingWGO || generatingWGONoNews || !ticker.trim()}
+              style={{ 
+                padding: '8px 16px', 
+                background: '#059669', 
+                color: 'white', 
+                border: 'none', 
+                borderRadius: 4,
+                fontSize: 16,
+                cursor: generatingWGO ? 'not-allowed' : 'pointer',
+                flex: 1
+              }}
+            >
+              {generatingWGO ? 'Generating WGO Story...' : 'WGO Story'}
+            </button>
+            <button
+              onClick={() => generateWGONoNewsStory()}
+              disabled={generatingWIIM || generatingWGO || generatingWGONoNews || !ticker.trim()}
+              style={{ 
+                padding: '8px 16px', 
+                background: '#dc2626', 
+                color: 'white', 
+                border: 'none', 
+                borderRadius: 4,
+                fontSize: 16,
+                cursor: generatingWGONoNews ? 'not-allowed' : 'pointer',
+                flex: 1
+              }}
+            >
+              {generatingWGONoNews ? 'Generating WGO No News...' : 'WGO No News'}
+            </button>
+          </div>
         </div>
       </div>
       
@@ -1023,7 +1097,7 @@ export default function PRStoryGeneratorPage() {
                       cursor: 'pointer',
                     }}
                     onClick={() => handleSelectPR(pr)}
-                    disabled={generating}
+                    disabled={generatingWIIM || generatingWGO || generatingWGONoNews}
                   >
                     <strong>{pr.headline || '[No Headline]'}</strong>
                     <br />
@@ -1075,7 +1149,7 @@ export default function PRStoryGeneratorPage() {
                       cursor: 'pointer',
                     }}
                     onClick={() => handleSelectArticle(article)}
-                    disabled={generating}
+                    disabled={generatingWIIM || generatingWGO || generatingWGONoNews}
                   >
                     <strong>{article.headline || '[No Headline]'}</strong>
                     <br />
