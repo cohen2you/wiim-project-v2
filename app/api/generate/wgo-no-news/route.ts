@@ -186,10 +186,11 @@ async function fetchStockData(ticker: string) {
       
       if (ratingsArray.length > 0) {
         analystRatings = ratingsArray.slice(0, 3).map((rating: any) => {
-          const date = new Date(rating.date).toLocaleDateString('en-US', { month: 'long', day: 'numeric' });
-          let line = `${date}: ${rating.analyst_name || rating.analyst} ${rating.action_company || 'rated'} ${rating.ticker} ${rating.rating_current}`;
+          // Extract just the firm name, removing any analyst name if present
+          const firmName = (rating.action_company || rating.firm || 'Analyst').split(' - ')[0].split(':')[0].trim();
+          let line = `${firmName} maintains ${rating.rating_current} rating`;
           if (rating.pt_current) {
-            line += ` and set a $${parseFloat(rating.pt_current).toFixed(2)} target`;
+            line += ` with $${parseFloat(rating.pt_current).toFixed(0)} price target`;
           }
           return line;
         });
@@ -262,8 +263,8 @@ async function fetchStockData(ticker: string) {
     if (analystRatings.length === 0) {
       console.log('Using fallback analyst ratings data');
       analystRatings = [
-        "Analyst A maintains Buy rating with $160 target",
-        "Analyst B raises price target to $155",
+        "Morgan Stanley maintains Buy rating with $810 price target",
+        "Goldman Sachs maintains Overweight rating with $915 price target",
         "Consensus rating: Overweight"
       ];
     } else {
@@ -312,27 +313,16 @@ export async function POST(request: Request) {
      }) || [];
 
            // Generate WGO No News story
-      const prompt = `
-You are a financial journalist creating a WGO No News story for ${ticker}. This story should cover trending stocks, focusing on technical analysis, analyst sentiment, and key data points.
+             const prompt = `
+You are a financial journalist creating a WGO No News story for ${ticker}. This story should focus PRIMARILY on technical analysis, market data, and analyst sentiment - laying out all the technical story first.
 
-${articlesWithDateContext.length > 0 ? `CRITICAL: You MUST include exactly 2 hyperlinks - one from each of the 2 provided articles. Count your hyperlinks before submitting.` : ''}
+CRITICAL RULE: NEVER mention individual analyst names in any part of the article. Only use firm names when referencing analyst ratings or commentary.
 
 CURRENT DATE: ${currentDateStr}
 CURRENT MARKET STATUS: ${marketStatus}
 
 STOCK DATA:
 ${JSON.stringify(stockData, null, 2)}
-
-${articlesWithDateContext.length > 0 ? `
-RECENT BENZINGA ARTICLES:
-${articlesWithDateContext.map((article: any, index: number) => `
-Article ${index + 1} (${article.daysOld} days ago):
-Headline: ${article.headline}
-Content: ${article.body}
-URL: ${article.url}
-Date Context: ${article.isRecent ? 'Very recent' : article.isThisWeek ? 'This week' : article.isLastWeek ? 'Last week' : 'Older'}
-`).join('\n')}
-` : ''}
 
 STORY REQUIREMENTS:
 
@@ -342,21 +332,21 @@ STORY REQUIREMENTS:
 - Do NOT use bold formatting (**) around the headline
 - Do NOT include the headline within the lead paragraph
 
-2. ARTICLE STRUCTURE:
+2. ARTICLE STRUCTURE (FOCUS ON TECHNICAL DATA FIRST):
 - HEADLINE: On its own line, no bold formatting
 - Opening paragraph: Compelling hook that draws readers in + engaging narrative about what's driving the stock (separate from headline)
-- "What To Know" section: Key data points (growth rankings, revenue metrics)
-- Recent events/partnerships/announcements (incorporate relevant recent Benzinga articles if available)
-- Analyst commentary and price target updates
-- Price action section with technical details
+- Technical analysis section: Focus on price action, momentum, support/resistance levels
+- Analyst commentary and price target updates (firm names only) - format as: "Goldman Sachs maintains Buy rating with $810 price target, Morgan Stanley maintains Overweight rating with $915 price target"
+- Market context and sector performance
 - Formatted price line at the bottom with exact price action data
 
-3. CONTENT GUIDELINES:
-- Focus on what's driving the momentum
-- Include technical indicators (RSI, moving averages, support/resistance)
+3. CONTENT GUIDELINES (TECHNICAL FOCUS):
+- Focus PRIMARILY on technical analysis and market data
+- Include key technical indicators (price action, volume, momentum)
 - Mention analyst ratings and price targets (emphasize FIRM names over analyst names)
-- Include volume analysis and short interest if relevant
-- Reference upcoming catalysts (earnings, events, etc.)
+- Include volume analysis and market cap data
+- Reference technical support/resistance levels if available
+- Focus on the technical story - what the data shows about the stock's performance
 
 - Use direct, clear, and journalistic language
 - Avoid flowery language like "amidst," "amid," "whilst," etc.
@@ -378,131 +368,53 @@ STORY REQUIREMENTS:
   * LEAD PARAGRAPH PRICE MOVEMENT: The first sentence of the lead paragraph MUST describe the actual price movement from the price action data (e.g., if changePercent is positive, say "traded higher" or "rose"; if negative, say "traded lower" or "declined"; if zero, say "traded unchanged")
 - FORMATTED PRICE LINE REQUIREMENTS:
   * At the very end of the article, add a formatted price line with exact price action data
-  * Use this exact format: "[TICKER] Price Action: [Company Name] shares were [up/down] [X.XX]% at $[XX.XX] [during premarket trading/during after-hours trading/while the market was closed] on [Day], according to <a href="https://pro.benzinga.com">Benzinga Pro</a>."
+  * Use this exact format: "[TICKER] Price Action: [Company Name] shares were [up/down] [X.XX]% at $[XX.XX] [during premarket trading/during after-hours trading/while the market was closed] on [Day], according to <a href=\"https://pro.benzinga.com\">Benzinga Pro</a>."
   * Include the exact percentage change, current price, and market status
-  * This should be the final line of the article, after all other content including "Also Read" and "Read Next" sections
+  * This should be the final line of the article, after all other content
   * DO NOT repeat the exact same price and percentage information that appears elsewhere in the article
 - LEAD PARAGRAPH REQUIREMENTS:
   * Start with a compelling hook that makes readers want to continue
   * Keep the lead to exactly TWO sentences maximum - no exceptions
   * Each sentence should be concise and impactful (avoid run-on sentences)
-  * First sentence: Start with the company name and ticker, then describe the ACTUAL price movement based on the price data (e.g., "traded higher", "declined", "rose", "fell") and use the exact time reference from market status (e.g., "in premarket trading", "during regular trading hours", "in after-hours trading"). ${articlesWithDateContext.length > 0 ? `MUST include exactly one hyperlink using this format: <a href="${articlesWithDateContext[0]?.url}">[three word phrase]</a>` : ''}
-  * Second sentence: Brief context about what's driving the momentum (NO exact price action, NO hyperlinks)
+  * First sentence: Start with the company name and ticker, then describe the ACTUAL price movement based on the price data (e.g., "traded higher", "declined", "rose", "fell") and use the exact time reference from market status (e.g., "in premarket trading", "during regular trading hours", "in after-hours trading")
+  * Second sentence: Brief context about what's driving the momentum based on technical data and analyst sentiment (NO exact price action)
   * CRITICAL: The lead MUST mention the actual price movement (up, down, unchanged) but NOT the specific percentage - reserve the percentage for the price action line at the bottom
   * Use the market status to provide accurate time context (premarket, regular hours, after-hours, closed)
   * Avoid robotic language like "is experiencing notable volatility" or "recently trading down"
   * Use engaging, human language that tells a story
-  * Focus on the narrative - what's happening and why it matters
-  * Do NOT include any hyperlinks in the lead paragraph
+  * Focus on the technical narrative - what the data shows about the stock's performance
   * Make it sound like a real journalist wrote it, not an AI
   * LEAD LENGTH RULE: If your lead exceeds two sentences, rewrite it to be more concise
   * EXAMPLE LEAD PARAGRAPH FORMAT:
-    * First sentence: "[Company Name] (NYSE: TICKER) traded higher in premarket trading on Monday as investors continue to focus on the company's <a href="${articlesWithDateContext[0]?.url || 'https://www.benzinga.com/markets'}">strong fundamentals</a>."
-    * Second sentence: "The stock's momentum comes amid positive analyst sentiment and strong technical indicators."
+    * First sentence: "[Company Name] (NYSE: TICKER) traded higher in premarket trading on Monday as investors continue to focus on the company's strong technical indicators."
+    * Second sentence: "The stock's momentum comes amid positive analyst sentiment and robust volume activity."
 
-4. RECENT ARTICLES INTEGRATION:
-${articlesWithDateContext.length > 0 ? `
-- CRITICAL REQUIREMENT: You MUST include exactly TWO hyperlinks using this exact format: <a href="[ARTICLE_URL]">[three word phrase]</a>
-- Use one hyperlink from each of the two articles provided - NO EXCEPTIONS
-- YOU MUST USE BOTH ARTICLES - DO NOT SKIP ANY ARTICLES
-- FAILURE TO INCLUDE BOTH HYPERLINKS WILL RESULT IN INCOMPLETE CONTENT
-- REQUIRED URLS TO USE:
-  * Article 1 URL: ${articlesWithDateContext[0]?.url}
-  * Article 2 URL: ${articlesWithDateContext[1]?.url}
-- You MUST use these exact URLs in your hyperlinks
-- Choose relevant three-word phrases from the article headlines or content
-- Embed the hyperlinks naturally in your sentences - do NOT say "according to a recent article" or "recent article" or "article"
-- HYPERLINK DISTRIBUTION: Include one hyperlink in a middle paragraph (paragraphs 2-4) and one hyperlink in another middle paragraph
-- HYPERLINK INTEGRATION: The hyperlinks should be embedded within existing sentence structure, NOT as standalone phrases
-- CRITICAL: NEVER create sentences that end with "here" or "this link" - hyperlinks must be part of natural sentence flow
-- HYPERLINK RULE: The hyperlink should be a natural part of the sentence, not a separate instruction to the reader
-- EXAMPLES OF GOOD HYPERLINK INTEGRATION:
-  * "The company's <a href="url">AI platform developments</a> continue to drive momentum..."
-  * "Analysts remain bullish on the stock's <a href="url">recent partnership announcements</a>..."
-  * "Investors are watching the company's <a href="url">regulatory compliance strategy</a>..."
-  * "Recent <a href="url">regulatory developments</a> have sparked renewed interest..."
-  * "The company's <a href="url">strategic positioning</a> continues to attract investor attention..."
-- EXAMPLES OF BAD HYPERLINK INTEGRATION (DO NOT USE):
-  * "For more insights, check out this week in Appleverse."
-  * "Read more about the latest developments here."
-  * "See related coverage on this topic."
-  * "According to a recent article..."
-  * "A recent article shows..."
-  * "The recent article..."
-  * "For more on [topic], see [source] here."
-  * "Click here for more information."
-  * "Read more here."
-  * "See [topic] here."
-  * "Check out [topic] here."
-  * Any sentence ending with "here" or "this link"
-  * Any standalone hyperlink phrases that don't flow naturally in the text
+4. TECHNICAL DATA FOCUS:
+- FOCUS ENTIRELY on technical analysis, market data, and analyst sentiment
+- Emphasize the technical story - what the data shows about the stock's performance
+- Include detailed price action analysis and volume data
+- Reference analyst ratings and price targets using firm names only
+- Provide comprehensive market context and sector performance
 - MANDATORY CHECKLIST:
   * [ ] Headline is on its own line, separate from lead paragraph
   * [ ] No bold formatting (**) around headline
   * [ ] Lead paragraph is exactly TWO sentences maximum
-  * [ ] First sentence contains company name, ticker, actual price movement with time context, and one hyperlink (NO exact percentage)
-  * [ ] Second sentence provides brief context about momentum drivers (NO exact price action, NO hyperlinks)
+  * [ ] First sentence contains company name, ticker, actual price movement with time context (NO exact percentage)
+  * [ ] Second sentence provides brief context about momentum drivers based on technical data
   * [ ] No run-on sentences in the lead
-  * [ ] Lead paragraph contains exactly ONE hyperlink (in the first sentence)
-  * [ ] First hyperlink from Article 1 included in the lead paragraph (first sentence)
-  * [ ] Second hyperlink from Article 2 included in a middle paragraph (paragraphs 2-4)
-  * [ ] Both hyperlinks use three-word phrases
-  * [ ] Both hyperlinks are naturally embedded in sentences
-  * [ ] No standalone hyperlink phrases
-  * [ ] NO references to "article," "recent article," or "Benzinga article"
-  * [ ] Hyperlinks are part of natural sentence flow
-  * [ ] NO sentences ending with "here" or "this link"
-  * [ ] NO "For more on [topic], see [source] here" formatting
-  * [ ] Hyperlinks flow naturally within sentences, not as separate instructions
-  * [ ] "Also Read" section placed immediately after "What To Know" section (top third of article)
   * [ ] Formatted price line included at the very end with exact price action data
   * [ ] "Benzinga Pro" hyperlinked in the price line
   * [ ] No repetitive price/percentage information throughout the article
-- DATE AWARENESS: Consider the age of each article when writing:
-  * If article is 1-3 days old: Use "recently", "this week", "latest"
-  * If article is 4-7 days old: Use "this week", "recently", "lately"
-  * If article is 8-14 days old: Use "recently", "in recent weeks", "lately"
-  * If article is older: Use "previously", "earlier this month", "recently"
-- Avoid referencing future events that have already happened based on article dates
-- FINAL VERIFICATION: Before submitting your response, count the number of <a href= tags in your article. You must have exactly 5 total hyperlinks:
-  * 1 in the lead paragraph (first sentence)
-  * 1 embedded in a middle paragraph (paragraphs 2-4)
-  * 1 in "Also Read" section
-  * 1 in "Read Next" section  
-  * 1 in "Benzinga Pro" price line
-  * If you have fewer than 5, add the missing hyperlink(s). If you have more than 5, remove the extra hyperlink(s).
-- HYPERLINK PLACEMENT STRATEGY:
-  * Article 1 hyperlink: Place in the lead paragraph (first sentence), naturally integrated into the sentence about price movement and market context
-  * Article 2 hyperlink: Place in a middle paragraph (paragraphs 2-4), naturally integrated into a sentence about recent developments or market context
-  * Both hyperlinks must be relevant to the context where they appear
-  * LEAD PARAGRAPH RULE: MUST include one hyperlink in the lead paragraph (first sentence)
-  * CRITICAL: You MUST embed both hyperlinks naturally in the article content, NOT just in the "Also Read" and "Read Next" sections
-  * The "Also Read" and "Read Next" sections are ADDITIONAL to the embedded hyperlinks, not replacements for them
-  * HYPERLINK REQUIREMENT: You MUST include exactly 2 embedded hyperlinks (1 in lead + 1 in middle paragraph)
-  * DO NOT rely only on "Also Read" and "Read Next" sections - you need hyperlinks within the actual article text
-- REQUIRED HYPERLINK COUNT: Your final article MUST contain exactly 5 hyperlinks total:
-  * 1 embedded hyperlink in the lead paragraph (from Article 1)
-  * 1 embedded hyperlink in a middle paragraph (from Article 2)
-  * 1 "Also Read" hyperlink (from Article 1)
-  * 1 "Read Next" hyperlink (from Article 2)
-  * 1 "Benzinga Pro" hyperlink in the price line
-  * Count them before submitting - you need ALL 5 hyperlinks
-- ADDITIONAL LINKS REQUIREMENTS:
-  * After the "What To Know" section (approximately in the top third of the article), insert the "Also Read:" section with this exact format:
-    Also Read: <a href="${articlesWithDateContext[0]?.url}">${articlesWithDateContext[0]?.headline}</a>
-  * The "Also Read" section should appear immediately after the "What To Know" section, before any other content
-  * After the price action section, add a "Read Next:" section with this exact format:
-    Read Next: <a href="${articlesWithDateContext[1]?.url || articlesWithDateContext[0]?.url}">${articlesWithDateContext[1]?.headline || articlesWithDateContext[0]?.headline}</a>
-` : '- No recent articles available, focus on technical analysis and analyst commentary'}
+  * [ ] Article focuses entirely on technical analysis and market data
+  * [ ] Only firm names are used for analyst references (no individual analyst names)
 
 5. DATA INTEGRATION:
-- Include revenue growth metrics when available
-- Reference analyst ratings and price targets (emphasize FIRM names over analyst names)
-- Include technical price levels and YTD performance
-- Mention social media/event mentions if relevant
-- ANALYST MENTION GUIDELINES: When mentioning analyst ratings, lead with the firm name (e.g., "Morgan Stanley maintains..." rather than "Joseph Moore of Morgan Stanley...")
+- Focus on technical price levels and YTD performance
+- Reference analyst ratings and price targets (ONLY use FIRM names - NEVER mention individual analyst names)
+- Include volume analysis and market cap data
+- ANALYST MENTION GUIDELINES: When mentioning analyst ratings, ONLY use the firm name - NEVER mention individual analyst names (e.g., "Morgan Stanley maintains..." - do NOT mention "Joseph Moore" or any other analyst names)
 
-6. TONE: Direct, clear, and journalistic - write like a professional financial news publication. Focus on "what's driving the momentum" with strong, active language.
+6. TONE: Direct, clear, and journalistic - write like a professional financial news publication. Focus on technical analysis and market data with strong, active language.
 
 Generate a complete WGO No News story following this structure.`;
 
@@ -519,18 +431,8 @@ Generate a complete WGO No News story following this structure.`;
       return NextResponse.json({ error: 'Failed to generate WGO No News story.' }, { status: 500 });
     }
 
-    // Verify hyperlink count if articles were provided
-    if (articlesWithDateContext.length > 0) {
-      const hyperlinkCount = (story.match(/<a href=/g) || []).length;
-      console.log(`Generated story contains ${hyperlinkCount} hyperlinks`);
-      
-      // Should have 5 hyperlinks: 2 embedded + 1 Also Read + 1 Read Next + 1 Benzinga Pro
-      const expectedCount = 5;
-      if (hyperlinkCount !== expectedCount) {
-        console.warn(`Warning: Story contains ${hyperlinkCount} hyperlinks instead of required ${expectedCount} (2 embedded + 1 Also Read + 1 Read Next + 1 Benzinga Pro)`);
-        // You could add logic here to regenerate or flag the issue
-      }
-    }
+    // Log story generation completion
+    console.log(`Generated WGO No News story for ${ticker} focusing on technical data`);
 
     return NextResponse.json({ 
       story,

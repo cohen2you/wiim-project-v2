@@ -76,55 +76,82 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Not enough related articles found for context.' }, { status: 404 });
     }
 
-    // Add hyperlinks to the existing article
+    // Intelligently integrate the articles into the existing story
     const prompt = `
-You are a professional financial journalist. Take the existing article and add exactly 2 hyperlinks to it using the provided related articles.
+You are a professional financial journalist. Take the existing technical story and intelligently integrate content from two recent Benzinga articles to enhance the narrative with relevant news context.
 
-EXISTING ARTICLE (DO NOT CHANGE THE CONTENT, ONLY ADD HYPERLINKS):
+EXISTING TECHNICAL STORY (DO NOT CHANGE THE BASIC STRUCTURE):
 ${currentArticle}
 
-RELATED ARTICLE 1:
+ARTICLE 1 TO INTEGRATE:
 Headline: ${relatedArticles[0].headline}
+Content: ${relatedArticles[0].body}
 URL: ${relatedArticles[0].url}
 
-RELATED ARTICLE 2:
+ARTICLE 2 TO INTEGRATE:
 Headline: ${relatedArticles[1].headline}
+Content: ${relatedArticles[1].body}
 URL: ${relatedArticles[1].url}
 
-TASK: Add exactly 2 hyperlinks to the existing article:
-1. Add ONE hyperlink in the LEAD paragraph (first paragraph) using a 3-word phrase from Article 1
-2. Add ONE hyperlink in a MIDDLE paragraph using a 3-word phrase from Article 2
+TASK: Enhance the existing story by thoughtfully integrating content from both articles:
 
-HYPERLINK RULES:
-- Use HTML format: <a href="URL">three word phrase</a>
-- Choose relevant 3-word phrases that fit naturally in the existing sentences
-- Do not change any existing content - only add the hyperlinks
-- Do not add "Also Read" or "Read Next" sections
-- Do not add any new text or sections
-- Keep the exact same article structure and content
-- The hyperlinks must be naturally embedded in existing sentences
+1. **CONTENT INTEGRATION**:
+   - You may add AT MOST TWO SHORT SENTENCES (no more than 20 words each) of content from each Benzinga article (maximum four sentences total)
+   - The added information must be thoughtfully woven into the existing data-driven narrative, not just appended or inserted as blocks
+   - The integration should support or enhance the technical analysis, not distract from it
+   - Do NOT add standalone lines, new paragraphs, or sentences whose sole purpose is to contain a hyperlink (e.g., 'Read more about X here.' or 'Explore Y here.' are strictly forbidden)
+   - Hyperlinks must be embedded naturally within otherwise meaningful sentences
 
-EXAMPLE:
-Original: "Meta Platforms Inc. traded higher in premarket trading on Monday as investors are optimistic about the company's strategic positioning."
-Modified: "Meta Platforms Inc. traded higher in premarket trading on Monday as investors are optimistic about the company's <a href="URL">strategic positioning</a>."
+2. **HYPERLINK PLACEMENT**:
+   - Add exactly 2 hyperlinks using the provided URLs
+   - Each hyperlink must be embedded NATURALLY within a sentence (never as its own line)
+   - Place one hyperlink in the FIRST or SECOND paragraph (near the top of the story)
+   - Place one hyperlink in a middle paragraph (paragraphs 3-5)
+   - Use HTML format: <a href="URL">relevant phrase</a>
+   - DO NOT place both hyperlinks at the bottom of the story
+   - Distribute hyperlinks throughout the content for better user experience
 
-Add the hyperlinks to the existing article now:`;
+3. **INTEGRATION GUIDELINES**:
+   - Maintain the technical focus while adding news context
+   - Keep the existing structure and flow
+   - Add or enhance sentences with relevant news content, but keep the story concise
+   - Make the integration feel natural and seamless
+   - Do not create separate 'Also Read' or 'Read Next' sections
+   - Preserve the price action line at the bottom
+   - CRITICAL: Place hyperlinks in the top/middle sections, NOT at the bottom
+   - Ensure hyperlinks are distributed throughout the story for better engagement
+   - MAINTAIN THE TWO-SENTENCE PER PARAGRAPH RULE: No paragraph should exceed two sentences
+
+4. **CONTENT SELECTION**:
+   - Choose the most relevant and impactful information from each article
+   - Focus on facts, quotes, and insights that enhance the technical story
+   - Avoid repetitive or conflicting information
+   - Prioritize information that explains or supports the price action
+
+5. **WRITING STYLE**:
+   - Maintain professional journalistic tone
+   - Keep paragraphs concise and impactful
+   - Use active voice and strong verbs
+   - Ensure smooth transitions between technical analysis and news content
+   - The final story should remain concise and focused on the data-driven narrative
+
+Enhance the existing story by integrating the article content and adding the hyperlinks naturally.`;
 
     const completion = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
+      model: 'gpt-4o',
       messages: [{ role: 'user', content: prompt }],
-      max_tokens: 1500,
-      temperature: 0.3, // Lower temperature for more consistent results
+      max_tokens: 2500,
+      temperature: 0.3, // Lower temperature for more consistent integration
     });
 
-    const updatedArticle = completion.choices[0].message?.content?.trim() || '';
+    const enhancedArticle = completion.choices[0].message?.content?.trim() || '';
 
-    if (!updatedArticle) {
-      return NextResponse.json({ error: 'Failed to add hyperlinks to article.' }, { status: 500 });
+    if (!enhancedArticle) {
+      return NextResponse.json({ error: 'Failed to enhance article with context.' }, { status: 500 });
     }
 
     return NextResponse.json({ 
-      updatedArticle,
+      updatedArticle: enhancedArticle,
       relatedArticles: relatedArticles.map(article => ({
         headline: article.headline,
         url: article.url

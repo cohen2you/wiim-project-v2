@@ -46,20 +46,15 @@ function formatRatingsBlock(ratings: AnalystRating[]): string {
     .sort((a, b) => Date.parse(b.date) - Date.parse(a.date))
     .slice(0, 5)
     .map(r => {
-      const date = new Date(r.date).toLocaleDateString('en-US', { month: 'long', day: 'numeric' });
-      let line = `${date}: ${r.analyst} rated ${r.ticker} ${r.action_company} ${r.rating_current}`;
-      if (r.rating_prior && r.rating_prior !== r.rating_current) {
-        line += ` (prior ${r.rating_prior})`;
-      }
+      // Extract just the firm name, removing any analyst name if present
+      const firmName = r.action_company.split(' - ')[0].split(':')[0].trim();
+      let line = `${firmName} maintains ${r.rating_current} rating`;
       if (r.pt_current) {
-        line += ` and set a $${parseFloat(r.pt_current).toFixed(2)} target`;
-        if (r.pt_prior && parseFloat(r.pt_prior) !== parseFloat(r.pt_current)) {
-          line += ` (prior $${parseFloat(r.pt_prior).toFixed(2)})`;
-        }
+        line += ` with $${parseFloat(r.pt_current).toFixed(0)} price target`;
       }
       return line;
     })
-    .join('\n');
+    .join(', ');
 }
 
 export async function POST(request: Request) {

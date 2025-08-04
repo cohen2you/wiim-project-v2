@@ -1066,7 +1066,7 @@ export default function PRStoryGeneratorPage() {
                   cursor: loadingWGOContext ? 'not-allowed' : 'pointer'
                 }}
               >
-                {loadingWGOContext ? 'Adding WGO Context...' : 'Add WGO Context'}
+                {loadingWGOContext ? 'Finalizing WGO No News...' : 'Finalize WGO No News'}
               </button>
               <button
                 onClick={handleCopyArticle}

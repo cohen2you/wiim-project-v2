@@ -129,30 +129,32 @@ function buildPrompt({ ticker, sourceText, analystSummary, priceSummary, priceAc
     
     const dateMatch = sourceText.match(/(\d{1,2})\s+(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{4})/i);
     
-    analystInfo = `
+         analystInfo = `
 EXTRACTED ANALYST INFORMATION:
-- Analyst: ${analystMatch ? 'Samik Chatterjee, CFA' : 'Not found'}
 - Firm: ${firmMatch ? 'J.P. Morgan' : 'Not found'}
 - Rating: ${ratingMatch ? 'Overweight' : 'Not found'}
 - Current Price Target: ${currentPriceTarget || 'Not found'}
 - Previous Price Target: ${previousPriceTarget || 'Not found'}
 - Date: ${dateMatch ? `${dateMatch[2]} ${dateMatch[1]}, ${dateMatch[3]}` : 'Not found'}
 
+CRITICAL: ONLY use the firm name. NEVER mention individual analyst names.
 YOU MUST USE THIS INFORMATION IN YOUR ARTICLE.
 `;
   }
   
-  return `You are a professional financial news writer for Benzinga.
+     return `You are a professional financial news writer for Benzinga.
+
+CRITICAL RULE: NEVER mention individual analyst names in any part of the article. Only use firm names when referencing analyst ratings or commentary.
 
 Write a concise, fact-based news article (about 350 words) about the stock with ticker: ${ticker}. Use the provided press release, news article, or analyst note text as your main source, but focus only on information relevant to ${ticker}. Ignore other tickers or companies mentioned in the source text.
 
 IMPORTANT: If the source text appears to be an analyst note (contains analyst names, firm names, ratings, price targets, or financial analysis), prioritize extracting and using the specific analyst insights, forecasts, and reasoning from the note rather than generic analyst summary data. 
 
-CRITICAL FOR ANALYST NOTES: Extract and include the analyst's name, firm, specific analysis points, financial forecasts, investment thesis, and key reasoning directly from the source text. Do not rely on the analyst summary data if the source text contains detailed analyst information.
+CRITICAL FOR ANALYST NOTES: Extract and include ONLY the firm name, specific analysis points, financial forecasts, investment thesis, and key reasoning directly from the source text. NEVER mention individual analyst names. Do not rely on the analyst summary data if the source text contains detailed analyst information.
 
-IMPORTANT: The source text below contains the full analyst note. Extract all relevant analyst information, including names, ratings, price targets, analysis, and reasoning directly from this source text. Do not use any external analyst summary data.
+IMPORTANT: The source text below contains the full analyst note. Extract all relevant analyst information, including ratings, price targets, analysis, and reasoning directly from this source text. NEVER mention individual analyst names - only use firm names. Do not use any external analyst summary data.
 
-${isAnalystNote ? 'CRITICAL: THIS IS AN ANALYST NOTE. You MUST extract and include the analyst name (Samik Chatterjee, CFA), firm name (J.P. Morgan), rating (Overweight), price target ($200), and specific analysis from the source text below. Do not write generic content.' : ''}
+${isAnalystNote ? 'CRITICAL: THIS IS AN ANALYST NOTE. You MUST extract and include ONLY the firm name (J.P. Morgan), rating (Overweight), price target ($200), and specific analysis from the source text below. NEVER mention individual analyst names. Do not write generic content.' : ''}
 
 ${analystInfo}
 
@@ -199,14 +201,14 @@ ${relatedArticles && relatedArticles.length > 1 ? `
   Also Read: <a href="${relatedArticles[1].url}">${relatedArticles[1].headline}</a>
 ` : ''}
 
-${isAnalystNote ? '- FOR ANALYST NOTES: Do NOT mention analyst names in the lead paragraph. Start your additional paragraphs (after the lead) with "According to J.P. Morgan analyst Samik Chatterjee, CFA..." and include specific details about the F3Q25 earnings preview, diversification strategy, Apple revenue loss impact, and investment thesis from the source text. When mentioning price targets, include the previous target if available (e.g., "raised the price target to $200 from $185"). Do not write generic content about the semiconductor industry.' : ''}
+${isAnalystNote ? '- FOR ANALYST NOTES: Do NOT mention analyst names in the lead paragraph. Start your additional paragraphs (after the lead) with "According to J.P. Morgan..." (emphasize the firm name first) and include specific details about the F3Q25 earnings preview, diversification strategy, Apple revenue loss impact, and investment thesis from the source text. When mentioning price targets, include the previous target if available (e.g., "raised the price target to $200 from $185"). Do not write generic content about the semiconductor industry.' : ''}
 
-- For analyst notes specifically: Extract and include the analyst's name (e.g., "Samik Chatterjee, CFA"), firm name, specific analysis points, financial forecasts, investment thesis, and key reasoning directly from the source text. Include details about earnings previews, price targets (use whole numbers like $200, not $200.00), ratings, and market insights mentioned in the note. When a price target is raised or lowered, always include both the current and previous targets in the format "raised the price target to [current] from [previous]" or "lowered the price target to [current] from [previous]".
+- For analyst notes specifically: Extract and include ONLY the firm name - NEVER mention individual analyst names (e.g., "J.P. Morgan maintains..." - do NOT mention "Samik Chatterjee" or any other analyst names). Include specific analysis points, financial forecasts, investment thesis, and key reasoning directly from the source text. Include details about earnings previews, price targets (use whole numbers like $200, not $200.00), ratings, and market insights mentioned in the note. When a price target is raised or lowered, always include both the current and previous targets in the format "raised the price target to [current] from [previous]" or "lowered the price target to [current] from [previous]".
 
-${isAnalystNote ? '- MANDATORY FOR ANALYST NOTES: Do NOT include analyst names in the lead paragraph. You MUST include the analyst name "Samik Chatterjee, CFA" and firm "J.P. Morgan" in your additional paragraphs (after the lead). You MUST mention the "Overweight" rating and price target information. If a previous price target is available, format it as "raised the price target to [current] from [previous]" (e.g., "raised the price target to $200 from $185"). If no previous target is available, use "raised the price target to [current]" or "set a price target of [current]". You MUST include specific details about the F3Q25 earnings preview, diversification strategy, and investment thesis from the source text.' : ''}
+${isAnalystNote ? '- MANDATORY FOR ANALYST NOTES: Do NOT include analyst names in the lead paragraph. You MUST emphasize the firm name "J.P. Morgan" first in your additional paragraphs (after the lead). You MUST mention the "Overweight" rating and price target information. If a previous price target is available, format it as "raised the price target to [current] from [previous]" (e.g., "raised the price target to $200 from $185"). If no previous target is available, use "raised the price target to [current]" or "set a price target of [current]". You MUST include specific details about the F3Q25 earnings preview, diversification strategy, and investment thesis from the source text.' : ''}
 
 - Analyst Ratings: Extract and include analyst information directly from the source text. Include:
-  * The analyst's name, firm, rating, and price target changes (use whole numbers like $200, not $200.00)
+  * ONLY the firm name - NEVER mention individual analyst names, rating, and price target changes (use whole numbers like $200, not $200.00)
   * If a price target was raised or lowered, include both the current and previous targets (e.g., "raised the price target to $200 from $185")
   * Key analysis points and investment thesis from the note
   * Specific financial forecasts or estimates mentioned
@@ -237,14 +239,15 @@ Source Text:
 ${sourceText}
 
 ${isAnalystNote ? `
-IMPORTANT: The source text above contains a J.P. Morgan analyst note by Samik Chatterjee, CFA. You MUST include:
-1. The analyst name "Samik Chatterjee, CFA" and firm "J.P. Morgan"
+IMPORTANT: The source text above contains a J.P. Morgan analyst note. You MUST include:
+1. ONLY the firm name "J.P. Morgan" - NEVER mention individual analyst names
 2. The "Overweight" rating and price target information (include previous target if available)
 3. Specific details about the F3Q25 earnings preview
 4. Information about the diversification strategy and Apple revenue loss
 5. The investment thesis about long-term re-rating opportunity
 6. Financial forecasts and market insights from the note
 
+CRITICAL: NEVER mention "Samik Chatterjee" or any other individual analyst names. Only use firm names.
 Do not write generic content about the semiconductor industry. Use the specific analyst insights from the source text.
 ` : ''}
 
