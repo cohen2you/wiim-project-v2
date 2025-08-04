@@ -52,6 +52,15 @@ export default function PRStoryGeneratorPage() {
   const [wgoContextError, setWgoContextError] = useState('');
   const [loadingAnalystRatings, setLoadingAnalystRatings] = useState(false);
   const [analystRatingsError, setAnalystRatingsError] = useState('');
+  const [currentStep, setCurrentStep] = useState(0);
+  const [storyComponents, setStoryComponents] = useState({
+    headline: '',
+    lead: '',
+    technical: '',
+    analystRatings: '',
+    newsContext: '',
+    priceActionLine: ''
+  });
 
   // Client-only: Convert PR or Article HTML body to plain text when selected
   useEffect(() => {
@@ -190,19 +199,32 @@ export default function PRStoryGeneratorPage() {
     setGenError('');
     setArticle('');
     setLoadingStory(true);
+    setCurrentStep(0);
+    setStoryComponents({
+      headline: '',
+      lead: '',
+      technical: '',
+      analystRatings: '',
+      newsContext: '',
+      priceActionLine: ''
+    });
     
     try {
-      const res = await fetch('/api/generate/wgo-no-news', {
+      // Step 1: Generate headline
+      const res = await fetch('/api/generate/headline', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ticker }),
       });
       
       const data = await res.json();
-      if (!res.ok || !data.story) throw new Error(data.error || 'Failed to generate WGO No News story');
-      setArticle(data.story);
+      if (!res.ok || !data.headline) throw new Error(data.error || 'Failed to generate headline');
+      
+      setStoryComponents(prev => ({ ...prev, headline: data.headline }));
+      setCurrentStep(1);
+      setArticle(data.headline);
     } catch (err: any) {
-      setGenError(err.message || 'Failed to generate WGO No News story');
+      setGenError(err.message || 'Failed to generate headline');
     } finally {
       setGeneratingWGONoNews(false);
       setLoadingStory(false);
@@ -228,10 +250,69 @@ export default function PRStoryGeneratorPage() {
       const data = await res.json();
       if (!res.ok || !data.story) throw new Error(data.error || 'Failed to add analyst ratings');
       setArticle(data.story);
+      setCurrentStep(4); // Increment to step 4 to show "Add Context" button
     } catch (err: any) {
       setAnalystRatingsError(err.message || 'Failed to add analyst ratings');
     } finally {
       setLoadingAnalystRatings(false);
+    }
+  };
+
+  const addLeadParagraph = async () => {
+    if (!storyComponents.headline) {
+      setGenError('No headline to add lead paragraph to');
+      return;
+    }
+    
+    setLoadingStory(true);
+    setGenError('');
+    
+    try {
+      const res = await fetch('/api/generate/lead-paragraph', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ticker }),
+      });
+      
+      const data = await res.json();
+      if (!res.ok || !data.lead) throw new Error(data.error || 'Failed to generate lead paragraph');
+      
+      setStoryComponents(prev => ({ ...prev, lead: data.lead }));
+      setCurrentStep(2);
+      setArticle(prev => `${prev}\n\n${data.lead}`);
+    } catch (err: any) {
+      setGenError(err.message || 'Failed to generate lead paragraph');
+    } finally {
+      setLoadingStory(false);
+    }
+  };
+
+  const addTechnicalAnalysis = async () => {
+    if (!storyComponents.lead) {
+      setGenError('No lead paragraph to add technical analysis to');
+      return;
+    }
+    
+    setLoadingStory(true);
+    setGenError('');
+    
+    try {
+      const res = await fetch('/api/generate/technical-analysis', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ticker }),
+      });
+      
+      const data = await res.json();
+      if (!res.ok || !data.technicalAnalysis) throw new Error(data.error || 'Failed to generate technical analysis');
+      
+      setStoryComponents(prev => ({ ...prev, technical: data.technicalAnalysis }));
+      setCurrentStep(3);
+      setArticle(prev => `${prev}\n\n${data.technicalAnalysis}`);
+    } catch (err: any) {
+      setGenError(err.message || 'Failed to generate technical analysis');
+    } finally {
+      setLoadingStory(false);
     }
   };
 
@@ -547,64 +628,63 @@ export default function PRStoryGeneratorPage() {
 
   // Add context from recent Benzinga article
   const addContext = async () => {
-    if (!ticker.trim() || !article.trim()) {
-      setContextError('Ticker and generated article are required');
+    if (!article) {
+      setContextError('No existing story to add context to');
       return;
     }
     
-    setContextError('');
     setLoadingContext(true);
+    setContextError('');
     
     try {
       const res = await fetch('/api/generate/add-context', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          ticker,
-          currentArticle: article 
-        }),
+        body: JSON.stringify({ ticker, existingStory: article }),
       });
       
       const data = await res.json();
-      if (data.error) {
-        setContextError(data.error);
-      } else if (data.updatedArticle) {
-        setArticle(data.updatedArticle);
-      }
-    } catch (error) {
-      setContextError('Failed to add context.');
+      if (!res.ok || !data.story) throw new Error(data.error || 'Failed to add context');
+      setArticle(data.story);
+      setCurrentStep(5); // Increment to step 5 to show "Finalize WGO No News" button
+    } catch (err: any) {
+      setContextError(err.message || 'Failed to add context');
     } finally {
       setLoadingContext(false);
     }
   };
 
   const addWGOContext = async () => {
-    if (!ticker.trim() || !article.trim()) {
-      setWgoContextError('Ticker and generated article are required');
+    if (!article) {
+      setWgoContextError('No existing story to add WGO context to');
       return;
     }
     
-    setWgoContextError('');
     setLoadingWGOContext(true);
+    setWgoContextError('');
     
     try {
+      console.log('Sending Finalize request with ticker:', ticker);
       const res = await fetch('/api/generate/add-wgo-context', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          ticker,
-          currentArticle: article 
-        }),
+        body: JSON.stringify({ ticker, existingStory: article }),
       });
       
       const data = await res.json();
-      if (data.error) {
-        setWgoContextError(data.error);
-      } else if (data.updatedArticle) {
-        setArticle(data.updatedArticle);
+      console.log('Finalize response:', data);
+      
+      if (!res.ok || !data.story) {
+        console.error('Finalize failed:', data.error);
+        throw new Error(data.error || 'Failed to add WGO context');
       }
-    } catch (error) {
-      setWgoContextError('Failed to add WGO context.');
+      
+      console.log('Setting article with new story length:', data.story.length);
+      setArticle(data.story);
+      setCurrentStep(6); // Increment to step 6 to indicate story is complete
+    } catch (err: any) {
+      console.error('Finalize error:', err);
+      setWgoContextError(err.message || 'Failed to add WGO context');
     } finally {
       setLoadingWGOContext(false);
     }
@@ -1067,51 +1147,91 @@ export default function PRStoryGeneratorPage() {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
             <h2>Generated Article</h2>
             <div style={{ display: 'flex', gap: 10 }}>
-              <button
-                onClick={addContext}
-                disabled={loadingContext}
-                style={{ 
-                  padding: '8px 16px', 
-                  background: loadingContext ? '#6b7280' : '#dc2626', 
-                  color: 'white', 
-                  border: 'none', 
-                  borderRadius: 4,
-                  fontSize: 14,
-                  cursor: loadingContext ? 'not-allowed' : 'pointer'
-                }}
-              >
-                {loadingContext ? 'Adding Context...' : 'Add Context'}
-              </button>
-              <button
-                onClick={addAnalystRatings}
-                disabled={loadingAnalystRatings}
-                style={{ 
-                  padding: '8px 16px', 
-                  background: loadingAnalystRatings ? '#6b7280' : '#059669', 
-                  color: 'white', 
-                  border: 'none', 
-                  borderRadius: 4,
-                  fontSize: 14,
-                  cursor: loadingAnalystRatings ? 'not-allowed' : 'pointer'
-                }}
-              >
-                {loadingAnalystRatings ? 'Adding Analyst Ratings...' : 'Add Analyst Ratings'}
-              </button>
-              <button
-                onClick={addWGOContext}
-                disabled={loadingWGOContext}
-                style={{ 
-                  padding: '8px 16px', 
-                  background: loadingWGOContext ? '#6b7280' : '#7c3aed', 
-                  color: 'white', 
-                  border: 'none', 
-                  borderRadius: 4,
-                  fontSize: 14,
-                  cursor: loadingWGOContext ? 'not-allowed' : 'pointer'
-                }}
-              >
-                {loadingWGOContext ? 'Finalizing WGO No News...' : 'Finalize WGO No News'}
-              </button>
+              {currentStep >= 1 && (
+                <button
+                  onClick={addLeadParagraph}
+                  disabled={loadingStory}
+                  style={{ 
+                    padding: '8px 16px', 
+                    background: loadingStory ? '#6b7280' : '#7c3aed', 
+                    color: 'white', 
+                    border: 'none', 
+                    borderRadius: 4,
+                    fontSize: 14,
+                    cursor: loadingStory ? 'not-allowed' : 'pointer'
+                  }}
+                >
+                  {loadingStory ? 'Generating Lead Paragraph...' : 'Add Lead Paragraph'}
+                </button>
+              )}
+              {currentStep >= 2 && (
+                <button
+                  onClick={addTechnicalAnalysis}
+                  disabled={loadingStory}
+                  style={{ 
+                    padding: '8px 16px', 
+                    background: loadingStory ? '#6b7280' : '#059669', 
+                    color: 'white', 
+                    border: 'none', 
+                    borderRadius: 4,
+                    fontSize: 14,
+                    cursor: loadingStory ? 'not-allowed' : 'pointer'
+                  }}
+                >
+                  {loadingStory ? 'Generating Technical Analysis...' : 'Add Technical Analysis'}
+                </button>
+              )}
+              {currentStep >= 3 && (
+                <button
+                  onClick={addAnalystRatings}
+                  disabled={loadingAnalystRatings}
+                  style={{ 
+                    padding: '8px 16px', 
+                    background: loadingAnalystRatings ? '#6b7280' : '#059669', 
+                    color: 'white', 
+                    border: 'none', 
+                    borderRadius: 4,
+                    fontSize: 14,
+                    cursor: loadingAnalystRatings ? 'not-allowed' : 'pointer'
+                  }}
+                >
+                  {loadingAnalystRatings ? 'Adding Analyst Ratings...' : 'Add Analyst Ratings'}
+                </button>
+              )}
+              {currentStep >= 4 && (
+                <button
+                  onClick={addContext}
+                  disabled={loadingContext}
+                  style={{ 
+                    padding: '8px 16px', 
+                    background: loadingContext ? '#6b7280' : '#dc2626', 
+                    color: 'white', 
+                    border: 'none', 
+                    borderRadius: 4,
+                    fontSize: 14,
+                    cursor: loadingContext ? 'not-allowed' : 'pointer'
+                  }}
+                >
+                  {loadingContext ? 'Adding Context...' : 'Add Context'}
+                </button>
+              )}
+              {currentStep >= 5 && (
+                <button
+                  onClick={addWGOContext}
+                  disabled={loadingWGOContext}
+                  style={{ 
+                    padding: '8px 16px', 
+                    background: loadingWGOContext ? '#6b7280' : '#7c3aed', 
+                    color: 'white', 
+                    border: 'none', 
+                    borderRadius: 4,
+                    fontSize: 14,
+                    cursor: loadingWGOContext ? 'not-allowed' : 'pointer'
+                  }}
+                >
+                  {loadingWGOContext ? 'Finalizing WGO No News...' : 'Finalize WGO No News'}
+                </button>
+              )}
               <button
                 onClick={handleCopyArticle}
                 style={{ 

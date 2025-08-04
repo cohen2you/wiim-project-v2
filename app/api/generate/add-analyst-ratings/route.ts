@@ -93,7 +93,7 @@ ${analystSection}
 TASK: Add an analyst ratings section to the existing story.
 
 INSTRUCTIONS:
-1. Insert the analyst ratings section AFTER the lead paragraph and BEFORE the technical analysis section
+1. Insert the analyst ratings section AFTER the technical analysis section and BEFORE any news context
 2. Use the EXACT firm names and ratings from the data provided above
 3. Format as: "Analyst ratings remain strong, with [EXACT FIRM NAME] maintaining [EXACT RATING] rating with $[EXACT PRICE] price target, [EXACT FIRM NAME] maintaining [EXACT RATING] rating with $[EXACT PRICE] price target"
 4. DO NOT use generic phrases like "a prominent financial firm" or "another firm"
@@ -104,7 +104,7 @@ INSTRUCTIONS:
 
 EXAMPLE: If the data shows "Morgan Stanley maintains Buy rating with $810 price target", your output should be "Morgan Stanley maintains Buy rating with $810 price target" (not "[FIRM NAME] maintains Buy rating with $810 price target")
 
-Add the analyst ratings section to the existing story now.`;
+Add the analyst ratings section after the technical analysis section now.`;
 
     const completion = await openai.chat.completions.create({
       model: 'gpt-4o-mini',

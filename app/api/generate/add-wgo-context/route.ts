@@ -63,95 +63,200 @@ async function fetchRelatedArticles(ticker: string, excludeUrl?: string): Promis
 
 export async function POST(request: Request) {
   try {
-    const { ticker, currentArticle } = await request.json();
+    const { ticker, existingStory } = await request.json();
+    console.log('Finalize request received for ticker:', ticker);
+    console.log('Existing story length:', existingStory?.length);
     
-    if (!ticker || !currentArticle) {
-      return NextResponse.json({ error: 'Ticker and current article are required.' }, { status: 400 });
+    if (!ticker || !existingStory) {
+      return NextResponse.json({ error: 'Ticker and existing story are required.' }, { status: 400 });
     }
 
-    // Fetch related articles for context
+    // Fetch related articles for context (needed for the Read Next link)
     const relatedArticles = await fetchRelatedArticles(ticker);
+    console.log('Found related articles:', relatedArticles.length);
     
     if (relatedArticles.length < 2) {
       return NextResponse.json({ error: 'Not enough related articles found for context.' }, { status: 404 });
     }
 
-    // Intelligently integrate the articles into the existing story
-    const prompt = `
-You are a professional financial journalist. Take the existing technical story and intelligently integrate content from two recent Benzinga articles to enhance the narrative with relevant news context.
+    // Condense and polish the story to 350-400 words while preserving all elements
+    const condensationPrompt = `
+You are a professional financial journalist. Take the existing story and AGGRESSIVELY condense it to exactly 350-400 words while preserving all hyperlinks, structure, and formatting.
 
-EXISTING TECHNICAL STORY (DO NOT CHANGE THE BASIC STRUCTURE):
-${currentArticle}
+EXISTING STORY:
+${existingStory}
 
-ARTICLE 1 TO INTEGRATE:
-Headline: ${relatedArticles[0].headline}
-Content: ${relatedArticles[0].body}
-URL: ${relatedArticles[0].url}
+CRITICAL TASK: AGGRESSIVELY condense this story to exactly 350-400 words total. Be RUTHLESS in cutting content.
 
-ARTICLE 2 TO INTEGRATE:
-Headline: ${relatedArticles[1].headline}
-Content: ${relatedArticles[1].body}
-URL: ${relatedArticles[1].url}
+CONDENSATION RULES:
+1. **MANDATORY WORD COUNT**: The final story MUST be 350-400 words - NO EXCEPTIONS
+2. **PRESERVE ALL ELEMENTS**: Keep headline, lead, technical analysis, analyst ratings, "Also Read" line, price action line, and "Read Next" link
+3. **PRESERVE HYPERLINKS**: Keep ALL existing hyperlinks in their current positions
+4. **AGGRESSIVE CUTTING**: Remove redundant information, combine similar points, eliminate unnecessary details
+5. **STREAMLINE SENTENCES**: Make every sentence more concise and impactful
+6. **TWO-SENTENCE PARAGRAPHS**: Ensure no paragraph exceeds 2 sentences
+7. **PRESERVE FORMATTING**: Keep HTML formatting and hyperlink structure intact
 
-TASK: Enhance the existing story by thoughtfully integrating content from both articles:
+WHAT TO CUT/COMBINE:
+- **Redundant technical details**: Combine similar technical points into single sentences
+- **Repetitive analyst commentary**: Keep only the most essential analyst ratings
+- **Excessive market context**: Streamline background information
+- **Verbose explanations**: Make explanations more direct and concise
+- **Similar data points**: Combine related price levels and indicators
+- **Unnecessary qualifiers**: Remove "may", "could", "potentially" when possible
+- **Repetitive phrases**: Eliminate redundant language
 
-1. **CONTENT INTEGRATION**:
-   - You may add AT MOST TWO SHORT SENTENCES (no more than 20 words each) of content from each Benzinga article (maximum four sentences total)
-   - The added information must be thoughtfully woven into the existing data-driven narrative, not just appended or inserted as blocks
-   - The integration should support or enhance the technical analysis, not distract from it
-   - Do NOT add standalone lines, new paragraphs, or sentences whose sole purpose is to contain a hyperlink (e.g., 'Read more about X here.' or 'Explore Y here.' are strictly forbidden)
-   - Hyperlinks must be embedded naturally within otherwise meaningful sentences
+CONDENSATION STRATEGY:
+- **Lead paragraph**: Keep essential company name and movement, cut excessive context
+- **Technical analysis**: Combine similar indicators, keep only key levels
+- **"Also Read" line**: CRITICAL - DO NOT REMOVE. Keep exactly as is and place in the MIDDLE of the story (after technical analysis, before analyst ratings)
+- **Analyst ratings**: Keep only the most important ratings and targets
+- **Market context**: Streamline to essential points only
+- **Price action line**: Keep exactly as is at the bottom
+- **"Read Next" link**: Keep exactly as is at the very bottom
 
-2. **HYPERLINK PLACEMENT**:
-   - Add exactly 2 hyperlinks using the provided URLs
-   - Each hyperlink must be embedded NATURALLY within a sentence (never as its own line)
-   - Place one hyperlink in the FIRST or SECOND paragraph (near the top of the story)
-   - Place one hyperlink in a middle paragraph (paragraphs 3-5)
-   - Use HTML format: <a href="URL">relevant phrase</a>
-   - DO NOT place both hyperlinks at the bottom of the story
-   - Distribute hyperlinks throughout the content for better user experience
+CORRECT STORY STRUCTURE:
+1. Headline
+2. Lead paragraph (2 sentences max)
+3. Technical analysis (condensed)
+4. "Also Read" line (in the MIDDLE) - DO NOT REMOVE
+5. Analyst ratings (condensed)
+6. Price action line (at bottom)
+7. "Read Next" link (at very bottom)
 
-3. **INTEGRATION GUIDELINES**:
-   - Maintain the technical focus while adding news context
-   - Keep the existing structure and flow
-   - Add or enhance sentences with relevant news content, but keep the story concise
-   - Make the integration feel natural and seamless
-   - Do not create separate 'Also Read' or 'Read Next' sections
-   - Preserve the price action line at the bottom
-   - CRITICAL: Place hyperlinks in the top/middle sections, NOT at the bottom
-   - Ensure hyperlinks are distributed throughout the story for better engagement
-   - MAINTAIN THE TWO-SENTENCE PER PARAGRAPH RULE: No paragraph should exceed two sentences
+EXAMPLE CONDENSATION:
+Before: "The stock's upward movement was supported by a favorable technical setup, indicating strong buying interest as the U.S. prepares to announce semiconductor import probe results in two weeks, potentially impacting the industry due to national security concerns."
+After: "The stock's upward movement reflects strong buying interest amid semiconductor import probe developments."
 
-4. **CONTENT SELECTION**:
-   - Choose the most relevant and impactful information from each article
-   - Focus on facts, quotes, and insights that enhance the technical story
-   - Avoid repetitive or conflicting information
-   - Prioritize information that explains or supports the price action
+VERIFICATION: The final story must contain:
+- Headline
+- Lead paragraph (2 sentences max)
+- Technical analysis (condensed)
+- "Also Read" line (in the MIDDLE of the story) - CRITICAL ELEMENT
+- Analyst ratings (condensed)
+- Price action line (at bottom)
+- "Read Next" link (at very bottom)
 
-5. **WRITING STYLE**:
-   - Maintain professional journalistic tone
-   - Keep paragraphs concise and impactful
-   - Use active voice and strong verbs
-   - Ensure smooth transitions between technical analysis and news content
-   - The final story should remain concise and focused on the data-driven narrative
+CRITICAL: The "Also Read" line must be preserved. If you remove it, you have failed the task.
 
-Enhance the existing story by integrating the article content and adding the hyperlinks naturally.`;
+Be RUTHLESS in cutting. If the story is still over 400 words, you have failed the task.
 
-    const completion = await openai.chat.completions.create({
+Return the AGGRESSIVELY condensed story (350-400 words) with all elements preserved in the correct order:`;
+
+    const condensationCompletion = await openai.chat.completions.create({
       model: 'gpt-4o',
-      messages: [{ role: 'user', content: prompt }],
-      max_tokens: 2500,
-      temperature: 0.3, // Lower temperature for more consistent integration
+      messages: [{ role: 'user', content: condensationPrompt }],
+      max_tokens: 2000,
+      temperature: 0.3,
     });
 
-    const enhancedArticle = completion.choices[0].message?.content?.trim() || '';
+    const condensedStory = condensationCompletion.choices[0].message?.content?.trim() || existingStory;
+    console.log('Condensed story length:', condensedStory.length);
 
-    if (!enhancedArticle) {
-      return NextResponse.json({ error: 'Failed to enhance article with context.' }, { status: 500 });
+    // Check if "Also Read" line is missing and add it back if needed
+    if (!condensedStory.includes('Also Read:')) {
+      console.log('Also Read line missing, adding it back...');
+      // Find the "Also Read" line in the original story
+      const alsoReadMatch = existingStory.match(/Also Read:.*?(?=\n\n|\n[A-Z]|$)/);
+      if (alsoReadMatch) {
+        const alsoReadLine = alsoReadMatch[0].trim();
+        // Insert it after technical analysis (before analyst ratings)
+        const parts = condensedStory.split('\n\n');
+        const insertIndex = Math.min(3, parts.length - 2); // Insert after technical analysis
+        parts.splice(insertIndex, 0, alsoReadLine);
+        const finalStory = parts.join('\n\n');
+        console.log('Final story length with Also Read restored:', finalStory.length);
+        
+        return NextResponse.json({ 
+          story: finalStory,
+          relatedArticles: relatedArticles.map(article => ({
+            headline: article.headline,
+            url: article.url
+          }))
+        });
+      }
     }
 
+    // Enforce two-sentence paragraph rule and ensure proper hyperlinking
+    const enforceRulesPrompt = `
+Take this story and ensure:
+1. NO paragraph exceeds 2 sentences
+2. The "Also Read" line is properly hyperlinked (without **)
+3. Remove detailed price information from the lead paragraph
+4. All other formatting is preserved
+
+STORY TO FIX:
+${condensedStory}
+
+RULES:
+- Break any paragraph with more than 2 sentences into multiple paragraphs
+- Ensure "Also Read:" line has the headline hyperlinked (not the whole line) and remove any ** formatting
+- Remove specific price details from the lead paragraph (current price, change, high/low) - these belong in the price action line
+- Keep all other hyperlinks and formatting intact
+- Maintain the story structure and flow
+
+EXAMPLE FIXES:
+- "Also Read:**" should become "Also Read:"
+- Lead paragraph should not include specific prices like "$179.04, up $5.33, nearing a high of $179.81"
+- Lead paragraph should focus on movement and context, not specific price data
+
+Return the corrected story:`;
+
+    const rulesCompletion = await openai.chat.completions.create({
+      model: 'gpt-4o',
+      messages: [{ role: 'user', content: enforceRulesPrompt }],
+      max_tokens: 2000,
+      temperature: 0.2,
+    });
+
+    const correctedStory = rulesCompletion.choices[0].message?.content?.trim() || condensedStory;
+    console.log('Final story length after rule enforcement:', correctedStory.length);
+
+    // If the story is still too long, do a second aggressive cut
+    if (correctedStory.length > 2500) {
+      console.log('Story still too long, doing second cut...');
+      const secondCutPrompt = `
+The story is still too long. Make a FINAL aggressive cut to get it to 350-400 words maximum.
+
+STORY TO CUT:
+${correctedStory}
+
+RULES:
+- Cut to 350-400 words MAXIMUM
+- Keep all hyperlinks and structural elements
+- Be extremely aggressive in cutting
+- Combine sentences, remove redundancy
+- Keep only the most essential information
+- CRITICAL: Preserve the "Also Read" line with proper hyperlinking (remove any ** formatting)
+- ENFORCE: No paragraph longer than 2 sentences
+- REMOVE: Specific price details from lead paragraph (current price, change, high/low)
+- LEAD PARAGRAPH: Should focus on movement and context, not specific price data
+
+Return the FINAL condensed story:`;
+
+      const secondCutCompletion = await openai.chat.completions.create({
+        model: 'gpt-4o',
+        messages: [{ role: 'user', content: secondCutPrompt }],
+        max_tokens: 1500,
+        temperature: 0.2,
+      });
+
+      const finalStory = secondCutCompletion.choices[0].message?.content?.trim() || correctedStory;
+      console.log('Final story length after second cut:', finalStory.length);
+      
+      return NextResponse.json({ 
+        story: finalStory,
+        relatedArticles: relatedArticles.map(article => ({
+          headline: article.headline,
+          url: article.url
+        }))
+      });
+    }
+
+    console.log('Final story length:', correctedStory.length);
+
     return NextResponse.json({ 
-      updatedArticle: enhancedArticle,
+      story: correctedStory,
       relatedArticles: relatedArticles.map(article => ({
         headline: article.headline,
         url: article.url
@@ -161,4 +266,63 @@ Enhance the existing story by integrating the article content and adding the hyp
     console.error('Error adding WGO context:', error);
     return NextResponse.json({ error: error.message || 'Failed to add WGO context.' }, { status: 500 });
   }
+}
+
+// Helper function to fetch price data
+async function fetchPriceData(ticker: string) {
+  try {
+    const response = await fetch(`https://api.benzinga.com/api/v2/quoteDelayed?token=${BENZINGA_API_KEY}&symbols=${encodeURIComponent(ticker)}`);
+    
+    if (!response.ok) {
+      console.error('Failed to fetch price data');
+      return null;
+    }
+    
+    const data = await response.json();
+    if (data && typeof data === 'object') {
+      const quote = data[ticker.toUpperCase()];
+      if (quote && typeof quote === 'object') {
+        return {
+          last: quote.lastTradePrice || 0,
+          change: quote.change || 0,
+          change_percent: quote.changePercent || 0,
+          volume: quote.volume || 0,
+          high: quote.high || 0,
+          low: quote.low || 0,
+          open: quote.open || 0
+        };
+      }
+    }
+    return null;
+  } catch (error) {
+    console.error('Error fetching price data:', error);
+    return null;
+  }
+}
+
+// Helper function to generate price action line
+function generatePriceActionLine(ticker: string, priceData: any) {
+  if (!priceData) {
+    return `${ticker} Price Action: ${ticker} shares were trading during regular market hours, according to <a href="https://pro.benzinga.com">Benzinga Pro</a>.`;
+  }
+  
+  const last = parseFloat(priceData.last || 0).toFixed(2);
+  const change = parseFloat(priceData.change || 0).toFixed(2);
+  const changePercent = parseFloat(priceData.change_percent || 0).toFixed(2);
+  
+  // Check if market is open (rough estimate - you might want to add proper market hours logic)
+  const now = new Date();
+  const isMarketOpen = now.getHours() >= 9 && now.getHours() < 16; // Simplified market hours
+  
+  if (isMarketOpen) {
+    return `${ticker} Price Action: ${ticker} shares were ${changePercent.startsWith('-') ? 'down' : 'up'} ${changePercent}% at $${last} during regular trading hours on ${getCurrentDayName()}, according to <a href="https://pro.benzinga.com">Benzinga Pro</a>.`;
+  } else {
+    return `${ticker} Price Action: ${ticker} shares ${changePercent.startsWith('-') ? 'fell' : 'rose'} ${changePercent}% to $${last} during regular trading hours on ${getCurrentDayName()}, according to <a href="https://pro.benzinga.com">Benzinga Pro</a>.`;
+  }
+}
+
+// Helper function to get current day name
+function getCurrentDayName() {
+  const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  return days[new Date().getDay()];
 } 

@@ -5,7 +5,7 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const BENZINGA_API_KEY = process.env.BENZINGA_API_KEY!;
 const BZ_NEWS_URL = 'https://api.benzinga.com/api/v2/news';
 
-async function fetchRecentArticle(ticker: string, excludeUrl?: string): Promise<any | null> {
+async function fetchRecentArticles(ticker: string): Promise<any[]> {
   try {
     const dateFrom = new Date();
     dateFrom.setDate(dateFrom.getDate() - 7);
@@ -19,13 +19,13 @@ async function fetchRecentArticle(ticker: string, excludeUrl?: string): Promise<
     
     if (!res.ok) {
       console.error('Benzinga API error:', await res.text());
-      return null;
+      return [];
     }
     
     const data = await res.json();
-    if (!Array.isArray(data) || data.length === 0) return null;
+    if (!Array.isArray(data) || data.length === 0) return [];
     
-    // Filter out press releases and the current article URL
+    // Filter out press releases
     const prChannelNames = ['press releases', 'press-releases', 'pressrelease', 'pr'];
     const normalize = (str: string) => str.toLowerCase().replace(/[-_]/g, ' ');
     
@@ -37,12 +37,6 @@ async function fetchRecentArticle(ticker: string, excludeUrl?: string): Promise<
         )) {
           return false;
         }
-        
-        // Exclude the current article URL if provided
-        if (excludeUrl && item.url === excludeUrl) {
-          return false;
-        }
-        
         return true;
       })
       .map((item: any) => ({
@@ -51,160 +45,183 @@ async function fetchRecentArticle(ticker: string, excludeUrl?: string): Promise<
         url: item.url,
         created: item.created,
       }))
-      .filter(item => item.body && item.body.length > 100); // Ensure there's substantial content
+      .filter(item => item.body && item.body.length > 100) // Ensure there's substantial content
+      .slice(0, 2); // Take only the first 2 articles
     
-    return recentArticles.length > 0 ? recentArticles[0] : null;
+    return recentArticles;
   } catch (error) {
-    console.error('Error fetching recent article:', error);
-    return null;
+    console.error('Error fetching recent articles:', error);
+    return [];
   }
 }
 
 export async function POST(request: Request) {
   try {
-    const { ticker, currentArticle } = await request.json();
+    const { ticker, existingStory } = await request.json();
     
-    if (!ticker || !currentArticle) {
-      return NextResponse.json({ error: 'Ticker and current article are required.' }, { status: 400 });
+    if (!ticker || !existingStory) {
+      return NextResponse.json({ error: 'Ticker and existing story are required.' }, { status: 400 });
     }
 
-    // Fetch a recent article for context
-    const recentArticle = await fetchRecentArticle(ticker);
+    // Fetch two recent articles for context
+    const recentArticles = await fetchRecentArticles(ticker);
     
-    if (!recentArticle) {
+    if (recentArticles.length === 0) {
       return NextResponse.json({ error: 'No recent articles found for context.' }, { status: 404 });
     }
 
-    // Generate condensed context using OpenAI
+    // Get current price data for the price action line
+    const priceData = await fetchPriceData(ticker);
+
+    // Prepare article data for the prompt
+    const articlesData = recentArticles.map((article, index) => 
+      `Article ${index + 1}:
+Headline: ${article.headline}
+Content: ${article.body}
+URL: ${article.url}`
+    ).join('\n\n');
+
+    // Generate enhanced story with integrated context
     const prompt = `
-You are a financial journalist. Given the current article and a recent news article about the same ticker, create 2 very concise paragraphs that add relevant context to the current article.
+You are a financial journalist. You have an existing story and two recent news articles about the same ticker. Your task is to intelligently integrate content from these articles into the existing story.
 
-Current Article:
-${currentArticle}
+EXISTING STORY:
+${existingStory}
 
-Recent News Article:
-Headline: ${recentArticle.headline}
-Content: ${recentArticle.body}
+RECENT ARTICLES:
+${articlesData}
 
-Requirements:
-1. Create exactly 2 paragraphs that provide additional context
-2. Make the content relevant to the current article's topic
-3. Keep each paragraph to EXACTLY 2 sentences maximum - no more, no less
-4. You MUST include exactly one hyperlink ONLY in the FIRST paragraph using this exact format: <a href="${recentArticle.url}">[three word phrase]</a>
-5. The SECOND paragraph should have NO hyperlinks
-6. Make the content flow naturally with the current article
-7. Focus on providing valuable context that enhances the reader's understanding
-8. Use AP style and maintain a professional tone
-9. Keep paragraphs short and impactful - aim for 1-2 sentences each
-10. The hyperlink should be embedded within existing words in the text, not as "[source]" at the end
-11. Choose relevant three-word phrases within the sentences to hyperlink, such as company names, key terms, or action phrases
-12. CRITICAL: ONLY the first paragraph should contain exactly one hyperlink in the format specified above
-13. Do NOT reference "a recent article" or similar phrases - just embed the hyperlink naturally in the existing sentence structure
-14. Ensure proper spacing between paragraphs - add double line breaks between paragraphs
+CRITICAL TASK: You MUST integrate content from BOTH articles with EXACTLY 2 hyperlinks total AND add a standalone "Also Read" line.
 
-Write the 2 context paragraphs now:`;
+INSTRUCTIONS:
+1. Review the existing story and identify where to integrate content from the two articles
+2. Place ONE hyperlink from Article 1 in the FIRST or SECOND paragraph of the story
+3. Place ONE hyperlink from Article 2 in a MIDDLE paragraph (paragraphs 3-5) of the story
+4. Each integration should be MAXIMUM 2 sentences from each article source
+5. Weave the content naturally into existing paragraphs - do NOT create standalone hyperlink lines
+6. Use this exact hyperlink format: <a href="[URL]">[three word phrase]</a>
+7. Maintain the two-sentence-per-paragraph rule throughout
+8. Focus on technical data, market context, or relevant business developments
+9. Make the integrations feel natural and enhance the story's flow
+10. Do NOT reference "recent articles" or similar phrases - just embed the hyperlinks naturally
+11. Ensure all prices are formatted to exactly 2 decimal places
+
+MANDATORY HYPERLINK REQUIREMENTS:
+- Article 1 URL: ${recentArticles[0].url} - MUST be used in paragraph 1 or 2
+- Article 2 URL: ${recentArticles[1].url} - MUST be used in paragraph 3, 4, or 5
+- Both hyperlinks must be embedded naturally in the text
+- YOU MUST INCLUDE EXACTLY 2 HYPERLINKS - ONE FROM EACH ARTICLE
+- DO NOT SKIP EITHER ARTICLE - BOTH MUST BE USED
+- If you only include 1 hyperlink, you have failed the task
+
+ALSO READ LINE REQUIREMENT:
+- Add a standalone line in the middle of the story (paragraphs 3-5)
+- Format: "Also Read: <a href="${recentArticles[0].url}">${recentArticles[0].headline}</a>"
+- Place it between paragraphs, not integrated into text
+- This is in addition to the 2 integrated hyperlinks
+
+CRITICAL RULES:
+- Article 1 hyperlink goes in paragraph 1 or 2
+- Article 2 hyperlink goes in paragraph 3, 4, or 5
+- Maximum 2 sentences per article integration
+- No standalone hyperlink lines (except the "Also Read" line)
+- Maintain existing story structure and flow
+- Format all prices to exactly 2 decimal places
+
+VERIFICATION: Before submitting, count your hyperlinks. You must have exactly 2 integrated hyperlinks plus 1 "Also Read" line.
+
+Return the complete enhanced story with integrated context and "Also Read" line:`;
 
     const completion = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
       messages: [{ role: 'user', content: prompt }],
-      max_tokens: 300,
+      max_tokens: 2000,
       temperature: 0.7,
     });
 
-    const contextParagraphs = completion.choices[0].message?.content?.trim() || '';
+    const enhancedStory = completion.choices[0].message?.content?.trim() || '';
 
-    if (!contextParagraphs) {
-      return NextResponse.json({ error: 'Failed to generate context.' }, { status: 500 });
+    if (!enhancedStory) {
+      return NextResponse.json({ error: 'Failed to generate enhanced story.' }, { status: 500 });
     }
 
-    // Ensure proper spacing between paragraphs
-    const formattedContextParagraphs = contextParagraphs
-      .replace(/\n\n+/g, '\n\n') // Normalize multiple line breaks to double
-      .replace(/\n([^<])/g, '\n\n$1') // Ensure paragraphs are separated by double line breaks
-      .replace(/([^>])\n\n([^<])/g, '$1\n\n$2'); // Ensure proper spacing around HTML tags
-
-    // Insert context paragraphs above the price action line
-    let updatedArticle = currentArticle;
+    // Add price action line at the bottom
+    const priceActionLine = generatePriceActionLine(ticker, priceData);
     
-    // Split the article into lines to find the price action section
-    const lines = currentArticle.split('\n');
-    const priceActionIndex = lines.findIndex((line: string) => 
-      line.includes('Price Action:') || 
-      line.includes('<strong>') && line.includes('Price Action:') ||
-      line.includes('Price Action')
-    );
+    // Add Read Next link (only headline hyperlinked)
+    const readNextLink = `Read Next: <a href="${recentArticles[1].url}">${recentArticles[1].headline}</a>`;
     
-    // Generate subhead first
-    let contextSubhead = '';
-    try {
-      const contextSubheadPrompt = `
-You are a top-tier financial journalist. Given the context that was just added to the article, create exactly 1 compelling subhead that introduces the context section.
-
-The context section provides additional background information and relevant details about the ticker.
-
-CONTEXT PARAGRAPHS TO BASE SUBHEAD ON:
-${formattedContextParagraphs}
-
-Requirements:
-- Create exactly 1 standalone mini headline
-- Make it 4-8 words maximum for maximum impact
-- Make it highly engaging and clickable
-- Focus on the context/additional information aspect
-- Use strong, active language that conveys authority
-- Capitalize the first letter of every word
-- Make it relevant to the context being added
-- Do NOT include quotes around the subhead
-- Make it specific to the actual context content, not generic
-- Base it on the specific details in the context paragraphs above
-- The subhead should directly relate to the main topic discussed in the context paragraphs
-
-Examples of good context subheads:
-- "Regulatory Compliance Strategy"
-- "App Store Policy Changes"
-- "Investor Confidence Factors"
-- "Market Positioning Tactics"
-- "Competitive Edge Measures"
-
-Create 1 subhead for the context section:`;
-
-      const contextSubheadCompletion = await openai.chat.completions.create({
-        model: 'gpt-4o-mini',
-        messages: [{ role: 'user', content: contextSubheadPrompt }],
-        max_tokens: 50,
-        temperature: 0.7,
-      });
-
-      contextSubhead = contextSubheadCompletion.choices[0].message?.content?.trim() || '';
-      if (contextSubhead) {
-        contextSubhead = contextSubhead.replace(/\*\*/g, '').replace(/^##\s*/, '').replace(/^["']|["']$/g, '').trim();
-      }
-    } catch (error) {
-      console.error('Error generating context subhead:', error);
-    }
-
-    // Insert context and subhead together
-    let updatedArticleWithSubheads = currentArticle;
-    if (priceActionIndex !== -1) {
-      // Insert context and subhead before the price action line
-      const beforePriceAction = lines.slice(0, priceActionIndex).join('\n');
-      const priceActionAndAfter = lines.slice(priceActionIndex).join('\n');
-      const subheadSection = contextSubhead ? `${contextSubhead}\n\n\n${formattedContextParagraphs}` : formattedContextParagraphs;
-      updatedArticleWithSubheads = `${beforePriceAction}\n\n${subheadSection}\n\n${priceActionAndAfter}`;
-    } else {
-      // If no price action found, add to the end
-      const subheadSection = contextSubhead ? `${contextSubhead}\n\n\n${formattedContextParagraphs}` : formattedContextParagraphs;
-      updatedArticleWithSubheads = `${currentArticle}\n\n${subheadSection}`;
-    }
+    // Combine enhanced story with price action line and read next link
+    const completeStory = `${enhancedStory}\n\n${priceActionLine}\n\n${readNextLink}`;
     
     return NextResponse.json({ 
-      updatedArticle: updatedArticleWithSubheads,
-      contextSource: {
-        headline: recentArticle.headline,
-        url: recentArticle.url
-      }
+      story: completeStory,
+      contextSources: recentArticles.map(article => ({
+        headline: article.headline,
+        url: article.url
+      }))
     });
   } catch (error: any) {
     console.error('Error adding context:', error);
     return NextResponse.json({ error: error.message || 'Failed to add context.' }, { status: 500 });
   }
+}
+
+// Helper function to fetch price data
+async function fetchPriceData(ticker: string) {
+  try {
+    const response = await fetch(`https://api.benzinga.com/api/v2/quoteDelayed?token=${process.env.BENZINGA_API_KEY}&symbols=${encodeURIComponent(ticker)}`);
+    
+    if (!response.ok) {
+      console.error('Failed to fetch price data');
+      return null;
+    }
+    
+    const data = await response.json();
+    if (data && typeof data === 'object') {
+      const quote = data[ticker.toUpperCase()];
+      if (quote && typeof quote === 'object') {
+        return {
+          last: quote.lastTradePrice || 0,
+          change: quote.change || 0,
+          change_percent: quote.changePercent || 0,
+          volume: quote.volume || 0,
+          high: quote.high || 0,
+          low: quote.low || 0,
+          open: quote.open || 0
+        };
+      }
+    }
+    return null;
+  } catch (error) {
+    console.error('Error fetching price data:', error);
+    return null;
+  }
+}
+
+// Helper function to generate price action line
+function generatePriceActionLine(ticker: string, priceData: any) {
+  if (!priceData) {
+    return `${ticker} Price Action: ${ticker} shares were trading during regular market hours, according to <a href="https://pro.benzinga.com">Benzinga Pro</a>.`;
+  }
+  
+  const last = parseFloat(priceData.last || 0).toFixed(2);
+  const change = parseFloat(priceData.change || 0).toFixed(2);
+  const changePercent = parseFloat(priceData.change_percent || 0).toFixed(2);
+  
+  // Check if market is open (rough estimate)
+  const now = new Date();
+  const isMarketOpen = now.getHours() >= 9 && now.getHours() < 16;
+  
+  if (isMarketOpen) {
+    return `${ticker} Price Action: ${ticker} shares were ${changePercent.startsWith('-') ? 'down' : 'up'} ${changePercent}% at $${last} during regular trading hours on ${getCurrentDayName()}, according to <a href="https://pro.benzinga.com">Benzinga Pro</a>.`;
+  } else {
+    return `${ticker} Price Action: ${ticker} shares ${changePercent.startsWith('-') ? 'fell' : 'rose'} ${changePercent}% to $${last} during regular trading hours on ${getCurrentDayName()}, according to <a href="https://pro.benzinga.com">Benzinga Pro</a>.`;
+  }
+}
+
+// Helper function to get current day name
+function getCurrentDayName() {
+  const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  return days[new Date().getDay()];
 } 
