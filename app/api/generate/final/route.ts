@@ -33,8 +33,11 @@ export async function POST(req: Request) {
       secondaryOutlet: secondaryOutlet || '',
     });
 
-    // Add hyperlinks if URLs are provided
-    if (primaryUrl || secondaryUrl) {
+    // Check if the story already contains hyperlinks from context segment
+    const hasExistingHyperlinks = result.includes('<a href=');
+    
+    // Only add hyperlinks if URLs are provided AND no existing hyperlinks are present
+    if ((primaryUrl || secondaryUrl) && !hasExistingHyperlinks) {
       try {
         const hyperlinkRes = await fetch(`${req.headers.get('origin') || 'http://localhost:3000'}/api/add-hyperlinks`, {
           method: 'POST',
