@@ -77,7 +77,7 @@ TECHNICAL DATA TO USE:
 ${priceData ? `
 Current Price: $${parseFloat(priceData.last || 0).toFixed(2)}
 Change: $${parseFloat(priceData.change || 0).toFixed(2)}
-Change Percent: ${parseFloat(priceData.change_percent || 0).toFixed(2)}%
+Change Percent: ${parseFloat(priceData.changePercent || 0).toFixed(2)}%
 Volume: ${priceData.volume ? priceData.volume.toLocaleString() : 'N/A'}
 High: $${parseFloat(priceData.high || 0).toFixed(2)}
 Low: $${parseFloat(priceData.low || 0).toFixed(2)}
