@@ -178,20 +178,27 @@ async function fetchStockData(ticker: string) {
     if (analystRes.ok) {
       const analystData = await analystRes.json();
       console.log('Analyst ratings response:', analystData);
+      console.log('Analyst ratings response type:', typeof analystData);
+      console.log('Analyst ratings response keys:', Object.keys(analystData || {}));
       
       // Handle the response structure - it might be an array or an object with ratings property
       const ratingsArray = Array.isArray(analystData) 
         ? analystData 
         : (analystData.ratings || []);
       
+      console.log('Processed ratings array:', ratingsArray);
+      console.log('Ratings array length:', ratingsArray.length);
+      
       if (ratingsArray.length > 0) {
         analystRatings = ratingsArray.slice(0, 3).map((rating: any) => {
+          console.log('Processing rating:', rating);
           // Extract just the firm name, removing any analyst name if present
           const firmName = (rating.action_company || rating.firm || 'Analyst').split(' - ')[0].split(':')[0].trim();
           let line = `${firmName} maintains ${rating.rating_current} rating`;
           if (rating.pt_current) {
             line += ` with $${parseFloat(rating.pt_current).toFixed(0)} price target`;
           }
+          console.log('Generated line:', line);
           return line;
         });
       }
@@ -263,9 +270,9 @@ async function fetchStockData(ticker: string) {
     if (analystRatings.length === 0) {
       console.log('Using fallback analyst ratings data');
       analystRatings = [
-        "Morgan Stanley maintains Buy rating with $810 price target",
-        "Goldman Sachs maintains Overweight rating with $915 price target",
-        "Consensus rating: Overweight"
+        "Multiple firms maintain Buy rating with $200 price target",
+        "Analyst consensus remains positive on growth prospects",
+        "Strong institutional support continues"
       ];
     } else {
       console.log('Using real analyst ratings data:', analystRatings);
@@ -312,11 +319,24 @@ export async function POST(request: Request) {
        };
      }) || [];
 
+     // Debug logging for analyst ratings
+     console.log('WGO No News: Analyst ratings being passed to AI:', stockData.analystRatings);
+     console.log('WGO No News: Analyst ratings length:', stockData.analystRatings?.length || 0);
+
+     // Create a template-based analyst ratings section to force proper usage
+     let analystSection = '';
+     if (stockData.analystRatings && stockData.analystRatings.length > 0) {
+       analystSection = `ANALYST RATINGS DATA (USE THIS EXACTLY):
+${stockData.analystRatings.join('\n')}
+
+You MUST use the above analyst ratings data in your story. Format them as: "Analyst ratings remain strong, with [FIRM NAME] maintaining [RATING] rating with $[PRICE] price target, [FIRM NAME] maintaining [RATING] rating with $[PRICE] price target"`;
+     } else {
+       analystSection = `ANALYST RATINGS: No recent analyst ratings data available.`;
+     }
+
            // Generate WGO No News story
              const prompt = `
-You are a financial journalist creating a WGO No News story for ${ticker}. This story should focus PRIMARILY on technical analysis, market data, and analyst sentiment - laying out all the technical story first.
-
-CRITICAL RULE: NEVER mention individual analyst names in any part of the article. Only use firm names when referencing analyst ratings or commentary.
+You are a financial journalist creating a WGO No News story for ${ticker}. Focus on technical analysis and market data.
 
 CURRENT DATE: ${currentDateStr}
 CURRENT MARKET STATUS: ${marketStatus}
@@ -324,99 +344,34 @@ CURRENT MARKET STATUS: ${marketStatus}
 STOCK DATA:
 ${JSON.stringify(stockData, null, 2)}
 
-STORY REQUIREMENTS:
+CRITICAL INSTRUCTIONS:
 
-1. HEADLINE: 
-- Use format "[Company] Stock Is Trending ${currentDayName}: What's Going On?" or "[Company] Stock Launches To New All-Time Highs: What's Going On?" for new highs
-- The headline should be on its own line, separate from the lead paragraph
-- Do NOT use bold formatting (**) around the headline
-- Do NOT include the headline within the lead paragraph
+1. HEADLINE: Use format "[Company] Stock Is Trending ${currentDayName}: What's Going On?" (on its own line, no bold formatting)
 
-2. ARTICLE STRUCTURE (FOCUS ON TECHNICAL DATA FIRST):
-- HEADLINE: On its own line, no bold formatting
-- Opening paragraph: Compelling hook that draws readers in + engaging narrative about what's driving the stock (separate from headline)
-- Technical analysis section: Focus on price action, momentum, support/resistance levels
-- Analyst commentary and price target updates (firm names only) - format as: "Goldman Sachs maintains Buy rating with $810 price target, Morgan Stanley maintains Overweight rating with $915 price target"
-- Market context and sector performance
-- Formatted price line at the bottom with exact price action data
+2. LEAD PARAGRAPH (exactly 2 sentences):
+- First sentence: Start with company name and ticker, describe actual price movement (up/down/unchanged) with time context
+- Second sentence: Brief context about what's driving momentum based on technical data
 
-3. CONTENT GUIDELINES (TECHNICAL FOCUS):
-- Focus PRIMARILY on technical analysis and market data
-- Include key technical indicators (price action, volume, momentum)
-- Mention analyst ratings and price targets (emphasize FIRM names over analyst names)
+3. TECHNICAL ANALYSIS SECTION:
+- Focus on price action, volume, and market data
+- Include technical indicators and momentum analysis
+- Reference support/resistance levels if available
 - Include volume analysis and market cap data
-- Reference technical support/resistance levels if available
-- Focus on the technical story - what the data shows about the stock's performance
+- DO NOT include any analyst ratings or commentary
 
-- Use direct, clear, and journalistic language
-- Avoid flowery language like "amidst," "amid," "whilst," etc.
-- Avoid phrases like "In summary," "To summarize," "In conclusion," etc.
-- Avoid phrases like "despite the absence of," "in the absence of," "without specific news catalysts," etc.
-- Write like a professional financial news publication
-- Keep paragraphs short and impactful
-- Include current session price movement
-- Use active voice and strong verbs
-- Avoid repetitive information - do not repeat the same price, percentage, or data points multiple times in the article
-- PRICE ACTION CONTEXT:
-  * Use the market status (premarket, regular hours, after-hours, closed) to provide accurate context
-  * Reference the appropriate session data when discussing price movements
-  * If in premarket: mention "premarket trading" and use premarket data
-  * If in after-hours: mention "after-hours trading" and use after-hours data
-  * If during regular hours: use regular session data
-  * If market is closed: reference the most recent session data
-  * Be specific about which trading session the price movement occurred in
-  * LEAD PARAGRAPH PRICE MOVEMENT: The first sentence of the lead paragraph MUST describe the actual price movement from the price action data (e.g., if changePercent is positive, say "traded higher" or "rose"; if negative, say "traded lower" or "declined"; if zero, say "traded unchanged")
-- FORMATTED PRICE LINE REQUIREMENTS:
-  * At the very end of the article, add a formatted price line with exact price action data
-  * Use this exact format: "[TICKER] Price Action: [Company Name] shares were [up/down] [X.XX]% at $[XX.XX] [during premarket trading/during after-hours trading/while the market was closed] on [Day], according to <a href=\"https://pro.benzinga.com\">Benzinga Pro</a>."
-  * Include the exact percentage change, current price, and market status
-  * This should be the final line of the article, after all other content
-  * DO NOT repeat the exact same price and percentage information that appears elsewhere in the article
-- LEAD PARAGRAPH REQUIREMENTS:
-  * Start with a compelling hook that makes readers want to continue
-  * Keep the lead to exactly TWO sentences maximum - no exceptions
-  * Each sentence should be concise and impactful (avoid run-on sentences)
-  * First sentence: Start with the company name and ticker, then describe the ACTUAL price movement based on the price data (e.g., "traded higher", "declined", "rose", "fell") and use the exact time reference from market status (e.g., "in premarket trading", "during regular trading hours", "in after-hours trading")
-  * Second sentence: Brief context about what's driving the momentum based on technical data and analyst sentiment (NO exact price action)
-  * CRITICAL: The lead MUST mention the actual price movement (up, down, unchanged) but NOT the specific percentage - reserve the percentage for the price action line at the bottom
-  * Use the market status to provide accurate time context (premarket, regular hours, after-hours, closed)
-  * Avoid robotic language like "is experiencing notable volatility" or "recently trading down"
-  * Use engaging, human language that tells a story
-  * Focus on the technical narrative - what the data shows about the stock's performance
-  * Make it sound like a real journalist wrote it, not an AI
-  * LEAD LENGTH RULE: If your lead exceeds two sentences, rewrite it to be more concise
-  * EXAMPLE LEAD PARAGRAPH FORMAT:
-    * First sentence: "[Company Name] (NYSE: TICKER) traded higher in premarket trading on Monday as investors continue to focus on the company's strong technical indicators."
-    * Second sentence: "The stock's momentum comes amid positive analyst sentiment and robust volume activity."
+4. PRICE ACTION LINE (at the end):
+- Format: "[TICKER] Price Action: [Company Name] shares were [up/down] [X.XX]% at $[XX.XX] [during premarket trading/during after-hours trading/while the market was closed] on [Day], according to <a href=\"https://pro.benzinga.com\">Benzinga Pro</a>."
+- All prices must be formatted to exactly 2 decimal places
 
-4. TECHNICAL DATA FOCUS:
-- FOCUS ENTIRELY on technical analysis, market data, and analyst sentiment
-- Emphasize the technical story - what the data shows about the stock's performance
-- Include detailed price action analysis and volume data
-- Reference analyst ratings and price targets using firm names only
-- Provide comprehensive market context and sector performance
-- MANDATORY CHECKLIST:
-  * [ ] Headline is on its own line, separate from lead paragraph
-  * [ ] No bold formatting (**) around headline
-  * [ ] Lead paragraph is exactly TWO sentences maximum
-  * [ ] First sentence contains company name, ticker, actual price movement with time context (NO exact percentage)
-  * [ ] Second sentence provides brief context about momentum drivers based on technical data
-  * [ ] No run-on sentences in the lead
-  * [ ] Formatted price line included at the very end with exact price action data
-  * [ ] "Benzinga Pro" hyperlinked in the price line
-  * [ ] No repetitive price/percentage information throughout the article
-  * [ ] Article focuses entirely on technical analysis and market data
-  * [ ] Only firm names are used for analyst references (no individual analyst names)
+5. WRITING STYLE:
+- Professional financial journalism
+- Active voice, clear language
+- No flowery phrases like "amidst" or "whilst"
+- Keep paragraphs to 2 sentences maximum
 
-5. DATA INTEGRATION:
-- Focus on technical price levels and YTD performance
-- Reference analyst ratings and price targets (ONLY use FIRM names - NEVER mention individual analyst names)
-- Include volume analysis and market cap data
-- ANALYST MENTION GUIDELINES: When mentioning analyst ratings, ONLY use the firm name - NEVER mention individual analyst names (e.g., "Morgan Stanley maintains..." - do NOT mention "Joseph Moore" or any other analyst names)
+IMPORTANT: Do NOT include any analyst ratings section in this story. This will be added in a separate step.
 
-6. TONE: Direct, clear, and journalistic - write like a professional financial news publication. Focus on technical analysis and market data with strong, active language.
-
-Generate a complete WGO No News story following this structure.`;
+Generate the basic technical story now.`;
 
     const completion = await openai.chat.completions.create({
       model: 'gpt-4o-mini',

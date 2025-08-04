@@ -50,6 +50,8 @@ export default function PRStoryGeneratorPage() {
   const [contextError, setContextError] = useState('');
   const [loadingWGOContext, setLoadingWGOContext] = useState(false);
   const [wgoContextError, setWgoContextError] = useState('');
+  const [loadingAnalystRatings, setLoadingAnalystRatings] = useState(false);
+  const [analystRatingsError, setAnalystRatingsError] = useState('');
 
   // Client-only: Convert PR or Article HTML body to plain text when selected
   useEffect(() => {
@@ -204,6 +206,32 @@ export default function PRStoryGeneratorPage() {
     } finally {
       setGeneratingWGONoNews(false);
       setLoadingStory(false);
+    }
+  };
+
+  const addAnalystRatings = async () => {
+    if (!article) {
+      setAnalystRatingsError('No existing story to add analyst ratings to');
+      return;
+    }
+    
+    setLoadingAnalystRatings(true);
+    setAnalystRatingsError('');
+    
+    try {
+      const res = await fetch('/api/generate/add-analyst-ratings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ticker, existingStory: article }),
+      });
+      
+      const data = await res.json();
+      if (!res.ok || !data.story) throw new Error(data.error || 'Failed to add analyst ratings');
+      setArticle(data.story);
+    } catch (err: any) {
+      setAnalystRatingsError(err.message || 'Failed to add analyst ratings');
+    } finally {
+      setLoadingAnalystRatings(false);
     }
   };
 
@@ -1033,6 +1061,7 @@ export default function PRStoryGeneratorPage() {
       {genError && <div style={{ color: 'red', marginBottom: 10 }}>{genError}</div>}
       {contextError && <div style={{ color: 'red', marginBottom: 10 }}>{contextError}</div>}
       {wgoContextError && <div style={{ color: 'red', marginBottom: 10 }}>{wgoContextError}</div>}
+      {analystRatingsError && <div style={{ color: 'red', marginBottom: 10 }}>{analystRatingsError}</div>}
       {article && (
         <div style={{ marginBottom: 20 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
@@ -1052,6 +1081,21 @@ export default function PRStoryGeneratorPage() {
                 }}
               >
                 {loadingContext ? 'Adding Context...' : 'Add Context'}
+              </button>
+              <button
+                onClick={addAnalystRatings}
+                disabled={loadingAnalystRatings}
+                style={{ 
+                  padding: '8px 16px', 
+                  background: loadingAnalystRatings ? '#6b7280' : '#059669', 
+                  color: 'white', 
+                  border: 'none', 
+                  borderRadius: 4,
+                  fontSize: 14,
+                  cursor: loadingAnalystRatings ? 'not-allowed' : 'pointer'
+                }}
+              >
+                {loadingAnalystRatings ? 'Adding Analyst Ratings...' : 'Add Analyst Ratings'}
               </button>
               <button
                 onClick={addWGOContext}
