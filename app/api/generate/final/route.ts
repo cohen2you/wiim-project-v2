@@ -33,6 +33,30 @@ export async function POST(req: Request) {
       secondaryOutlet: secondaryOutlet || '',
     });
 
+    // Add hyperlinks if URLs are provided
+    if (primaryUrl || secondaryUrl) {
+      try {
+        const hyperlinkRes = await fetch(`${req.headers.get('origin') || 'http://localhost:3000'}/api/add-hyperlinks`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            text: result,
+            primaryUrl,
+            secondaryUrl,
+            primaryOutlet,
+          }),
+        });
+
+        if (hyperlinkRes.ok) {
+          const hyperlinkData = await hyperlinkRes.json();
+          return NextResponse.json({ result: hyperlinkData.result });
+        }
+      } catch (hyperlinkError) {
+        console.error('Error adding hyperlinks:', hyperlinkError);
+        // Continue without hyperlinks if there's an error
+      }
+    }
+
     return NextResponse.json({ result });
   } catch (error: any) {
     return NextResponse.json(

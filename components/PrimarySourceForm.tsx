@@ -17,14 +17,44 @@ export default function PrimarySourceForm() {
   const [loading, setLoading] = useState(false);
   const [scrapeLoading, setScrapeLoading] = useState(false);
   const [scrapeError, setScrapeError] = useState('');
+  const [generateError, setGenerateError] = useState('');
 
   useEffect(() => {
     console.log('PrimarySourceForm rendered');
   }, []);
 
-  const generatePrimary = () => {
-    console.log('Generate Primary Output button clicked');
-    setPrimaryOutput('This is a fixed test output from the Generate Primary Output button.');
+  const generatePrimary = async () => {
+    if (!primaryText.trim()) {
+      setGenerateError('Please provide article text before generating.');
+      return;
+    }
+
+    setLoading(true);
+    setGenerateError('');
+    setPrimaryOutput('');
+
+    try {
+      const res = await fetch('/api/generate/primary', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sourceUrl: primaryUrl,
+          articleText: primaryText,
+        }),
+      });
+
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.error || 'Failed to generate primary content.');
+      }
+
+      const data = await res.json();
+      setPrimaryOutput(data.result);
+    } catch (err: any) {
+      setGenerateError(err.message || 'Error generating primary content.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleScrape = async () => {
@@ -74,12 +104,19 @@ export default function PrimarySourceForm() {
       />
       <button
         onClick={generatePrimary}
-        className="bg-blue-600 text-white px-6 py-2 rounded"
+        disabled={loading || !primaryText.trim()}
+        className="bg-blue-600 text-white px-6 py-2 rounded disabled:bg-gray-400"
       >
-        Generate Primary Output
+        {loading ? 'Generating...' : 'Generate Primary Output'}
       </button>
+      {generateError && (
+        <div className="text-red-600 text-sm mt-2">{generateError}</div>
+      )}
       {primaryOutput && (
-        <pre className="mt-4 whitespace-pre-wrap">{primaryOutput}</pre>
+        <div className="mt-4">
+          <h3 className="font-semibold mb-2">Generated Output:</h3>
+          <pre className="whitespace-pre-wrap bg-gray-50 p-4 rounded border">{primaryOutput}</pre>
+        </div>
       )}
     </div>
   );

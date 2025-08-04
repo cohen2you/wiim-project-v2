@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { getPrimaryPrompt } from '@/lib/prompts/primary';
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY!;
 const OPENAI_API_URL = 'https://api.openai.com/v1/chat/completions';
@@ -32,14 +33,18 @@ async function callOpenAI(prompt: string) {
 
 export async function POST(req: Request) {
   try {
-    const { sourceUrl, articleText } = await req.json();
+    const { sourceUrl, articleText, ticker } = await req.json();
 
     if (!sourceUrl && !articleText) {
       return NextResponse.json({ error: 'Missing sourceUrl or articleText' }, { status: 400 });
     }
 
-    // Construct a prompt - adjust this as you want
-    const prompt = `Write a concise Lead and What Happened section based ONLY on this article content:\n\n${articleText}`;
+    // Use the proper prompt with hyperlink requirements
+    const prompt = getPrimaryPrompt.prompt({
+      sourceUrl: sourceUrl || '',
+      ticker: ticker || '',
+      articleText: articleText || '',
+    });
 
     const generatedText = await callOpenAI(prompt);
 

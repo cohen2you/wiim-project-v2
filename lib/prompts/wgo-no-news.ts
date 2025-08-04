@@ -16,7 +16,7 @@ STORY REQUIREMENTS:
 
 2. ARTICLE STRUCTURE:
 - Opening paragraph: Compelling hook that draws readers in + engaging narrative about what's driving the stock
-- "What To Know" section: Key data points (momentum scores, growth rankings, revenue metrics)
+- "What To Know" section: Key data points (growth rankings, revenue metrics)
 - Recent events/partnerships/announcements
 - Analyst commentary and price target updates
 - Price action section with technical details
@@ -42,7 +42,6 @@ STORY REQUIREMENTS:
   * Make it sound like a real journalist wrote it, not an AI
 
 4. DATA INTEGRATION:
-- Use Benzinga momentum scores and rankings
 - Include revenue growth metrics when available
 - Reference analyst ratings and price targets
 - Include technical price levels and YTD performance

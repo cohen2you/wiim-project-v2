@@ -26,7 +26,7 @@ Strict rules and enforcement:
 2. What Happened section (~200 words):
 - Begins immediately after the Lead.
 - The first sentence must include a three-word anchor linking to the source URL.
-- The anchor text must use the source name as clickable text (e.g., "according to [Benzinga](${sourceUrl})").
+- The anchor text must use the source name as clickable text (e.g., "according to <a href="${sourceUrl}">Benzinga</a>").
 - Use short paragraphs of no more than two sentences each.
 - Summarize all key developments factually and chronologically.
 - Mention the source name once more in the section (not hyperlinked).

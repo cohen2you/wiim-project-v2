@@ -48,6 +48,8 @@ export default function PRStoryGeneratorPage() {
   const [includeSubheads, setIncludeSubheads] = useState(false);
   const [loadingContext, setLoadingContext] = useState(false);
   const [contextError, setContextError] = useState('');
+  const [loadingWGOContext, setLoadingWGOContext] = useState(false);
+  const [wgoContextError, setWgoContextError] = useState('');
 
   // Client-only: Convert PR or Article HTML body to plain text when selected
   useEffect(() => {
@@ -287,9 +289,37 @@ export default function PRStoryGeneratorPage() {
         }
       }
       
-      // Calculate priceActionDay for today
+      // Calculate priceActionDay using the same logic as the price action API
+      function getMarketStatus(): 'open' | 'premarket' | 'afterhours' | 'closed' {
+        const now = new Date();
+        const nowUtc = now.getTime() + (now.getTimezoneOffset() * 60000);
+        const nyOffset = -4; // EDT
+        const nyTime = new Date(nowUtc + (3600000 * nyOffset));
+        const day = nyTime.getDay();
+        const hour = nyTime.getHours();
+        const minute = nyTime.getMinutes();
+        const time = hour * 100 + minute;
+        if (day === 0 || day === 6) return 'closed';
+        if (time >= 400 && time < 930) return 'premarket';
+        if (time >= 930 && time < 1600) return 'open';
+        if (time >= 1600 && time < 2000) return 'afterhours';
+        return 'closed';
+      }
+      
+      const marketStatus = getMarketStatus();
+      let marketStatusPhrase = '';
+      if (marketStatus === 'premarket') {
+        marketStatusPhrase = 'in premarket trading';
+      } else if (marketStatus === 'afterhours') {
+        marketStatusPhrase = 'in after-hours trading';
+      } else if (marketStatus === 'closed') {
+        marketStatusPhrase = 'while the market was closed';
+      } else {
+        marketStatusPhrase = 'during regular trading hours';
+      }
+      
       const today = new Date();
-      const priceActionDay = `on ${today.toLocaleDateString('en-US', { weekday: 'long' })}`;
+      const priceActionDay = `${marketStatusPhrase} on ${today.toLocaleDateString('en-US', { weekday: 'long' })}`;
       // Generate CTA and subheads if requested
       let ctaText = '';
       let subheadTexts: string[] = [];
@@ -517,6 +547,38 @@ export default function PRStoryGeneratorPage() {
       setContextError('Failed to add context.');
     } finally {
       setLoadingContext(false);
+    }
+  };
+
+  const addWGOContext = async () => {
+    if (!ticker.trim() || !article.trim()) {
+      setWgoContextError('Ticker and generated article are required');
+      return;
+    }
+    
+    setWgoContextError('');
+    setLoadingWGOContext(true);
+    
+    try {
+      const res = await fetch('/api/generate/add-wgo-context', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          ticker,
+          currentArticle: article 
+        }),
+      });
+      
+      const data = await res.json();
+      if (data.error) {
+        setWgoContextError(data.error);
+      } else if (data.updatedArticle) {
+        setArticle(data.updatedArticle);
+      }
+    } catch (error) {
+      setWgoContextError('Failed to add WGO context.');
+    } finally {
+      setLoadingWGOContext(false);
     }
   };
 
@@ -970,6 +1032,7 @@ export default function PRStoryGeneratorPage() {
       {/* Generated Article - Moved here to appear directly under Generate Story button */}
       {genError && <div style={{ color: 'red', marginBottom: 10 }}>{genError}</div>}
       {contextError && <div style={{ color: 'red', marginBottom: 10 }}>{contextError}</div>}
+      {wgoContextError && <div style={{ color: 'red', marginBottom: 10 }}>{wgoContextError}</div>}
       {article && (
         <div style={{ marginBottom: 20 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
@@ -989,6 +1052,21 @@ export default function PRStoryGeneratorPage() {
                 }}
               >
                 {loadingContext ? 'Adding Context...' : 'Add Context'}
+              </button>
+              <button
+                onClick={addWGOContext}
+                disabled={loadingWGOContext}
+                style={{ 
+                  padding: '8px 16px', 
+                  background: loadingWGOContext ? '#6b7280' : '#7c3aed', 
+                  color: 'white', 
+                  border: 'none', 
+                  borderRadius: 4,
+                  fontSize: 14,
+                  cursor: loadingWGOContext ? 'not-allowed' : 'pointer'
+                }}
+              >
+                {loadingWGOContext ? 'Adding WGO Context...' : 'Add WGO Context'}
               </button>
               <button
                 onClick={handleCopyArticle}

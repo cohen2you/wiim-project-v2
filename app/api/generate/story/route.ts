@@ -14,16 +14,25 @@ async function fetchRelatedArticles(ticker: string, excludeUrl?: string): Promis
     
     const url = `${BZ_NEWS_URL}?token=${BENZINGA_API_KEY}&tickers=${encodeURIComponent(ticker)}&items=20&fields=headline,title,created,url,channels&accept=application/json&displayOutput=full&dateFrom=${dateFromStr}`;
     
+    console.log('Fetching related articles for ticker:', ticker);
+    console.log('Benzinga API URL:', url);
+    console.log('BENZINGA_API_KEY available:', !!BENZINGA_API_KEY);
+    console.log('BENZINGA_API_KEY length:', BENZINGA_API_KEY ? BENZINGA_API_KEY.length : 0);
+    
     const res = await fetch(url, {
       headers: { Accept: 'application/json' },
     });
     
     if (!res.ok) {
-      console.error('Benzinga API error:', await res.text());
+      const errorText = await res.text();
+      console.error('Benzinga API error:', errorText);
+      console.error('Benzinga API status:', res.status);
+      console.error('Benzinga API headers:', Object.fromEntries(res.headers.entries()));
       return [];
     }
     
     const data = await res.json();
+    console.log('Benzinga API response:', data);
     if (!Array.isArray(data)) return [];
     
     // Filter out press releases and the current article URL
@@ -36,11 +45,13 @@ async function fetchRelatedArticles(ticker: string, excludeUrl?: string): Promis
         if (Array.isArray(item.channels) && item.channels.some((ch: any) => 
           typeof ch.name === 'string' && prChannelNames.includes(normalize(ch.name))
         )) {
+          console.log('Filtering out press release:', item.headline || item.title);
           return false;
         }
         
         // Exclude the current article URL if provided
         if (excludeUrl && item.url === excludeUrl) {
+          console.log('Filtering out current article URL:', item.headline || item.title);
           return false;
         }
         
@@ -53,9 +64,25 @@ async function fetchRelatedArticles(ticker: string, excludeUrl?: string): Promis
       }))
       .slice(0, 5);
     
+    console.log('Filtered related articles:', relatedArticles);
+    
+    // If no related articles found, create a fallback
+    if (relatedArticles.length === 0) {
+      console.log('No related articles found, using fallback');
+      relatedArticles.push({
+        headline: 'Market Analysis',
+        url: 'https://www.benzinga.com/markets',
+        created: new Date().toISOString()
+      });
+    }
+    
+    // Ensure we always have at least one article for hyperlinking
+    console.log('Final related articles for hyperlinking:', relatedArticles);
+    
     return relatedArticles;
   } catch (error) {
     console.error('Error fetching related articles:', error);
+    console.error('BENZINGA_API_KEY available:', !!BENZINGA_API_KEY);
     return [];
   }
 }
@@ -140,15 +167,20 @@ Structure your article as follows:
   - C3 AI Stock Is Tumbling Thursday: What's Going On?
   - What's Going On With Oklo Stock?
 
-- Lead paragraph: Start with a sentence describing the ACTUAL price movement of the stock based on the price data provided. Use the exact movement from the price summary (e.g., if price summary shows "down 1.61%", say "traded lower" or "declined"; if it shows "up 2.5%", say "rose" or "traded higher"). Use the full company name and ticker in this format: <strong>Company Name</strong> (NYSE: TICKER). The company name should be bolded using HTML <strong> tags. Do not use markdown bold (**) or asterisks elsewhere. Do not include the specific price or percentage in the lead; reserve that for the price action line at the bottom. Then state what happened and why it matters for ${ticker}. CRITICAL: Do NOT include analyst names (like "Samik Chatterjee" or "J.P. Morgan analyst") in the lead paragraph. The lead should focus on the stock movement and the general news event, not specific analyst details. 
+- Lead paragraph: Start with a sentence describing the ACTUAL price movement of the stock based on the price data provided. Use the exact movement from the price summary (e.g., if price summary shows "down 1.61%", say "traded lower" or "declined"; if it shows "up 2.5%", say "rose" or "traded higher"). Use the full company name and ticker in this format: <strong>Company Name</strong> (NYSE: TICKER). The company name should be bolded using HTML <strong> tags. Do not use markdown bold (**) or asterisks elsewhere. Do not include the specific price or percentage in the lead; reserve that for the price action line at the bottom. Then state what happened and why it matters for ${ticker}. CRITICAL: Do NOT include analyst names (like "Samik Chatterjee" or "J.P. Morgan analyst") in the lead paragraph. The lead should focus on the stock movement and the general news event, not specific analyst details. IMPORTANT: Do NOT use the word "today" in the lead paragraph. Use the exact time reference provided in priceActionDay. CRITICAL: The lead MUST mention the actual price movement (up, down, unchanged) but NOT the specific percentage - reserve the percentage for the price action line at the bottom. 
 
-MANDATORY HYPERLINK RULE: If sourceUrl is provided and not empty, you MUST include exactly one hyperlink in the lead paragraph. Wrap exactly three consecutive words in <a href="${sourceUrl}"> and </a> tags. Choose any three consecutive words that fit naturally. If sourceUrl is empty, do not include any hyperlinks. EXAMPLE: "Apple Inc (NASDAQ: AAPL) traded lower on Tuesday following <a href="${sourceUrl}">reports that JPMorgan</a> Chase & Co. is in advanced discussions"
+CRITICAL HYPERLINK REQUIREMENT: You MUST include exactly one hyperlink in the lead paragraph. ${relatedArticles && relatedArticles.length > 0 ? `Use this specific article: "${relatedArticles[0].headline}" at URL: ${relatedArticles[0].url}. Choose any three consecutive words from your lead paragraph and wrap them in <a href="${relatedArticles[0].url}"> and </a> tags. EXAMPLE: "Apple Inc (NASDAQ: AAPL) traded lower ${priceActionDay || 'this morning'} following <a href="${relatedArticles[0].url}">reports that JPMorgan</a> Chase & Co. is in advanced discussions"` : 'If no related articles are available, choose any three consecutive words and link to a Benzinga topic page using <a href="https://www.benzinga.com/markets"> and </a> tags.'} The hyperlink CANNOT link to the source URL. THIS IS MANDATORY - YOUR LEAD PARAGRAPH MUST CONTAIN ONE HYPERLINK. DO NOT FORGET TO INCLUDE THE HYPERLINK IN THE LEAD PARAGRAPH.
 
 CRITICAL: The lead paragraph must be exactly 2 sentences maximum. If you have more information, create additional paragraphs.
 
-- IMPORTANT: In your lead, use this exact phrase to reference the timing of the price movement: "${priceActionDay || '[Day not provided]'}". Do not use or infer any other day or date, even if the source text or PR/article date mentions a different day.
+EXAMPLE LEAD PARAGRAPH FORMAT:
+<p><strong>Apple Inc.</strong> (NASDAQ: AAPL) traded lower ${priceActionDay || 'this morning'} following <a href="${relatedArticles && relatedArticles.length > 0 ? relatedArticles[0].url : 'https://www.benzinga.com/markets'}">reports that JPMorgan</a> Chase & Co. is in advanced discussions. The stock's decline comes amid broader market volatility and concerns about the tech sector's performance.</p>
+
+- IMPORTANT: In your lead, use this exact phrase to reference the timing of the price movement: "${priceActionDay || '[Day not provided]'}". Do not use or infer any other day or date, even if the source text or PR/article date mentions a different day. DO NOT use the word "today" - use the exact time reference provided in priceActionDay.
 
 - Additional paragraphs: Provide factual details, context, and any relevant quotes about ${ticker}. When referencing the source material, mention the actual date: "${sourceDateFormatted || '[Date not provided]'}" (e.g., "In a press release dated ${sourceDateFormatted}" or "According to the ${sourceDateFormatted} announcement"). If the source is an analyst note, include specific details about earnings forecasts, financial estimates, market analysis, and investment reasoning from the note. CRITICAL: Each paragraph must be no longer than 2 sentences. If you have more information, create additional paragraphs.
+
+SOURCE URL HYPERLINK: If sourceUrl is provided, the first sentence of the additional content (after the lead paragraph) must include a three-word anchor linking to the source URL. Use the format "according to <a href="${sourceUrl}">Benzinga</a>" or similar attribution. EXAMPLE: "According to <a href="${sourceUrl}">Benzinga Pro</a>, the company announced..."
 
 ${includeCTA && ctaText ? `
 - CTA Integration: After the lead paragraph, insert the following CTA exactly as provided:
@@ -162,9 +194,9 @@ ${includeSubheads && subheadTexts && subheadTexts.length > 0 ? `
   Format each subhead as a standalone line with proper spacing before and after.
 ` : ''}
 
-${relatedArticles && relatedArticles.length > 0 ? `
+${relatedArticles && relatedArticles.length > 1 ? `
 - After the second paragraph of additional content (not the lead paragraph), insert the "Also Read:" section with this exact format:
-  Also Read: <a href="${relatedArticles[0].url}">${relatedArticles[0].headline}</a>
+  Also Read: <a href="${relatedArticles[1].url}">${relatedArticles[1].headline}</a>
 ` : ''}
 
 ${isAnalystNote ? '- FOR ANALYST NOTES: Do NOT mention analyst names in the lead paragraph. Start your additional paragraphs (after the lead) with "According to J.P. Morgan analyst Samik Chatterjee, CFA..." and include specific details about the F3Q25 earnings preview, diversification strategy, Apple revenue loss impact, and investment thesis from the source text. When mentioning price targets, include the previous target if available (e.g., "raised the price target to $200 from $185"). Do not write generic content about the semiconductor industry.' : ''}
@@ -187,9 +219,9 @@ ${isAnalystNote ? '- MANDATORY FOR ANALYST NOTES: Do NOT include analyst names i
   - Hyperlink "according to Benzinga Pro." to https://pro.benzinga.com/ using <a href="https://pro.benzinga.com/">according to Benzinga Pro.</a>
 ${priceSummary}
 
-${relatedArticles && relatedArticles.length > 0 ? `
+${relatedArticles && relatedArticles.length > 2 ? `
 - After the price action, add a "Read Next:" section with the following format:
-  Read Next: <a href="${relatedArticles[1]?.url || relatedArticles[0].url}">${relatedArticles[1]?.headline || relatedArticles[0].headline}</a>
+  Read Next: <a href="${relatedArticles[2].url}">${relatedArticles[2].headline}</a>
 ` : ''}
 
 Keep the tone neutral and informative, suitable for a financial news audience. Do not include speculation or personal opinion. 
@@ -199,7 +231,7 @@ CRITICAL HTML FORMATTING: You MUST wrap each paragraph in <p> tags. The output s
 <p>Second paragraph content.</p>
 <p>Third paragraph content.</p>
 
-REMEMBER: NO paragraph should exceed 2 sentences. Break up longer content into multiple paragraphs. The hyperlink MUST appear in the lead paragraph.
+REMEMBER: NO paragraph should exceed 2 sentences. Break up longer content into multiple paragraphs. THE HYPERLINK MUST APPEAR IN THE LEAD PARAGRAPH - THIS IS MANDATORY.
 
 Source Text:
 ${sourceText}
@@ -215,6 +247,8 @@ IMPORTANT: The source text above contains a J.P. Morgan analyst note by Samik Ch
 
 Do not write generic content about the semiconductor industry. Use the specific analyst insights from the source text.
 ` : ''}
+
+FINAL REMINDER: Your lead paragraph MUST contain exactly one hyperlink. The hyperlink must be in the lead paragraph, not in any other section.
 
 Write the article now.`;
 }
@@ -232,8 +266,17 @@ export async function POST(req: Request) {
     
     // Fetch related articles
     const relatedArticles = await fetchRelatedArticles(ticker, sourceUrl);
+    console.log('Related articles fetched:', relatedArticles);
+    console.log('Number of related articles:', relatedArticles.length);
+    if (relatedArticles.length > 0) {
+      console.log('First related article:', relatedArticles[0]);
+    }
     
     const prompt = buildPrompt({ ticker, sourceText, analystSummary: analystSummary || '', priceSummary: priceSummary || '', priceActionDay, sourceUrl, sourceDateFormatted, relatedArticles, includeCTA, ctaText, includeSubheads, subheadTexts });
+    console.log('Prompt includes related articles:', relatedArticles.length > 0);
+    if (relatedArticles.length > 0) {
+      console.log('Prompt will use article:', relatedArticles[0].headline);
+    }
     const res = await fetch(OPENAI_API_URL, {
       method: 'POST',
       headers: {
