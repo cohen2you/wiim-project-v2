@@ -27,10 +27,13 @@ Generate ONLY a headline for ${ticker} stock.
 Format: "[Company] Stock Is Trending ${currentDayName}: What's Going On?"
 
 Rules:
-- No bold formatting
-- No extra text
-- Just the headline
+- NO bold formatting (**text**) - remove any ** symbols
+- NO markdown formatting
+- NO extra text or punctuation
+- Just the plain headline text
 - Use the company name, not just the ticker
+- DO NOT include ** around the headline
+- DO NOT include any formatting symbols
 
 Generate the headline:`;
 
@@ -41,11 +44,14 @@ Generate the headline:`;
       temperature: 0.3,
     });
 
-    const headline = completion.choices[0].message?.content?.trim() || '';
+    let headline = completion.choices[0].message?.content?.trim() || '';
 
     if (!headline) {
       return NextResponse.json({ error: 'Failed to generate headline.' }, { status: 500 });
     }
+
+    // Remove any ** formatting that might have been added
+    headline = headline.replace(/\*\*/g, '');
 
     console.log(`Generated headline for ${ticker}: ${headline}`);
 

@@ -6,61 +6,18 @@ export async function POST(req: Request) {
     const body = await req.json();
 
     const {
-      lead,
-      whatHappened,
-      whyItMatters,
-      priceAction,
-      primaryUrl,
-      secondaryUrl,
-      primaryOutlet,
-      secondaryOutlet,
+      story, // The complete story with hyperlinks already added
     } = body;
 
-    if (!lead || !whatHappened || !whyItMatters) {
+    if (!story) {
       return NextResponse.json(
-        { error: 'Missing required fields: lead, whatHappened, whyItMatters.' },
+        { error: 'Missing required field: story.' },
         { status: 400 }
       );
     }
 
-    // Generate the story without embedding hyperlinks (just raw text)
-    const result = await generateFinalStory({
-      lead,
-      whatHappened,
-      whyItMatters,
-      priceAction: priceAction || '',
-      primaryOutlet: primaryOutlet || '',
-      secondaryOutlet: secondaryOutlet || '',
-    });
-
-    // Check if the story already contains hyperlinks from context segment
-    const hasExistingHyperlinks = result.includes('<a href=');
-    
-    // Only add hyperlinks if URLs are provided AND no existing hyperlinks are present
-    if ((primaryUrl || secondaryUrl) && !hasExistingHyperlinks) {
-      try {
-        const hyperlinkRes = await fetch(`${req.headers.get('origin') || 'http://localhost:3000'}/api/add-hyperlinks`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            text: result,
-            primaryUrl,
-            secondaryUrl,
-            primaryOutlet,
-          }),
-        });
-
-        if (hyperlinkRes.ok) {
-          const hyperlinkData = await hyperlinkRes.json();
-          return NextResponse.json({ result: hyperlinkData.result });
-        }
-      } catch (hyperlinkError) {
-        console.error('Error adding hyperlinks:', hyperlinkError);
-        // Continue without hyperlinks if there's an error
-      }
-    }
-
-    return NextResponse.json({ result });
+    // Simply return the story as-is, preserving all existing hyperlinks
+    return NextResponse.json({ result: story });
   } catch (error: any) {
     return NextResponse.json(
       { error: error.message || 'Unexpected error occurred' },

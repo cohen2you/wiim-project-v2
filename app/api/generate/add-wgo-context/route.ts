@@ -91,7 +91,7 @@ CRITICAL TASK: AGGRESSIVELY condense this story to exactly 350-400 words total. 
 CONDENSATION RULES:
 1. **MANDATORY WORD COUNT**: The final story MUST be 350-400 words - NO EXCEPTIONS
 2. **PRESERVE ALL ELEMENTS**: Keep headline, lead, technical analysis, analyst ratings, "Also Read" line, price action line, and "Read Next" link
-3. **PRESERVE HYPERLINKS**: Keep ALL existing hyperlinks in their current positions
+3. **PRESERVE HTML HYPERLINKS**: CRITICAL - Keep ALL existing HTML hyperlinks (<a href="...">text</a>) exactly as they are. DO NOT convert them to plain text URLs.
 4. **AGGRESSIVE CUTTING**: Remove redundant information, combine similar points, eliminate unnecessary details
 5. **STREAMLINE SENTENCES**: Make every sentence more concise and impactful
 6. **TWO-SENTENCE PARAGRAPHS**: Ensure no paragraph exceeds 2 sentences
@@ -184,6 +184,7 @@ Take this story and ensure:
 2. The "Also Read" line is properly hyperlinked (without **)
 3. Remove detailed price information from the lead paragraph
 4. All other formatting is preserved
+5. PRESERVE ALL HTML HYPERLINKS - DO NOT convert them to plain text URLs
 
 STORY TO FIX:
 ${condensedStory}
@@ -192,7 +193,7 @@ RULES:
 - Break any paragraph with more than 2 sentences into multiple paragraphs
 - Ensure "Also Read:" line has the headline hyperlinked (not the whole line) and remove any ** formatting
 - Remove specific price details from the lead paragraph (current price, change, high/low) - these belong in the price action line
-- Keep all other hyperlinks and formatting intact
+- Keep all other HTML hyperlinks (<a href="...">text</a>) exactly as they are - DO NOT convert to plain text URLs
 - Maintain the story structure and flow
 
 EXAMPLE FIXES:
@@ -223,7 +224,7 @@ ${correctedStory}
 
 RULES:
 - Cut to 350-400 words MAXIMUM
-- Keep all hyperlinks and structural elements
+- Keep all HTML hyperlinks (<a href="...">text</a>) exactly as they are - DO NOT convert to plain text URLs
 - Be extremely aggressive in cutting
 - Combine sentences, remove redundancy
 - Keep only the most essential information
@@ -231,6 +232,7 @@ RULES:
 - ENFORCE: No paragraph longer than 2 sentences
 - REMOVE: Specific price details from lead paragraph (current price, change, high/low)
 - LEAD PARAGRAPH: Should focus on movement and context, not specific price data
+- PRESERVE ALL HTML HYPERLINKS: Keep all <a href="...">text</a> tags exactly as they are
 
 Return the FINAL condensed story:`;
 

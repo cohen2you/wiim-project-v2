@@ -48,6 +48,8 @@ export default function PRStoryGeneratorPage() {
   const [includeSubheads, setIncludeSubheads] = useState(false);
   const [loadingContext, setLoadingContext] = useState(false);
   const [contextError, setContextError] = useState('');
+  const [loadingLinksPrice, setLoadingLinksPrice] = useState(false);
+  const [linksPriceError, setLinksPriceError] = useState('');
   const [loadingWGOContext, setLoadingWGOContext] = useState(false);
   const [wgoContextError, setWgoContextError] = useState('');
   const [loadingAnalystRatings, setLoadingAnalystRatings] = useState(false);
@@ -190,6 +192,7 @@ export default function PRStoryGeneratorPage() {
     // TODO: Implement WGO story generation
     // This will be implemented based on your WGO story structure requirements
     
+    setCurrentStep(4); // Set to step 4 to show "Add Context" button
     setGeneratingWGO(false);
     setLoadingStory(false);
   };
@@ -518,6 +521,7 @@ export default function PRStoryGeneratorPage() {
       const data = await res.json();
       if (!res.ok || !data.story) throw new Error(data.error || 'Failed to generate story');
       setArticle(data.story);
+      setCurrentStep(4); // Set to step 4 to show "Add Context" button
     } catch (err: any) {
       setGenError(err.message || 'Failed to generate story');
     } finally {
@@ -646,11 +650,39 @@ export default function PRStoryGeneratorPage() {
       const data = await res.json();
       if (!res.ok || !data.story) throw new Error(data.error || 'Failed to add context');
       setArticle(data.story);
-      setCurrentStep(5); // Increment to step 5 to show "Finalize WGO No News" button
+      setCurrentStep(5); // Go to Add Links/Price step
     } catch (err: any) {
       setContextError(err.message || 'Failed to add context');
     } finally {
       setLoadingContext(false);
+    }
+  };
+
+  // Add Links/Price step
+  const addLinksPrice = async () => {
+    if (!article) {
+      setLinksPriceError('No existing story to add links and price to');
+      return;
+    }
+    
+    setLoadingLinksPrice(true);
+    setLinksPriceError('');
+    
+    try {
+      const res = await fetch('/api/generate/add-links-price', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ticker, story: article }),
+      });
+      
+      const data = await res.json();
+      if (!res.ok || !data.story) throw new Error(data.error || 'Failed to add links and price');
+      setArticle(data.story);
+      setCurrentStep(6); // Go to finalize step
+    } catch (err: any) {
+      setLinksPriceError(err.message || 'Failed to add links and price');
+    } finally {
+      setLoadingLinksPrice(false);
     }
   };
 
@@ -681,7 +713,7 @@ export default function PRStoryGeneratorPage() {
       
       console.log('Setting article with new story length:', data.story.length);
       setArticle(data.story);
-      setCurrentStep(6); // Increment to step 6 to indicate story is complete
+      setCurrentStep(7); // Increment to step 7 to indicate story is complete
     } catch (err: any) {
       console.error('Finalize error:', err);
       setWgoContextError(err.message || 'Failed to add WGO context');
@@ -1139,14 +1171,18 @@ export default function PRStoryGeneratorPage() {
       
       {/* Generated Article - Moved here to appear directly under Generate Story button */}
       {genError && <div style={{ color: 'red', marginBottom: 10 }}>{genError}</div>}
-      {contextError && <div style={{ color: 'red', marginBottom: 10 }}>{contextError}</div>}
-      {wgoContextError && <div style={{ color: 'red', marginBottom: 10 }}>{wgoContextError}</div>}
+                  {contextError && <div style={{ color: 'red', marginBottom: 10 }}>{contextError}</div>}
+            {linksPriceError && <div style={{ color: 'red', marginBottom: 10 }}>{linksPriceError}</div>}
+            {wgoContextError && <div style={{ color: 'red', marginBottom: 10 }}>{wgoContextError}</div>}
       {analystRatingsError && <div style={{ color: 'red', marginBottom: 10 }}>{analystRatingsError}</div>}
       {article && (
         <div style={{ marginBottom: 20 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
             <h2>Generated Article</h2>
             <div style={{ display: 'flex', gap: 10 }}>
+              <div style={{ fontSize: '12px', color: '#666', marginRight: '10px', alignSelf: 'center' }}>
+                Step: {currentStep}
+              </div>
               {currentStep >= 1 && (
                 <button
                   onClick={addLeadParagraph}
@@ -1198,7 +1234,7 @@ export default function PRStoryGeneratorPage() {
                   {loadingAnalystRatings ? 'Adding Analyst Ratings...' : 'Add Analyst Ratings'}
                 </button>
               )}
-              {currentStep >= 4 && (
+              {currentStep >= 4 && currentStep < 4.5 && (
                 <button
                   onClick={addContext}
                   disabled={loadingContext}
@@ -1215,7 +1251,24 @@ export default function PRStoryGeneratorPage() {
                   {loadingContext ? 'Adding Context...' : 'Add Context'}
                 </button>
               )}
-              {currentStep >= 5 && (
+              {currentStep >= 5 && currentStep < 6 && (
+                <button
+                  onClick={addLinksPrice}
+                  disabled={loadingLinksPrice}
+                  style={{ 
+                    padding: '8px 16px', 
+                    background: loadingLinksPrice ? '#6b7280' : '#059669', 
+                    color: 'white', 
+                    border: 'none', 
+                    borderRadius: 4,
+                    fontSize: 14,
+                    cursor: loadingLinksPrice ? 'not-allowed' : 'pointer'
+                  }}
+                >
+                  {loadingLinksPrice ? 'Adding Links/Price...' : 'Add Links/Price'}
+                </button>
+              )}
+              {currentStep >= 6 && (
                 <button
                   onClick={addWGOContext}
                   disabled={loadingWGOContext}
@@ -1229,7 +1282,7 @@ export default function PRStoryGeneratorPage() {
                     cursor: loadingWGOContext ? 'not-allowed' : 'pointer'
                   }}
                 >
-                  {loadingWGOContext ? 'Finalizing WGO No News...' : 'Finalize WGO No News'}
+                  {loadingWGOContext ? 'Finalizing...' : 'Finalize'}
                 </button>
               )}
               <button
