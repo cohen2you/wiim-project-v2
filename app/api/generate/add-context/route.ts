@@ -70,11 +70,23 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'No recent articles found for context.' }, { status: 404 });
     }
 
+    // Validate that we have at least 2 articles with valid URLs
+    const validArticles = recentArticles.filter(article => article.url && article.headline && article.body);
+    
+    if (validArticles.length < 2) {
+      return NextResponse.json({ 
+        error: `Insufficient articles with valid URLs. Found ${validArticles.length} valid articles, need at least 2.` 
+      }, { status: 404 });
+    }
+
+    // Ensure we have exactly 2 articles for the context
+    const articlesForContext = validArticles.slice(0, 2);
+
     // Get current price data for the price action line
     const priceData = await fetchPriceData(ticker);
 
     // Prepare article data for the prompt
-    const articlesData = recentArticles.map((article, index) => 
+    const articlesData = articlesForContext.map((article, index) => 
       `Article ${index + 1}:
 Headline: ${article.headline}
 Content: ${article.body}
@@ -107,8 +119,8 @@ INSTRUCTIONS:
 11. Ensure all prices are formatted to exactly 2 decimal places
 
 MANDATORY HYPERLINK REQUIREMENTS:
-- Article 1 URL: ${recentArticles[0].url} - MUST be used in paragraph 1 or 2
-- Article 2 URL: ${recentArticles[1].url} - MUST be used in paragraph 3, 4, or 5
+- Article 1 URL: ${articlesForContext[0].url} - MUST be used in paragraph 1 or 2
+- Article 2 URL: ${articlesForContext[1].url} - MUST be used in paragraph 3, 4, or 5
 - Both hyperlinks must be embedded naturally in the text
 - YOU MUST INCLUDE EXACTLY 2 HYPERLINKS - ONE FROM EACH ARTICLE
 - DO NOT SKIP EITHER ARTICLE - BOTH MUST BE USED
@@ -116,7 +128,7 @@ MANDATORY HYPERLINK REQUIREMENTS:
 
 ALSO READ LINE REQUIREMENT:
 - Add a standalone line in the middle of the story (paragraphs 3-5)
-- Format: "Also Read: <a href="${recentArticles[0].url}">${recentArticles[0].headline}</a>"
+- Format: "Also Read: <a href="${articlesForContext[0].url}">${articlesForContext[0].headline}</a>"
 - Place it between paragraphs, not integrated into text
 - This is in addition to the 2 integrated hyperlinks
 
@@ -149,14 +161,14 @@ Return the complete enhanced story with integrated context and "Also Read" line:
     const priceActionLine = generatePriceActionLine(ticker, priceData);
     
     // Add Read Next link (only headline hyperlinked)
-    const readNextLink = `Read Next: <a href="${recentArticles[1].url}">${recentArticles[1].headline}</a>`;
+    const readNextLink = `Read Next: <a href="${articlesForContext[1].url}">${articlesForContext[1].headline}</a>`;
     
     // Combine enhanced story with price action line and read next link
     const completeStory = `${enhancedStory}\n\n${priceActionLine}\n\n${readNextLink}`;
     
     return NextResponse.json({ 
       story: completeStory,
-      contextSources: recentArticles.map(article => ({
+      contextSources: articlesForContext.map(article => ({
         headline: article.headline,
         url: article.url
       }))
