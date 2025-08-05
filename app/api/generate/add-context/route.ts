@@ -7,75 +7,144 @@ const BZ_NEWS_URL = 'https://api.benzinga.com/api/v2/news';
 
 async function fetchRecentArticles(ticker: string): Promise<any[]> {
   try {
-    const dateFrom = new Date();
-    dateFrom.setDate(dateFrom.getDate() - 14); // Extend to 14 days for more options
-    const dateFromStr = dateFrom.toISOString().slice(0, 10);
+    // Strategy 1: Recent ticker-specific articles (48 hours)
+    const dateFrom48h = new Date();
+    dateFrom48h.setDate(dateFrom48h.getDate() - 2);
+    const dateFrom48hStr = dateFrom48h.toISOString().slice(0, 10);
     
-    // Try with more items first
-    const url = `${BZ_NEWS_URL}?token=${BENZINGA_API_KEY}&tickers=${encodeURIComponent(ticker)}&items=20&fields=headline,title,created,body,url,channels&accept=application/json&displayOutput=full&dateFrom=${dateFromStr}`;
+    const recentUrl = `${BZ_NEWS_URL}?token=${BENZINGA_API_KEY}&tickers=${encodeURIComponent(ticker)}&items=30&fields=headline,title,created,body,url,channels&accept=application/json&displayOutput=full&dateFrom=${dateFrom48hStr}`;
     
-    const res = await fetch(url, {
+    console.log(`Searching for recent ${ticker} articles (48 hours)...`);
+    const recentRes = await fetch(recentUrl, {
       headers: { Accept: 'application/json' },
     });
     
-    if (!res.ok) {
-      console.error('Benzinga API error:', await res.text());
-      return [];
-    }
-    
-    const data = await res.json();
-    if (!Array.isArray(data) || data.length === 0) return [];
-    
-    console.log(`Found ${data.length} total articles for ${ticker}`);
-    
-    // Filter out press releases (less strict)
-    const prChannelNames = ['press releases', 'press-releases', 'pressrelease'];
-    const normalize = (str: string) => str.toLowerCase().replace(/[-_]/g, ' ');
-    
-    let recentArticles = data
-      .filter(item => {
-        // More lenient press release filtering
-        if (Array.isArray(item.channels) && item.channels.some((ch: any) => 
-          typeof ch.name === 'string' && prChannelNames.includes(normalize(ch.name))
-        )) {
-          return false;
+    if (recentRes.ok) {
+      const recentData = await recentRes.json();
+      if (Array.isArray(recentData) && recentData.length > 0) {
+        const recentArticles = filterAndProcessArticles(recentData, false);
+        console.log(`Found ${recentArticles.length} recent articles for ${ticker}`);
+        
+        if (recentArticles.length >= 2) {
+          console.log('Using recent ticker-specific articles');
+          return recentArticles.slice(0, 2);
         }
-        return true;
-      })
-      .map((item: any) => ({
-        headline: item.headline || item.title || '[No Headline]',
-        body: item.body || '',
-        url: item.url,
-        created: item.created,
-      }))
-      .filter(item => {
-        // More lenient content filtering
-        return item.body && item.body.length > 50 && item.url; // Reduced minimum length, ensure URL exists
-      });
-    
-    console.log(`After filtering: ${recentArticles.length} valid articles`);
-    
-    // If we still don't have enough, try without press release filtering
-    if (recentArticles.length < 2) {
-      console.log('Trying without press release filtering...');
-      recentArticles = data
-        .map((item: any) => ({
-          headline: item.headline || item.title || '[No Headline]',
-          body: item.body || '',
-          url: item.url,
-          created: item.created,
-        }))
-        .filter(item => item.body && item.body.length > 50 && item.url);
-      
-      console.log(`After removing press release filter: ${recentArticles.length} valid articles`);
+      }
     }
     
-    // Take up to 3 articles to have a backup
-    return recentArticles.slice(0, 3);
+    // Strategy 2: Movers articles from past month (avoiding insights URLs)
+    const dateFrom30d = new Date();
+    dateFrom30d.setDate(dateFrom30d.getDate() - 30);
+    const dateFrom30dStr = dateFrom30d.toISOString().slice(0, 10);
+    
+    const moversUrl = `${BZ_NEWS_URL}?token=${BENZINGA_API_KEY}&tickers=${encodeURIComponent(ticker)}&items=100&fields=headline,title,created,body,url,channels&accept=application/json&displayOutput=full&dateFrom=${dateFrom30dStr}`;
+    
+    console.log(`Searching for movers articles for ${ticker} (30 days)...`);
+    const moversRes = await fetch(moversUrl, {
+      headers: { Accept: 'application/json' },
+    });
+    
+    if (moversRes.ok) {
+      const moversData = await moversRes.json();
+      if (Array.isArray(moversData) && moversData.length > 0) {
+        const moversArticles = filterAndProcessArticles(moversData, true);
+        console.log(`Found ${moversArticles.length} movers articles for ${ticker}`);
+        
+        if (moversArticles.length >= 2) {
+          console.log('Using movers articles');
+          return moversArticles.slice(0, 2);
+        }
+      }
+    }
+    
+    // Strategy 3: SPY market articles (24 hours)
+    const dateFrom24h = new Date();
+    dateFrom24h.setDate(dateFrom24h.getDate() - 1);
+    const dateFrom24hStr = dateFrom24h.toISOString().slice(0, 10);
+    
+    const spyUrl = `${BZ_NEWS_URL}?token=${BENZINGA_API_KEY}&tickers=SPY&items=20&fields=headline,title,created,body,url,channels&accept=application/json&displayOutput=full&dateFrom=${dateFrom24hStr}`;
+    
+    console.log('Searching for SPY market articles (24 hours)...');
+    const spyRes = await fetch(spyUrl, {
+      headers: { Accept: 'application/json' },
+    });
+    
+    if (spyRes.ok) {
+      const spyData = await spyRes.json();
+      if (Array.isArray(spyData) && spyData.length > 0) {
+        const spyArticles = filterAndProcessArticles(spyData, false);
+        console.log(`Found ${spyArticles.length} SPY articles`);
+        
+        if (spyArticles.length >= 2) {
+          console.log('Using SPY market articles as fallback');
+          return spyArticles.slice(0, 2);
+        }
+      }
+    }
+    
+    console.log('No suitable articles found from any strategy');
+    return [];
   } catch (error) {
     console.error('Error fetching recent articles:', error);
     return [];
   }
+}
+
+// Helper function to filter and process articles
+function filterAndProcessArticles(data: any[], prioritizeMovers: boolean): any[] {
+  // Filter out press releases and insights URLs
+  const prChannelNames = ['press releases', 'press-releases', 'pressrelease'];
+  const normalize = (str: string) => str.toLowerCase().replace(/[-_]/g, ' ');
+  
+  let articles = data
+    .filter(item => {
+      // Exclude press releases
+      if (Array.isArray(item.channels) && item.channels.some((ch: any) => 
+        typeof ch.name === 'string' && prChannelNames.includes(normalize(ch.name))
+      )) {
+        return false;
+      }
+      
+      // Exclude insights URLs
+      if (item.url && item.url.includes('/insights/')) {
+        return false;
+      }
+      
+      return true;
+    })
+    .map((item: any) => ({
+      headline: item.headline || item.title || '[No Headline]',
+      body: item.body || '',
+      url: item.url,
+      created: item.created,
+      isMovers: item.url && item.url.includes('/trading-ideas/movers'),
+    }))
+    .filter(item => {
+      // Ensure substantial content and valid URL
+      return item.body && item.body.length > 50 && item.url;
+    });
+  
+  // Sort articles based on strategy
+  if (prioritizeMovers) {
+    // For movers strategy: prioritize movers articles, then by date
+    articles.sort((a, b) => {
+      if (a.isMovers && !b.isMovers) return -1;
+      if (!a.isMovers && b.isMovers) return 1;
+      
+      const dateA = new Date(a.created || 0);
+      const dateB = new Date(b.created || 0);
+      return dateB.getTime() - dateA.getTime();
+    });
+  } else {
+    // For other strategies: sort by date only
+    articles.sort((a, b) => {
+      const dateA = new Date(a.created || 0);
+      const dateB = new Date(b.created || 0);
+      return dateB.getTime() - dateA.getTime();
+    });
+  }
+  
+  return articles;
 }
 
 export async function POST(request: Request) {
@@ -101,146 +170,7 @@ export async function POST(request: Request) {
       console.log(`Article ${index + 1}: ${article.headline} - URL: ${article.url ? 'Yes' : 'No'}`);
     });
     
-    if (validArticles.length < 2) {
-      // Try to get more articles with a broader search
-      console.log('Attempting broader search for more articles...');
-      
-      // Try without date restriction
-      const broaderUrl = `${BZ_NEWS_URL}?token=${BENZINGA_API_KEY}&tickers=${encodeURIComponent(ticker)}&items=30&fields=headline,title,created,body,url,channels&accept=application/json&displayOutput=full`;
-      
-      try {
-        const broaderRes = await fetch(broaderUrl, {
-          headers: { Accept: 'application/json' },
-        });
-        
-        if (broaderRes.ok) {
-          const broaderData = await broaderRes.json();
-          if (Array.isArray(broaderData) && broaderData.length > 0) {
-            const additionalArticles = broaderData
-              .map((item: any) => ({
-                headline: item.headline || item.title || '[No Headline]',
-                body: item.body || '',
-                url: item.url,
-                created: item.created,
-              }))
-              .filter(item => item.body && item.body.length > 50 && item.url)
-              .slice(0, 5);
-            
-            console.log(`Found ${additionalArticles.length} additional articles from broader search`);
-            
-            // Combine and deduplicate
-            const allArticles = [...validArticles, ...additionalArticles];
-            const uniqueArticles = allArticles.filter((article, index, self) => 
-              index === self.findIndex(a => a.url === article.url)
-            );
-            
-            if (uniqueArticles.length >= 2) {
-              console.log(`Successfully found ${uniqueArticles.length} total articles`);
-              const articlesForContext = uniqueArticles.slice(0, 2);
-              
-              // Get current price data for the price action line
-              const priceData = await fetchPriceData(ticker);
-
-              // Prepare article data for the prompt
-              const articlesData = articlesForContext.map((article, index) => 
-                `Article ${index + 1}:
-Headline: ${article.headline}
-Content: ${article.body}
-URL: ${article.url}`
-              ).join('\n\n');
-
-              // Continue with the rest of the function using articlesForContext
-              // Generate enhanced story with integrated context
-              const prompt = `
-You are a financial journalist. You have an existing story and two recent news articles about the same ticker. Your task is to intelligently integrate content from these articles into the existing story.
-
-EXISTING STORY:
-${existingStory}
-
-RECENT ARTICLES:
-${articlesData}
-
-CRITICAL TASK: You MUST integrate content from BOTH articles with EXACTLY 2 hyperlinks total AND add a standalone "Also Read" line.
-
-INSTRUCTIONS:
-1. Review the existing story and identify where to integrate content from the two articles
-2. Place ONE hyperlink from Article 1 in the FIRST or SECOND paragraph of the story
-3. Place ONE hyperlink from Article 2 in a MIDDLE paragraph (paragraphs 3-5) of the story
-4. Each integration should be MAXIMUM 2 sentences from each article source
-5. Weave the content naturally into existing paragraphs - do NOT create standalone hyperlink lines
-6. Use this exact hyperlink format: <a href="[URL]">[three word phrase]</a>
-7. Maintain the two-sentence-per-paragraph rule throughout
-8. Focus on technical data, market context, or relevant business developments
-9. Make the integrations feel natural and enhance the story's flow
-10. Do NOT reference "recent articles" or similar phrases - just embed the hyperlinks naturally
-11. Ensure all prices are formatted to exactly 2 decimal places
-
-MANDATORY HYPERLINK REQUIREMENTS:
-- Article 1 URL: ${articlesForContext[0].url} - MUST be used in paragraph 1 or 2
-- Article 2 URL: ${articlesForContext[1].url} - MUST be used in paragraph 3, 4, or 5
-- Both hyperlinks must be embedded naturally in the text
-- YOU MUST INCLUDE EXACTLY 2 HYPERLINKS - ONE FROM EACH ARTICLE
-- DO NOT SKIP EITHER ARTICLE - BOTH MUST BE USED
-- If you only include 1 hyperlink, you have failed the task
-
-ALSO READ LINE REQUIREMENT:
-- Add a standalone line in the middle of the story (paragraphs 3-5)
-- Format: "Also Read: <a href="${articlesForContext[0].url}">${articlesForContext[0].headline}</a>"
-- Place it between paragraphs, not integrated into text
-- This is in addition to the 2 integrated hyperlinks
-
-CRITICAL RULES:
-- Article 1 hyperlink goes in paragraph 1 or 2
-- Article 2 hyperlink goes in paragraph 3, 4, or 5
-- Maximum 2 sentences per article integration
-- No standalone hyperlink lines (except the "Also Read" line)
-- Maintain existing story structure and flow
-- Format all prices to exactly 2 decimal places
-
-VERIFICATION: Before submitting, count your hyperlinks. You must have exactly 2 integrated hyperlinks plus 1 "Also Read" line.
-
-Return the complete enhanced story with integrated context and "Also Read" line:`;
-
-              const completion = await openai.chat.completions.create({
-                model: 'gpt-4o-mini',
-                messages: [{ role: 'user', content: prompt }],
-                max_tokens: 2000,
-                temperature: 0.7,
-              });
-
-              const enhancedStory = completion.choices[0].message?.content?.trim() || '';
-
-              if (!enhancedStory) {
-                return NextResponse.json({ error: 'Failed to generate enhanced story.' }, { status: 500 });
-              }
-
-              // Add price action line at the bottom
-              const priceActionLine = generatePriceActionLine(ticker, priceData);
-              
-              // Add Read Next link (only headline hyperlinked)
-              const readNextLink = `Read Next: <a href="${articlesForContext[1].url}">${articlesForContext[1].headline}</a>`;
-              
-              // Combine enhanced story with price action line and read next link
-              const completeStory = `${enhancedStory}\n\n${priceActionLine}\n\n${readNextLink}`;
-              
-              return NextResponse.json({ 
-                story: completeStory,
-                contextSources: articlesForContext.map(article => ({
-                  headline: article.headline,
-                  url: article.url
-                }))
-              });
-            } else {
-              return NextResponse.json({ 
-                error: `Insufficient articles with valid URLs. Found ${uniqueArticles.length} valid articles after broader search, need at least 2.` 
-              }, { status: 404 });
-            }
-          }
-        }
-      } catch (broaderError) {
-        console.error('Error in broader search:', broaderError);
-      }
-      
+        if (validArticles.length < 2) {
       return NextResponse.json({ 
         error: `Insufficient articles with valid URLs. Found ${validArticles.length} valid articles, need at least 2.` 
       }, { status: 404 });
