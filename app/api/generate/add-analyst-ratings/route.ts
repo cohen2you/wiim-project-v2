@@ -95,14 +95,19 @@ TASK: Add an analyst ratings section to the existing story.
 INSTRUCTIONS:
 1. Insert the analyst ratings section AFTER the technical analysis section and BEFORE any news context
 2. Use the EXACT firm names and ratings from the data provided above
-3. Format as: "Analyst ratings remain strong, with [EXACT FIRM NAME] maintaining [EXACT RATING] rating with $[EXACT PRICE] price target, [EXACT FIRM NAME] maintaining [EXACT RATING] rating with $[EXACT PRICE] price target"
-4. DO NOT use generic phrases like "a prominent financial firm" or "another firm"
-5. DO NOT use placeholder text like "[FIRM NAME]" - use the actual firm names from the data
-6. Keep the rest of the story exactly as it is
-7. Maintain the same writing style and tone
-8. If no analyst ratings are available, skip adding this section
+3. Analyze the sentiment of the ratings and provide appropriate commentary:
+   - If ratings are mostly positive (Buy, Overweight, Outperform): "Analyst sentiment remains positive"
+   - If ratings are mixed (some positive, some neutral/negative): "Analyst ratings show mixed sentiment"
+   - If ratings are mostly negative (Sell, Underweight, Underperform): "Analyst sentiment appears cautious"
+   - If ratings are mostly neutral (Hold, Market Perform, Equal Weight): "Analyst ratings reflect neutral sentiment"
+4. Format as: "[SENTIMENT COMMENTARY], with [EXACT FIRM NAME] maintaining [EXACT RATING] rating with $[EXACT PRICE] price target, [EXACT FIRM NAME] maintaining [EXACT RATING] rating with $[EXACT PRICE] price target"
+5. DO NOT use generic phrases like "a prominent financial firm" or "another firm"
+6. DO NOT use placeholder text like "[FIRM NAME]" - use the actual firm names from the data
+7. Keep the rest of the story exactly as it is
+8. Maintain the same writing style and tone
+9. If no analyst ratings are available, skip adding this section
 
-EXAMPLE: If the data shows "Morgan Stanley maintains Buy rating with $810 price target", your output should be "Morgan Stanley maintains Buy rating with $810 price target" (not "[FIRM NAME] maintains Buy rating with $810 price target")
+EXAMPLE: If the data shows "Morgan Stanley maintains Buy rating with $810 price target", your output should be "Analyst sentiment remains positive, with Morgan Stanley maintaining Buy rating with $810 price target"
 
 Add the analyst ratings section after the technical analysis section now.`;
 

@@ -329,7 +329,13 @@ export async function POST(request: Request) {
        analystSection = `ANALYST RATINGS DATA (USE THIS EXACTLY):
 ${stockData.analystRatings.join('\n')}
 
-You MUST use the above analyst ratings data in your story. Format them as: "Analyst ratings remain strong, with [FIRM NAME] maintaining [RATING] rating with $[PRICE] price target, [FIRM NAME] maintaining [RATING] rating with $[PRICE] price target"`;
+You MUST use the above analyst ratings data in your story. Analyze the sentiment and format as:
+- If ratings are mostly positive (Buy, Overweight, Outperform): "Analyst sentiment remains positive"
+- If ratings are mixed (some positive, some neutral/negative): "Analyst ratings show mixed sentiment" 
+- If ratings are mostly negative (Sell, Underweight, Underperform): "Analyst sentiment appears cautious"
+- If ratings are mostly neutral (Hold, Market Perform, Equal Weight): "Analyst ratings reflect neutral sentiment"
+
+Format: "[SENTIMENT COMMENTARY], with [FIRM NAME] maintaining [RATING] rating with $[PRICE] price target"`;
      } else {
        analystSection = `ANALYST RATINGS: No recent analyst ratings data available.`;
      }
