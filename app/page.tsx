@@ -54,6 +54,8 @@ export default function PRStoryGeneratorPage() {
   const [wgoContextError, setWgoContextError] = useState('');
   const [loadingAnalystRatings, setLoadingAnalystRatings] = useState(false);
   const [analystRatingsError, setAnalystRatingsError] = useState('');
+  const [loadingEdgeRatings, setLoadingEdgeRatings] = useState(false);
+  const [edgeRatingsError, setEdgeRatingsError] = useState('');
   const [currentStep, setCurrentStep] = useState(0);
   const [storyComponents, setStoryComponents] = useState({
     headline: '',
@@ -253,11 +255,39 @@ export default function PRStoryGeneratorPage() {
       const data = await res.json();
       if (!res.ok || !data.story) throw new Error(data.error || 'Failed to add analyst ratings');
       setArticle(data.story);
-      setCurrentStep(4); // Increment to step 4 to show "Add Context" button
+      setCurrentStep(4); // Go to step 4 to show "Add Edge Ratings" button
     } catch (err: any) {
       setAnalystRatingsError(err.message || 'Failed to add analyst ratings');
     } finally {
       setLoadingAnalystRatings(false);
+    }
+  };
+
+  // Add Edge Ratings step
+  const addEdgeRatings = async () => {
+    if (!article) {
+      setEdgeRatingsError('No existing story to add Edge ratings to');
+      return;
+    }
+    
+    setLoadingEdgeRatings(true);
+    setEdgeRatingsError('');
+    
+    try {
+      const res = await fetch('/api/generate/add-edge-ratings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ticker, existingStory: article }),
+      });
+      
+      const data = await res.json();
+      if (!res.ok || !data.story) throw new Error(data.error || 'Failed to add Edge ratings');
+      setArticle(data.story);
+      setCurrentStep(5); // Go to step 5 to show "Add Context" button
+    } catch (err: any) {
+      setEdgeRatingsError(err.message || 'Failed to add Edge ratings');
+    } finally {
+      setLoadingEdgeRatings(false);
     }
   };
 
@@ -650,7 +680,7 @@ export default function PRStoryGeneratorPage() {
       const data = await res.json();
       if (!res.ok || !data.story) throw new Error(data.error || 'Failed to add context');
       setArticle(data.story);
-      setCurrentStep(5); // Go to Add Links/Price step
+      setCurrentStep(6); // Go to Add Links/Price step
     } catch (err: any) {
       setContextError(err.message || 'Failed to add context');
     } finally {
@@ -678,7 +708,7 @@ export default function PRStoryGeneratorPage() {
       const data = await res.json();
       if (!res.ok || !data.story) throw new Error(data.error || 'Failed to add links and price');
       setArticle(data.story);
-      setCurrentStep(6); // Go to finalize step
+      setCurrentStep(7); // Go to finalize step
     } catch (err: any) {
       setLinksPriceError(err.message || 'Failed to add links and price');
     } finally {
@@ -713,7 +743,7 @@ export default function PRStoryGeneratorPage() {
       
       console.log('Setting article with new story length:', data.story.length);
       setArticle(data.story);
-      setCurrentStep(7); // Increment to step 7 to indicate story is complete
+      setCurrentStep(8); // Increment to step 8 to indicate story is complete
     } catch (err: any) {
       console.error('Finalize error:', err);
       setWgoContextError(err.message || 'Failed to add WGO context');
@@ -1054,6 +1084,7 @@ export default function PRStoryGeneratorPage() {
             {linksPriceError && <div style={{ color: 'red', marginBottom: 10 }}>{linksPriceError}</div>}
             {wgoContextError && <div style={{ color: 'red', marginBottom: 10 }}>{wgoContextError}</div>}
       {analystRatingsError && <div style={{ color: 'red', marginBottom: 10 }}>{analystRatingsError}</div>}
+      {edgeRatingsError && <div style={{ color: 'red', marginBottom: 10 }}>{edgeRatingsError}</div>}
       {article && (
         <div style={{ marginBottom: 20 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
@@ -1113,7 +1144,24 @@ export default function PRStoryGeneratorPage() {
                   {loadingAnalystRatings ? 'Adding Analyst Ratings...' : 'Add Analyst Ratings'}
                 </button>
               )}
-              {currentStep >= 4 && currentStep < 4.5 && (
+              {currentStep >= 4 && currentStep < 5 && (
+                <button
+                  onClick={addEdgeRatings}
+                  disabled={loadingEdgeRatings}
+                  style={{ 
+                    padding: '8px 16px', 
+                    background: loadingEdgeRatings ? '#6b7280' : '#f59e0b', 
+                    color: 'white', 
+                    border: 'none', 
+                    borderRadius: 4,
+                    fontSize: 14,
+                    cursor: loadingEdgeRatings ? 'not-allowed' : 'pointer'
+                  }}
+                >
+                  {loadingEdgeRatings ? 'Adding Edge Ratings...' : 'Add Edge Ratings'}
+                </button>
+              )}
+              {currentStep >= 5 && currentStep < 6 && (
                 <button
                   onClick={addContext}
                   disabled={loadingContext}
@@ -1130,7 +1178,7 @@ export default function PRStoryGeneratorPage() {
                   {loadingContext ? 'Adding Context...' : 'Add Context'}
                 </button>
               )}
-              {currentStep >= 5 && currentStep < 6 && (
+              {currentStep >= 6 && currentStep < 7 && (
                 <button
                   onClick={addLinksPrice}
                   disabled={loadingLinksPrice}
@@ -1147,7 +1195,7 @@ export default function PRStoryGeneratorPage() {
                   {loadingLinksPrice ? 'Adding Links/Price...' : 'Add Links/Price'}
                 </button>
               )}
-              {currentStep >= 6 && (
+              {currentStep >= 7 && (
                 <button
                   onClick={addWGOContext}
                   disabled={loadingWGOContext}

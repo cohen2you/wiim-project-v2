@@ -100,14 +100,18 @@ INSTRUCTIONS:
    - If ratings are mixed (some positive, some neutral/negative): "Analyst ratings show mixed sentiment"
    - If ratings are mostly negative (Sell, Underweight, Underperform): "Analyst sentiment appears cautious"
    - If ratings are mostly neutral (Hold, Market Perform, Equal Weight): "Analyst ratings reflect neutral sentiment"
-4. Format as: "[SENTIMENT COMMENTARY], with [EXACT FIRM NAME] maintaining [EXACT RATING] rating with $[EXACT PRICE] price target, [EXACT FIRM NAME] maintaining [EXACT RATING] rating with $[EXACT PRICE] price target"
+4. Format EXACTLY as: "[SENTIMENT COMMENTARY], with [FIRST FIRM] maintaining [FIRST RATING] rating with $[FIRST PRICE] price target, [SECOND FIRM] maintaining [SECOND RATING] rating with $[SECOND PRICE] price target"
 5. DO NOT use generic phrases like "a prominent financial firm" or "another firm"
 6. DO NOT use placeholder text like "[FIRM NAME]" - use the actual firm names from the data
-7. Keep the rest of the story exactly as it is
-8. Maintain the same writing style and tone
-9. If no analyst ratings are available, skip adding this section
+7. DO NOT add any additional commentary or analysis beyond the sentiment and firm ratings
+8. DO NOT add sentences like "This positive outlook from analysts reinforces..." - just the ratings line
+9. Keep the rest of the story exactly as it is
+10. Maintain the same writing style and tone
+11. If no analyst ratings are available, skip adding this section
 
 EXAMPLE: If the data shows "Morgan Stanley maintains Buy rating with $810 price target", your output should be "Analyst sentiment remains positive, with Morgan Stanley maintaining Buy rating with $810 price target"
+
+CRITICAL: Do NOT add any additional sentences after the ratings line. The analyst ratings section should be exactly ONE sentence.
 
 Add the analyst ratings section after the technical analysis section now.`;
 

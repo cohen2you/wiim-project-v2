@@ -61,7 +61,7 @@ Rules:
 - Include SPECIFIC price levels, volume data, and technical indicator values
 - Use the actual price data provided below
 - Focus on technical analysis with concrete data points
-- Professional financial journalism tone
+- Write in a direct, conversational tone - like a trader talking to another trader
 - No analyst ratings or commentary
 - DO NOT mention the ticker symbol (${ticker}) or company name in this section
 - DO NOT repeat the company name - it should only appear once in the lead paragraph
@@ -73,6 +73,12 @@ Rules:
 - AVOID generic statements - use specific data points
 - DO NOT repeat specific price changes or percentages that will be in the price action line
 - DO NOT include current price action lines like "The stock is currently trading at $X.XX" - focus on technical analysis only
+- ABSOLUTELY FORBIDDEN: Do NOT mention current price, current trading levels, or "currently trading at" - this information belongs in the price action line at the bottom
+- ABSOLUTELY FORBIDDEN: Do NOT say "the stock exhibits a current price of" or similar phrases
+- ABSOLUTELY FORBIDDEN: Do NOT describe what the stock is "currently" doing in terms of price - focus on technical patterns and indicators only
+- WRITING STYLE: Use direct, punchy language - avoid flowery or academic language
+- WRITING STYLE: Write like you're explaining to a colleague, not writing a research paper
+- WRITING STYLE: Use active voice and short, clear sentences
 
 TECHNICAL DATA TO USE:
 ${priceData ? `
@@ -105,10 +111,29 @@ REQUIRED ELEMENTS:
 AVOID:
 - Current price action statements
 - "The stock is currently trading at..." phrases
+- "The stock exhibits a current price of..." phrases
+- "Currently trading at..." phrases
 - Simple price change descriptions
 - Focus on technical analysis, not price reporting
+- ANY mention of current price levels or current trading status
+- Formal, academic language like "exhibits," "indicates," "suggests," "reflects"
+- Flowery phrases like "notably above," "significantly," "particularly"
+- Research paper tone - write like a trader, not a professor
 
-Generate the technical analysis section with specific data points:`;
+Generate the technical analysis section with specific data points:
+
+EXAMPLES OF WHAT NOT TO WRITE:
+❌ "The stock exhibits a current price of $204.06, reflecting a slight upward movement."
+❌ "Currently trading at $204.06, the stock shows..."
+❌ "The stock is currently at $204.06 with..."
+
+EXAMPLES OF WHAT TO WRITE:
+✅ "The stock is testing resistance at $205.34 with solid support at $202.16."
+✅ "Volume is running hot at 22.5 million shares - that's well above the 15 million average."
+✅ "RSI at 62.45 shows we're getting close to overbought territory."
+✅ "MACD is still bullish but the lines are tightening up."
+✅ "We've got higher highs and higher lows - that's a solid uptrend."
+✅ "This looks like an ascending triangle forming between $205.34 and the recent lows."`;
 
     const completion = await openai.chat.completions.create({
       model: 'gpt-4o-mini',

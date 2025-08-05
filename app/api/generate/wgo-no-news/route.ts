@@ -335,7 +335,9 @@ You MUST use the above analyst ratings data in your story. Analyze the sentiment
 - If ratings are mostly negative (Sell, Underweight, Underperform): "Analyst sentiment appears cautious"
 - If ratings are mostly neutral (Hold, Market Perform, Equal Weight): "Analyst ratings reflect neutral sentiment"
 
-Format: "[SENTIMENT COMMENTARY], with [FIRM NAME] maintaining [RATING] rating with $[PRICE] price target"`;
+Format: "[SENTIMENT COMMENTARY], with [FIRST FIRM] maintaining [FIRST RATING] rating with $[FIRST PRICE] price target, [SECOND FIRM] maintaining [SECOND RATING] rating with $[SECOND PRICE] price target"
+
+CRITICAL: Use the EXACT firm names from the data above. Do NOT use [FIRM NAME] placeholders.`;
      } else {
        analystSection = `ANALYST RATINGS: No recent analyst ratings data available.`;
      }
