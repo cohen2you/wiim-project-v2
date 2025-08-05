@@ -144,8 +144,10 @@ function filterAndProcessArticles(data: any[], prioritizeMovers: boolean): any[]
     });
   }
   
-  return articles;
-}
+     return articles;
+ }
+
+
 
 export async function POST(request: Request) {
   try {
@@ -179,8 +181,7 @@ export async function POST(request: Request) {
     // Ensure we have exactly 2 articles for the context
     const articlesForContext = validArticles.slice(0, 2);
 
-    // Get current price data for the price action line
-    const priceData = await fetchPriceData(ticker);
+
 
     // Prepare article data for the prompt
     const articlesData = articlesForContext.map((article, index) => 
@@ -200,7 +201,7 @@ ${existingStory}
 RECENT ARTICLES:
 ${articlesData}
 
-CRITICAL TASK: You MUST integrate content from BOTH articles with EXACTLY 2 hyperlinks total AND add a standalone "Also Read" line.
+CRITICAL TASK: You MUST integrate content from BOTH articles with EXACTLY 2 hyperlinks total.
 
 INSTRUCTIONS:
 1. Review the existing story and identify where to integrate content from the two articles
@@ -214,6 +215,8 @@ INSTRUCTIONS:
 9. Make the integrations feel natural and enhance the story's flow
 10. Do NOT reference "recent articles" or similar phrases - just embed the hyperlinks naturally
 11. Ensure all prices are formatted to exactly 2 decimal places
+12. DO NOT use phrases like "according to Benzinga" or "according to recent reports" - these are awkward since this is for Benzinga
+13. Integrate the content directly without attribution phrases
 
 MANDATORY HYPERLINK REQUIREMENTS:
 - Article 1 URL: ${articlesForContext[0].url} - MUST be used in paragraph 1 or 2
@@ -223,23 +226,22 @@ MANDATORY HYPERLINK REQUIREMENTS:
 - DO NOT SKIP EITHER ARTICLE - BOTH MUST BE USED
 - If you only include 1 hyperlink, you have failed the task
 
-ALSO READ LINE REQUIREMENT:
-- Add a standalone line in the middle of the story (paragraphs 3-5)
-- Format: "Also Read: <a href="${articlesForContext[0].url}">${articlesForContext[0].headline}</a>"
-- Place it between paragraphs, not integrated into text
-- This is in addition to the 2 integrated hyperlinks
+HYPERLINK INTEGRATION RULES:
+- Integrate content naturally without attribution phrases
+- Avoid phrases like "according to Benzinga" or "according to recent reports"
+- Present information directly as factual content
 
 CRITICAL RULES:
 - Article 1 hyperlink goes in paragraph 1 or 2
 - Article 2 hyperlink goes in paragraph 3, 4, or 5
 - Maximum 2 sentences per article integration
-- No standalone hyperlink lines (except the "Also Read" line)
+- No standalone hyperlink lines
 - Maintain existing story structure and flow
 - Format all prices to exactly 2 decimal places
 
-VERIFICATION: Before submitting, count your hyperlinks. You must have exactly 2 integrated hyperlinks plus 1 "Also Read" line.
+VERIFICATION: Before submitting, count your hyperlinks. You must have exactly 2 integrated hyperlinks.
 
-Return the complete enhanced story with integrated context and "Also Read" line:`;
+Return the complete enhanced story with integrated context:`;
 
     const completion = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
@@ -254,14 +256,8 @@ Return the complete enhanced story with integrated context and "Also Read" line:
       return NextResponse.json({ error: 'Failed to generate enhanced story.' }, { status: 500 });
     }
 
-    // Add price action line at the bottom
-    const priceActionLine = generatePriceActionLine(ticker, priceData);
-    
-    // Add Read Next link (only headline hyperlinked)
-    const readNextLink = `Read Next: <a href="${articlesForContext[1].url}">${articlesForContext[1].headline}</a>`;
-    
-    // Combine enhanced story with price action line and read next link
-    const completeStory = `${enhancedStory}\n\n${priceActionLine}\n\n${readNextLink}`;
+         // Return just the enhanced story with integrated context (no price action or additional links)
+     const completeStory = enhancedStory;
     
     return NextResponse.json({ 
       story: completeStory,
@@ -276,61 +272,4 @@ Return the complete enhanced story with integrated context and "Also Read" line:
   }
 }
 
-// Helper function to fetch price data
-async function fetchPriceData(ticker: string) {
-  try {
-    const response = await fetch(`https://api.benzinga.com/api/v2/quoteDelayed?token=${process.env.BENZINGA_API_KEY}&symbols=${encodeURIComponent(ticker)}`);
-    
-    if (!response.ok) {
-      console.error('Failed to fetch price data');
-      return null;
-    }
-    
-    const data = await response.json();
-    if (data && typeof data === 'object') {
-      const quote = data[ticker.toUpperCase()];
-      if (quote && typeof quote === 'object') {
-        return {
-          last: quote.lastTradePrice || 0,
-          change: quote.change || 0,
-          change_percent: quote.changePercent || 0,
-          volume: quote.volume || 0,
-          high: quote.high || 0,
-          low: quote.low || 0,
-          open: quote.open || 0
-        };
-      }
-    }
-    return null;
-  } catch (error) {
-    console.error('Error fetching price data:', error);
-    return null;
-  }
-}
-
-// Helper function to generate price action line
-function generatePriceActionLine(ticker: string, priceData: any) {
-  if (!priceData) {
-    return `${ticker} Price Action: ${ticker} shares were trading during regular market hours, according to <a href="https://pro.benzinga.com">Benzinga Pro</a>.`;
-  }
-  
-  const last = parseFloat(priceData.last || 0).toFixed(2);
-  const change = parseFloat(priceData.change || 0).toFixed(2);
-  const changePercent = parseFloat(priceData.change_percent || 0).toFixed(2);
-  
-  // Check if market is open (rough estimate)
-  const now = new Date();
-  const isMarketOpen = now.getHours() >= 9 && now.getHours() < 16;
-  
-  if (isMarketOpen) {
-    return `${ticker} Price Action: ${ticker} shares were ${changePercent.startsWith('-') ? 'down' : 'up'} ${changePercent}% at $${last} during regular trading hours on ${getCurrentDayName()}, according to <a href="https://pro.benzinga.com">Benzinga Pro</a>.`;
-  } else {
-    return `${ticker} Price Action: ${ticker} shares ${changePercent.startsWith('-') ? 'fell' : 'rose'} ${changePercent}% to $${last} during regular trading hours on ${getCurrentDayName()}, according to <a href="https://pro.benzinga.com">Benzinga Pro</a>.`;
-  }
-}
-
-// Helper function to get current day name
-function getCurrentDayName() {
-  const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-  return days[new Date().getDay()];
-} 
+ 

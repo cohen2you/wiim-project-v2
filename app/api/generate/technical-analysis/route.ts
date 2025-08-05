@@ -72,6 +72,7 @@ Rules:
 - Use present tense for current market conditions
 - AVOID generic statements - use specific data points
 - DO NOT repeat specific price changes or percentages that will be in the price action line
+- DO NOT include current price action lines like "The stock is currently trading at $X.XX" - focus on technical analysis only
 
 TECHNICAL DATA TO USE:
 ${priceData ? `
@@ -94,12 +95,18 @@ CALCULATE AND INCLUDE:
 ` : 'No price data available'}
 
 REQUIRED ELEMENTS:
-1. **Price Action**: Specific current price, change, and momentum
+1. **Technical Indicators**: Calculated values (RSI, MACD, etc.)
 2. **Volume Analysis**: Actual volume numbers and significance
 3. **Support/Resistance**: Specific price levels with context
-4. **Technical Indicators**: Calculated values (RSI, MACD, etc.)
-5. **Chart Patterns**: Specific formations based on price action
-6. **Market Structure**: Higher highs/lows, trend confirmation
+4. **Chart Patterns**: Specific formations based on price action
+5. **Market Structure**: Higher highs/lows, trend confirmation
+6. **Momentum Analysis**: Technical momentum indicators and signals
+
+AVOID:
+- Current price action statements
+- "The stock is currently trading at..." phrases
+- Simple price change descriptions
+- Focus on technical analysis, not price reporting
 
 Generate the technical analysis section with specific data points:`;
 
