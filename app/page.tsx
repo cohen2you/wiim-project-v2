@@ -850,149 +850,28 @@ export default function PRStoryGeneratorPage() {
 
   const handleCopyArticle = async () => {
     if (articleRef.current) {
-      // Get the article HTML content
+      // Get the article HTML content and remove chart placeholder
       let htmlContent = articleRef.current.innerHTML;
       
-            // Generate unique OpenAI chart with accurate data
-      if (ticker) {
-        try {
-          // Get real price data first
-          const priceResponse = await fetch('/api/bz/priceaction', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ticker }),
-          });
-          
-          let chartImage = '';
-          if (priceResponse.ok) {
-            const priceData = await priceResponse.json();
-            if (priceData.priceAction) {
-              // Generate realistic 5-day price data based on current price
-              const currentPrice = priceData.priceAction.last || 100;
-              const priceChange = priceData.priceAction.change || 0;
-              const volatility = Math.abs(priceChange) / 100; // Use actual volatility
-              
-              // Create realistic 5-day price progression
-              const basePrice = currentPrice - priceChange; // Start from previous close
-              const prices = [];
-              for (let i = 0; i < 5; i++) {
-                const dayChange = (Math.random() - 0.5) * volatility * basePrice * 0.02; // Realistic daily movement
-                const price = basePrice + (i * priceChange / 4) + dayChange;
-                prices.push(Math.round(price * 100) / 100);
-              }
-              prices.push(currentPrice); // Add current price
-              
-              // Generate unique chart styling with OpenAI-inspired design
-              const chartConfig = {
-                type: 'line',
-                data: {
-                  labels: ['5 Days Ago', '4 Days Ago', '3 Days Ago', '2 Days Ago', 'Yesterday', 'Today'],
-                  datasets: [{
-                    label: `${ticker} Stock Price`,
-                    data: prices,
-                    borderColor: '#667eea',
-                    backgroundColor: 'rgba(102, 126, 234, 0.1)',
-                    borderWidth: 3,
-                    fill: true,
-                    tension: 0.4,
-                    pointBackgroundColor: '#667eea',
-                    pointBorderColor: '#ffffff',
-                    pointBorderWidth: 2,
-                    pointRadius: 4
-                  }]
-                },
-                options: {
-                  responsive: true,
-                  plugins: {
-                    title: {
-                      display: true,
-                      text: `${ticker} 5-Day Price Movement`,
-                      font: { size: 16, weight: 'bold' },
-                      color: '#374151'
-                    },
-                    legend: {
-                      display: false
-                    }
-                  },
-                  scales: {
-                    y: {
-                      beginAtZero: false,
-                      grid: {
-                        color: 'rgba(0,0,0,0.1)'
-                      },
-                      ticks: {
-                        color: '#6b7280'
-                      }
-                    },
-                    x: {
-                      grid: {
-                        color: 'rgba(0,0,0,0.1)'
-                      },
-                      ticks: {
-                        color: '#6b7280'
-                      }
-                    }
-                  }
-                }
-              };
-              
-              const chartUrl = `https://quickchart.io/chart?c=${encodeURIComponent(JSON.stringify(chartConfig))}&width=600&height=400&backgroundColor=white`;
-              
-              chartImage = `
-                <div style="text-align: center; margin: 20px 0;">
-                  <img src="${chartUrl}" alt="5-Day Stock Chart for ${ticker}" style="max-width: 100%; height: auto; border: 1px solid #e5e7eb; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);" />
-                  <p style="font-size: 12px; color: #666; margin-top: 10px;">AI-Generated 5-Day Stock Chart for ${ticker}</p>
-                </div>
-              `;
-            }
-          }
-          
-          // Fallback to Finviz if custom chart fails
-          if (!chartImage) {
-            chartImage = `
-              <div style="text-align: center; margin: 20px 0;">
-                <img src="https://finviz.com/chart.ashx?t=${ticker}&ty=c&ta=1&p=d&s=l" alt="5-Day Stock Chart for ${ticker}" style="max-width: 100%; height: auto; border: 1px solid #e5e7eb; border-radius: 8px;" />
-                <p style="font-size: 12px; color: #666; margin-top: 10px;">5-Day Stock Chart for ${ticker}</p>
-              </div>
-            `;
-          }
-          
-          const finalHtmlContent = htmlContent + chartImage;
-          
-          // Create a clipboard item with both HTML and text formats
-          const clipboardItem = new ClipboardItem({
-            'text/html': new Blob([finalHtmlContent], { type: 'text/html' }),
-            'text/plain': new Blob([articleRef.current?.innerText || ''], { type: 'text/plain' })
-          });
-          
-          navigator.clipboard.write([clipboardItem]);
-          setCopied(true);
-          setTimeout(() => setCopied(false), 2000);
-          return;
-        } catch (error) {
-          console.log('Failed to generate chart image:', error);
-        }
-      }
+      // Remove chart placeholder and any chart-related content
+      htmlContent = htmlContent.replace(/\[STOCK_CHART_PLACEHOLDER\][\s\S]*?\[\/STOCK_CHART_PLACEHOLDER\]/g, '');
+      htmlContent = htmlContent.replace(/\[5-Day Stock Chart[\s\S]*?Chart will be embedded[\s\S]*?\]/g, '');
+      htmlContent = htmlContent.replace(/<div style="text-align: center; margin: 20px 0;">[\s\S]*?<\/div>/g, '');
       
-      // Fallback: Add chart placeholder if image capture failed
-      if (ticker) {
-        const chartPlaceholder = `
-          <div style="text-align: center; margin: 20px 0;">
-            <p style="font-size: 14px; color: #666; margin-bottom: 10px;">
-              [5-Day Stock Chart for ${ticker} - Chart will be embedded when pasted into WordPress]
-            </p>
-          </div>
-        `;
-        htmlContent += chartPlaceholder;
-      }
+      // Convert HTML to properly formatted text with paragraph breaks
+      const tempDiv = document.createElement('div');
+      tempDiv.innerHTML = htmlContent;
       
-      // Get text content with proper line breaks
-      const textContent = articleRef.current.innerText;
+      // Extract text content with proper paragraph formatting
+      const paragraphs = Array.from(tempDiv.querySelectorAll('p')).map(p => p.textContent?.trim()).filter(text => text);
+      
+      // Join paragraphs with double line breaks for proper formatting
+      const formattedText = paragraphs.join('\n\n');
       
       // Create a clipboard item with both HTML and text formats
       const clipboardItem = new ClipboardItem({
         'text/html': new Blob([htmlContent], { type: 'text/html' }),
-        'text/plain': new Blob([textContent], { type: 'text/plain' })
+        'text/plain': new Blob([formattedText], { type: 'text/plain' })
       });
       
       navigator.clipboard.write([clipboardItem]);
