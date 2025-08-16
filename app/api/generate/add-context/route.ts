@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
 import OpenAI from 'openai';
-import { preserveHyperlinks } from '../../../../lib/hyperlink-preservation';
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const BENZINGA_API_KEY = process.env.BENZINGA_API_KEY!;
@@ -311,43 +310,97 @@ Return the complete enhanced story with integrated context:`;
       }
     }
     
-    // If we still don't have both hyperlinks after all attempts, try a simpler approach
-    if (!enhancedStory.includes(articlesForContext[0].url) || !enhancedStory.includes(articlesForContext[1].url)) {
-      console.log('Falling back to manual hyperlink insertion...');
-      
-      // Check if we lost existing hyperlinks
-      const existingHyperlinkCount = (existingStory.match(/<a href=/g) || []).length;
-      const currentHyperlinkCount = (enhancedStory.match(/<a href=/g) || []).length;
-      
-      if (currentHyperlinkCount < existingHyperlinkCount) {
-        console.log('WARNING: Lost existing hyperlinks during AI processing. Restoring original story and adding new hyperlinks manually.');
-        enhancedStory = existingStory; // Restore original story to preserve existing hyperlinks
-      }
-      
-      // Split the story into paragraphs
-      const paragraphs = enhancedStory.split('\n\n').filter(p => p.trim());
-      
-      if (paragraphs.length >= 2) {
-        // Insert Article 1 hyperlink in first or second paragraph
-        const targetParagraph1 = paragraphs.length >= 2 ? 1 : 0;
-        const article1Content = ` <a href="${articlesForContext[0].url}">recent market activity</a>`;
-        paragraphs[targetParagraph1] = paragraphs[targetParagraph1] + article1Content;
-        
-        // Insert Article 2 hyperlink in middle paragraph
-        const targetParagraph2 = Math.min(3, paragraphs.length - 1);
-        const article2Content = ` <a href="${articlesForContext[1].url}">market developments</a>`;
-        paragraphs[targetParagraph2] = paragraphs[targetParagraph2] + article2Content;
-        
-        enhancedStory = paragraphs.join('\n\n');
-        console.log('Manual hyperlink insertion completed');
-      }
-    }
+         // If we still don't have both hyperlinks after all attempts, try a more natural approach
+     if (!enhancedStory.includes(articlesForContext[0].url) || !enhancedStory.includes(articlesForContext[1].url)) {
+       console.log('Falling back to natural hyperlink integration...');
+       
+       // Check if we lost existing hyperlinks
+       const existingHyperlinkCount = (existingStory.match(/<a href=/g) || []).length;
+       const currentHyperlinkCount = (enhancedStory.match(/<a href=/g) || []).length;
+       
+       if (currentHyperlinkCount < existingHyperlinkCount) {
+         console.log('WARNING: Lost existing hyperlinks during AI processing. Restoring original story and adding new hyperlinks naturally.');
+         enhancedStory = existingStory; // Restore original story to preserve existing hyperlinks
+       }
+       
+       // Split the story into paragraphs
+       const paragraphs = enhancedStory.split('\n\n').filter(p => p.trim());
+       
+       if (paragraphs.length >= 2) {
+         // For Article 1: Find a natural place in the first or second paragraph
+         const targetParagraph1 = paragraphs.length >= 2 ? 1 : 0;
+         let paragraph1 = paragraphs[targetParagraph1];
+         
+         // Look for natural integration points in the first paragraph
+         const integrationPoints1 = [
+           { pattern: /(shares have been|stock has been|company has been)/i, replacement: `$1 <a href="${articlesForContext[0].url}">amid recent developments</a>` },
+           { pattern: /(performance throughout|rally has extended|surge has continued)/i, replacement: `$1 <a href="${articlesForContext[0].url}">with strong momentum</a>` },
+           { pattern: /(analysts expressing|market sentiment|investor confidence)/i, replacement: `$1 <a href="${articlesForContext[0].url}">in the sector</a>` }
+         ];
+         
+         let integrated1 = false;
+         for (const point of integrationPoints1) {
+           if (point.pattern.test(paragraph1)) {
+             paragraph1 = paragraph1.replace(point.pattern, point.replacement);
+             integrated1 = true;
+             break;
+           }
+         }
+         
+         // If no natural point found, add at the end of the sentence before the last period
+         if (!integrated1) {
+           const sentences = paragraph1.split('.');
+           if (sentences.length > 1) {
+             const lastSentence = sentences[sentences.length - 2];
+             if (lastSentence.trim()) {
+               sentences[sentences.length - 2] = lastSentence + ` <a href="${articlesForContext[0].url}">amid recent developments</a>`;
+               paragraph1 = sentences.join('.');
+             }
+           }
+         }
+         
+         // For Article 2: Find a natural place in middle paragraphs
+         const targetParagraph2 = Math.min(3, paragraphs.length - 1);
+         let paragraph2 = paragraphs[targetParagraph2];
+         
+         const integrationPoints2 = [
+           { pattern: /(market conditions|trading activity|sector performance)/i, replacement: `$1 <a href="${articlesForContext[1].url}">shows continued strength</a>` },
+           { pattern: /(valuation outlook|price targets|analyst ratings)/i, replacement: `$1 <a href="${articlesForContext[1].url}">reflect market sentiment</a>` },
+           { pattern: /(execution risks|inherent challenges|market dynamics)/i, replacement: `$1 <a href="${articlesForContext[1].url}">in the current environment</a>` }
+         ];
+         
+         let integrated2 = false;
+         for (const point of integrationPoints2) {
+           if (point.pattern.test(paragraph2)) {
+             paragraph2 = paragraph2.replace(point.pattern, point.replacement);
+             integrated2 = true;
+             break;
+           }
+         }
+         
+         // If no natural point found, add at the end of the sentence before the last period
+         if (!integrated2) {
+           const sentences = paragraph2.split('.');
+           if (sentences.length > 1) {
+             const lastSentence = sentences[sentences.length - 2];
+             if (lastSentence.trim()) {
+               sentences[sentences.length - 2] = lastSentence + ` <a href="${articlesForContext[1].url}">amid market developments</a>`;
+               paragraph2 = sentences.join('.');
+             }
+           }
+         }
+         
+         // Update the paragraphs
+         paragraphs[targetParagraph1] = paragraph1;
+         paragraphs[targetParagraph2] = paragraph2;
+         
+         enhancedStory = paragraphs.join('\n\n');
+         console.log('Natural hyperlink integration completed');
+       }
+     }
 
-    // Return just the enhanced story with integrated context (no price action or additional links)
-    const completeStory = enhancedStory;
-    
-    // Preserve existing hyperlinks
-    const finalStory = preserveHyperlinks(existingStory, completeStory);
+    // Return the enhanced story with integrated context
+    const finalStory = enhancedStory;
     
     return NextResponse.json({ 
       story: finalStory,

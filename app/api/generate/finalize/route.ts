@@ -45,9 +45,9 @@ export async function POST(request: Request) {
     const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
     const currentDay = days[new Date().getDay()];
 
-    // Create a prompt to adjust the lead paragraph
-    const adjustmentPrompt = `
-You are a professional financial journalist. The lead paragraph of this story contradicts the price action information at the bottom. 
+    // Create a comprehensive prompt for finalizing the story
+    const finalizePrompt = `
+You are a senior financial editor reviewing and finalizing a news article. Your task is to create a polished, professional, and conversational financial news story while maintaining ALL essential content.
 
 EXISTING STORY:
 ${existingStory}
@@ -58,37 +58,96 @@ PRICE ACTION INFORMATION:
 - Ticker: ${tickerFromPrice}
 - Current day: ${currentDay}
 
-TASK: Adjust ONLY the lead paragraph to match the price action and include the day of the week while keeping everything else exactly the same.
+EDITORIAL TASKS:
+1. **Fix Market Day Issues**: If the story mentions Saturday or Sunday, change it to the most recent trading day (Friday) since markets are closed on weekends
+2. **Streamline to 350-400 Words**: Reduce the story length while preserving ALL essential content
+3. **Enhance Conversational Style**: Make the writing more engaging and conversational while maintaining journalistic standards
+4. **Preserve ALL Hyperlinks**: Keep ALL existing <a href="...">text</a> tags exactly as they are - DO NOT REMOVE ANY
+5. **Preserve Price Action Line**: Keep the price action line at the bottom of the story
+6. **Preserve Analyst Ratings**: Keep all analyst ratings with firm names and dates
+7. **Preserve Context Articles**: Keep all context article hyperlinks and references
+8. **Improve Wording**: Enhance sentence structure, word choice, and readability
+9. **Maintain Accuracy**: Ensure all facts, numbers, and technical details remain accurate
+10. **Professional Tone**: Keep the tone professional but accessible to retail investors
 
-RULES:
-1. **ONLY modify the lead paragraph** - leave everything else unchanged
-2. **Match the price direction**: If price action shows "down", the lead should say the stock "fell", "declined", "dropped", etc. If price action shows "up", the lead should say the stock "gained", "rose", "climbed", etc.
-3. **Include the day**: Add the day of the week (${currentDay}) to the lead paragraph
-4. **Preserve the structure**: Keep the same sentence structure and flow
-5. **Keep the context**: Maintain any relevant market context or volume information
-6. **Preserve all HTML hyperlinks**: Do not modify any <a href="...">text</a> tags
-7. **Keep the same tone**: Maintain the professional journalistic tone
-8. **Do not add specific price numbers**: The lead should focus on direction and context, not specific prices
+SPECIFIC REQUIREMENTS:
+- **Target Length**: 350-400 words total
+- **Lead Paragraph**: Must match the price action direction and include the correct trading day
+- **Weekend Fix**: Replace Saturday/Sunday with Friday (or the most recent trading day)
+- **Hyperlink Preservation**: ALL existing hyperlinks must remain intact and functional
+- **Price Action Line**: Must remain at the bottom of the story
+- **Analyst Ratings**: Must remain with firm names and dates
+- **Context Articles**: Must remain with hyperlinks
+- **Story Flow**: Improve transitions between paragraphs and ideas
+- **Clarity**: Make complex financial concepts more accessible
+- **Conciseness**: Remove redundant phrases and unnecessary words, but keep all essential information
 
-EXAMPLES:
-- If price action shows "down 0.17%" on Friday, the lead should say "saw declines on Friday", "fell on Friday", "declined on Friday", etc.
-- If price action shows "up 2.5%" on Friday, the lead should say "saw gains on Friday", "rose on Friday", "climbed on Friday", etc.
+CRITICAL PRESERVATION RULES:
+- PRESERVE ALL EXISTING HYPERLINKS - Do not remove, modify, or change any <a href="...">text</a> tags
+- PRESERVE THE PRICE ACTION LINE - Keep it at the bottom of the story
+- PRESERVE ALL ANALYST RATINGS - Keep firm names, ratings, price targets, and dates
+- PRESERVE ALL CONTEXT ARTICLE REFERENCES - Keep hyperlinks to context articles
+- Fix any Saturday/Sunday references to Friday (or most recent trading day)
+- Match the lead paragraph to the price action direction
+- Improve the overall writing quality and flow
+- Keep all factual information accurate
 
-CRITICAL: Only change the lead paragraph. Do not touch any other part of the story.
+EDITORIAL STYLE:
+- Conversational but professional
+- Clear and engaging for retail investors
+- Avoid jargon when possible
+- Smooth transitions between ideas
+- Logical flow from lead to conclusion
+- Active voice preferred
+- Concise sentences (2 sentences max per paragraph)
 
-Return the corrected story with the adjusted lead paragraph:`;
+LENGTH REDUCTION STRATEGY:
+- Remove redundant phrases and unnecessary words
+- Combine similar ideas into single sentences
+- Eliminate repetitive information
+- Streamline transitions
+- Keep all essential facts, numbers, and data points
+- Maintain all hyperlinks and references
 
-    const adjustmentCompletion = await openai.chat.completions.create({
+Return the finalized, editorially improved story that is 350-400 words while preserving ALL essential content:`;
+
+    const finalizeCompletion = await openai.chat.completions.create({
       model: 'gpt-4o',
-      messages: [{ role: 'user', content: adjustmentPrompt }],
-      max_tokens: 2000,
-      temperature: 0.2,
+      messages: [{ role: 'user', content: finalizePrompt }],
+      max_tokens: 2500,
+      temperature: 0.3,
     });
 
-    const adjustedStory = adjustmentCompletion.choices[0].message?.content?.trim() || existingStory;
+    const finalizedStory = finalizeCompletion.choices[0].message?.content?.trim() || existingStory;
+
+    // Verify that essential content was preserved
+    const originalHyperlinkCount = (existingStory.match(/<a href=/g) || []).length;
+    const finalHyperlinkCount = (finalizedStory.match(/<a href=/g) || []).length;
+    const hasPriceAction = finalizedStory.includes('Price Action:');
+    const hasAnalystRatings = finalizedStory.includes('Analyst sentiment') || finalizedStory.includes('rating with $');
+    
+    console.log('Finalize verification:');
+    console.log(`- Original hyperlinks: ${originalHyperlinkCount}`);
+    console.log(`- Final hyperlinks: ${finalHyperlinkCount}`);
+    console.log(`- Has price action line: ${hasPriceAction}`);
+    console.log(`- Has analyst ratings: ${hasAnalystRatings}`);
+    console.log(`- Final word count: ${finalizedStory.split(' ').length}`);
+    
+    // If essential content was lost, return the original story with a warning
+    if (finalHyperlinkCount < originalHyperlinkCount || !hasPriceAction) {
+      console.warn('Finalize: Essential content was lost, returning original story');
+      return NextResponse.json({ 
+        story: existingStory,
+        originalStory: existingStory,
+        priceDirection: isUp ? 'up' : 'down',
+        priceChangePercent: priceChangePercent,
+        warning: 'Finalization was skipped to preserve essential content'
+      });
+    }
 
     return NextResponse.json({ 
-      story: adjustedStory,
+      story: finalizedStory,
+      originalStory: existingStory,
       priceDirection: isUp ? 'up' : 'down',
       priceChangePercent: priceChangePercent
     });

@@ -24,7 +24,19 @@ export default function ModularStoryBuilder({ ticker, currentArticle, onStoryUpd
   const [showCustomizeModal, setShowCustomizeModal] = useState(false);
   const [loadingCustomContext, setLoadingCustomContext] = useState(false);
   const [loadingFinalize, setLoadingFinalize] = useState(false);
+  const [originalStory, setOriginalStory] = useState<string>('');
+  const [isFinalized, setIsFinalized] = useState(false);
+  const [hasBaseStory, setHasBaseStory] = useState(false);
   const articleRef = useRef<HTMLDivElement>(null);
+
+  // Check if we have a base story (more than just scraped content)
+  useEffect(() => {
+    if (currentArticle && currentArticle.length > 200 && !currentArticle.includes('Benzinga')) {
+      setHasBaseStory(true);
+    } else {
+      setHasBaseStory(false);
+    }
+  }, [currentArticle]);
 
 
 
@@ -114,6 +126,12 @@ export default function ModularStoryBuilder({ ticker, currentArticle, onStoryUpd
         // The API returns the complete enhanced story with the new content integrated
         onStoryUpdate(data.story);
         
+        // If we have a base story, don't create separate components for these types
+        // since they modify the existing story rather than adding separate sections
+        if (hasBaseStory && (type === 'analystRatings' || type === 'edgeRatings' || type === 'newsContext')) {
+          return; // Exit early since we've updated the story directly
+        }
+        
         // Extract content for display purposes only
         if (type === 'analystRatings') {
           const analystRatingsMatch = data.story.match(/Analyst sentiment[\s\S]*?(?=\n\n|$)/);
@@ -135,21 +153,35 @@ export default function ModularStoryBuilder({ ticker, currentArticle, onStoryUpd
         content = data[type] || data.headline || data.lead || data.technicalAnalysis || '';
       }
       
-      // Create component for this type
-      const newComponent: StoryComponent = {
-        id: `${type}-${Date.now()}`,
-        type,
-        content,
-        order: components.length,
-        isActive: true
-      };
-      
-      const updatedComponents = [...components, newComponent];
-      setComponents(updatedComponents);
-      
-      // Update the story
-      const newStory = rebuildArticle(updatedComponents);
-      onStoryUpdate(newStory);
+             // For components that should enhance the existing story, don't create separate components
+       if (hasBaseStory && (type === 'analystRatings' || type === 'edgeRatings' || type === 'newsContext' || type === 'priceAction' || type === 'alsoReadLink')) {
+         // These components enhance the existing story, so we don't need to do anything else
+         // The story has already been updated via onStoryUpdate(data.story)
+         return;
+       }
+       
+       // For standalone components (headline, lead, technical), create separate components
+       const newComponent: StoryComponent = {
+         id: `${type}-${Date.now()}`,
+         type,
+         content,
+         order: components.length,
+         isActive: true
+       };
+       
+       const updatedComponents = [...components, newComponent];
+       setComponents(updatedComponents);
+       
+       // If we have a base story, append the new component to it instead of rebuilding
+       if (hasBaseStory) {
+         const baseStory = currentArticle;
+         const newStory = baseStory + '\n\n' + content;
+         onStoryUpdate(newStory);
+       } else {
+         // Update the story by rebuilding from components (original behavior)
+         const newStory = rebuildArticle(updatedComponents);
+         onStoryUpdate(newStory);
+       }
       
     } catch (err: any) {
       setError(err.message || `Failed to generate ${type}`);
@@ -202,12 +234,19 @@ export default function ModularStoryBuilder({ ticker, currentArticle, onStoryUpd
         isActive: true
       };
       
-      const updatedComponents = [...components, headlineComponent, leadComponent];
-      setComponents(updatedComponents);
-      
-      // Update the story
-      const newStory = rebuildArticle(updatedComponents);
-      onStoryUpdate(newStory);
+             const updatedComponents = [...components, headlineComponent, leadComponent];
+       setComponents(updatedComponents);
+       
+       // If we have a base story, prepend the headline and lead to it
+       if (hasBaseStory) {
+         const baseStory = currentArticle;
+         const newStory = headlineData.headline + '\n\n' + leadData.lead + '\n\n' + baseStory;
+         onStoryUpdate(newStory);
+       } else {
+         // Update the story by rebuilding from components (original behavior)
+         const newStory = rebuildArticle(updatedComponents);
+         onStoryUpdate(newStory);
+       }
       
     } catch (err: any) {
       setError(err.message || 'Failed to generate headline and lead paragraph');
@@ -251,6 +290,9 @@ export default function ModularStoryBuilder({ ticker, currentArticle, onStoryUpd
     setError('');
     
     try {
+      // Store the original story before finalizing
+      setOriginalStory(currentArticle);
+      
       const res = await fetch('/api/generate/finalize', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -265,10 +307,19 @@ export default function ModularStoryBuilder({ ticker, currentArticle, onStoryUpd
       
       // Update the story with the finalized version
       onStoryUpdate(data.story);
+      setIsFinalized(true);
     } catch (err: any) {
       setError(err.message || 'Failed to finalize story');
     } finally {
       setLoadingFinalize(false);
+    }
+  };
+
+  const handleUndoFinalize = () => {
+    if (originalStory) {
+      onStoryUpdate(originalStory);
+      setIsFinalized(false);
+      setOriginalStory('');
     }
   };
 
@@ -379,6 +430,25 @@ export default function ModularStoryBuilder({ ticker, currentArticle, onStoryUpd
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+      {hasBaseStory && (
+        <div style={{ 
+          fontSize: '14px', 
+          color: '#059669', 
+          padding: '12px', 
+          backgroundColor: '#f0fdf4', 
+          borderRadius: '6px', 
+          border: '1px solid #bbf7d0',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px'
+        }}>
+          <span style={{ fontSize: '16px' }}>✓</span>
+          <div>
+            <strong>Base Story Detected:</strong> Components like "Add Analyst Ratings", "Add Edge Ratings", and "Add Context" will enhance your existing story rather than replace it.
+          </div>
+        </div>
+      )}
+      
       {/* Component Controls */}
       <div style={{ backgroundColor: '#f9fafb', padding: '16px', borderRadius: '8px', border: '1px solid #e5e7eb' }}>
         <h3 style={{ fontSize: '18px', fontWeight: '600', marginBottom: '16px' }}>Add Story Components</h3>
@@ -574,21 +644,40 @@ export default function ModularStoryBuilder({ ticker, currentArticle, onStoryUpd
       <div style={{ backgroundColor: 'white', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '16px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
           <h3 style={{ fontSize: '18px', fontWeight: '600' }}>Story Preview</h3>
-          <button
-            onClick={handleCopyArticle}
-            style={{
-              padding: '8px 16px',
-              backgroundColor: copied ? '#059669' : '#2563eb',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              fontSize: '14px',
-              cursor: 'pointer',
-              transition: 'background-color 0.2s'
-            }}
-          >
-            {copied ? 'Copied!' : 'Copy Article'}
-          </button>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            {isFinalized && (
+              <button
+                onClick={handleUndoFinalize}
+                style={{
+                  padding: '8px 16px',
+                  backgroundColor: '#dc2626',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '4px',
+                  fontSize: '14px',
+                  cursor: 'pointer',
+                  transition: 'background-color 0.2s'
+                }}
+              >
+                Undo Finalize
+              </button>
+            )}
+            <button
+              onClick={handleCopyArticle}
+              style={{
+                padding: '8px 16px',
+                backgroundColor: copied ? '#059669' : '#2563eb',
+                color: 'white',
+                border: 'none',
+                borderRadius: '4px',
+                fontSize: '14px',
+                cursor: 'pointer',
+                transition: 'background-color 0.2s'
+              }}
+            >
+              {copied ? 'Copied!' : 'Copy Article'}
+            </button>
+          </div>
         </div>
         <div
           ref={articleRef}
