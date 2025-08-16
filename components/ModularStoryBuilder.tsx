@@ -154,7 +154,7 @@ export default function ModularStoryBuilder({ ticker, currentArticle, onStoryUpd
       }
       
              // For components that should enhance the existing story, don't create separate components
-       if (hasBaseStory && (type === 'analystRatings' || type === 'edgeRatings' || type === 'newsContext' || type === 'priceAction' || type === 'alsoReadLink')) {
+       if (hasBaseStory && ['analystRatings', 'edgeRatings', 'newsContext', 'priceAction', 'alsoReadLink'].includes(type)) {
          // These components enhance the existing story, so we don't need to do anything else
          // The story has already been updated via onStoryUpdate(data.story)
          return;
