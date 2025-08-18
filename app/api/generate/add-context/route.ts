@@ -186,6 +186,9 @@ export async function POST(request: Request) {
       console.log(`Article ${index + 1}:`);
       console.log(`- Headline: ${article.headline}`);
       console.log(`- URL: ${article.url}`);
+      console.log(`- Created: ${article.created}`);
+      console.log(`- Created type: ${typeof article.created}`);
+      console.log(`- Full article object:`, JSON.stringify(article, null, 2));
       console.log(`- Content length: ${article.body?.length || 0}`);
     });
 
@@ -223,6 +226,7 @@ INSTRUCTIONS:
 11. Ensure all prices are formatted to exactly 2 decimal places
 12. DO NOT use phrases like "according to Benzinga" or "according to recent reports" - these are awkward since this is for Benzinga
 13. Integrate the content directly without attribution phrases
+14. **CRITICAL: DO NOT use any time references like "last week", "recently", "earlier this week", "this week", etc. - these articles may be from different time periods and using time references creates false information**
 
 MANDATORY HYPERLINK REQUIREMENTS:
 - Article 1 URL: ${articlesForContext[0].url} - MUST be used in paragraph 1 or 2
@@ -406,7 +410,8 @@ Return the complete enhanced story with integrated context:`;
       story: finalStory,
       contextSources: articlesForContext.map(article => ({
         headline: article.headline,
-        url: article.url
+        url: article.url,
+        created: article.created
       }))
     });
   } catch (error: any) {
