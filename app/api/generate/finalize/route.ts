@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import OpenAI from 'openai';
+import { preserveHyperlinks } from '../../../../lib/hyperlink-preservation';
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -60,18 +61,18 @@ PRICE ACTION INFORMATION:
 
 EDITORIAL TASKS:
 1. **Fix Market Day Issues**: If the story mentions Saturday or Sunday, change it to the most recent trading day (Friday) since markets are closed on weekends
-2. **Streamline to 350-400 Words**: Reduce the story length while preserving ALL essential content
-3. **Enhance Conversational Style**: Make the writing more engaging and conversational while maintaining journalistic standards
+2. **Limit Paragraph Length**: Ensure no paragraph is longer than 2 sentences
+3. **Enhance Writing Quality**: Improve sentence structure, word choice, and readability
 4. **Preserve ALL Hyperlinks**: Keep ALL existing <a href="...">text</a> tags exactly as they are - DO NOT REMOVE ANY
 5. **Preserve Price Action Line**: Keep the price action line at the bottom of the story
 6. **Preserve Analyst Ratings**: Keep all analyst ratings with firm names and dates
 7. **Preserve Context Articles**: Keep all context article hyperlinks and references
-8. **Improve Wording**: Enhance sentence structure, word choice, and readability
+8. **Improve Flow**: Create better transitions between paragraphs and ideas
 9. **Maintain Accuracy**: Ensure all facts, numbers, and technical details remain accurate
 10. **Professional Tone**: Keep the tone professional but accessible to retail investors
 
 SPECIFIC REQUIREMENTS:
-- **Target Length**: 350-400 words total
+- **Paragraph Length**: NO paragraph should be longer than 2 sentences
 - **Lead Paragraph**: Must match the price action direction and include the correct trading day
 - **Weekend Fix**: Replace Saturday/Sunday with Friday (or the most recent trading day)
 - **Hyperlink Preservation**: ALL existing hyperlinks must remain intact and functional
@@ -80,7 +81,7 @@ SPECIFIC REQUIREMENTS:
 - **Context Articles**: Must remain with hyperlinks
 - **Story Flow**: Improve transitions between paragraphs and ideas
 - **Clarity**: Make complex financial concepts more accessible
-- **Conciseness**: Remove redundant phrases and unnecessary words, but keep all essential information
+- **Writing Quality**: Enhance sentence structure and word choice while preserving all facts
 
 CRITICAL PRESERVATION RULES:
 - PRESERVE ALL EXISTING HYPERLINKS - Do not remove, modify, or change any <a href="...">text</a> tags
@@ -120,18 +121,21 @@ Return the finalized, editorially improved story that is 350-400 words while pre
 
     const finalizedStory = finalizeCompletion.choices[0].message?.content?.trim() || existingStory;
 
+    // Preserve existing hyperlinks
+    const finalStory = preserveHyperlinks(existingStory, finalizedStory);
+
     // Verify that essential content was preserved
     const originalHyperlinkCount = (existingStory.match(/<a href=/g) || []).length;
-    const finalHyperlinkCount = (finalizedStory.match(/<a href=/g) || []).length;
-    const hasPriceAction = finalizedStory.includes('Price Action:');
-    const hasAnalystRatings = finalizedStory.includes('Analyst sentiment') || finalizedStory.includes('rating with $');
+    const finalHyperlinkCount = (finalStory.match(/<a href=/g) || []).length;
+    const hasPriceAction = finalStory.includes('Price Action:');
+    const hasAnalystRatings = finalStory.includes('Analyst sentiment') || finalStory.includes('rating with $');
     
     console.log('Finalize verification:');
     console.log(`- Original hyperlinks: ${originalHyperlinkCount}`);
     console.log(`- Final hyperlinks: ${finalHyperlinkCount}`);
     console.log(`- Has price action line: ${hasPriceAction}`);
     console.log(`- Has analyst ratings: ${hasAnalystRatings}`);
-    console.log(`- Final word count: ${finalizedStory.split(' ').length}`);
+    console.log(`- Final word count: ${finalStory.split(' ').length}`);
     
     // If essential content was lost, return the original story with a warning
     if (finalHyperlinkCount < originalHyperlinkCount || !hasPriceAction) {
@@ -146,7 +150,7 @@ Return the finalized, editorially improved story that is 350-400 words while pre
     }
 
     return NextResponse.json({ 
-      story: finalizedStory,
+      story: finalStory,
       originalStory: existingStory,
       priceDirection: isUp ? 'up' : 'down',
       priceChangePercent: priceChangePercent
