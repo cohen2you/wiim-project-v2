@@ -84,6 +84,20 @@ function restoreSpecificHyperlinks(originalText: string, newText: string): strin
           }
         }
         
+        // Strategy 5: For long headlines, try to find key words
+        if (linkText.length > 50) {
+          console.log('Strategy 5 - trying to find key words in long headline');
+          const keyWords = linkText.split(' ').filter(word => word.length > 4);
+          for (const word of keyWords.slice(0, 3)) { // Try first 3 long words
+            const wordRegex = new RegExp(`\\b${word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'gi');
+            if (wordRegex.test(restoredText)) {
+              console.log('Strategy 5 success - found key word:', word);
+              restoredText = restoredText.replace(wordRegex, `<a href="${url}">${linkText}</a>`);
+              break;
+            }
+          }
+        }
+        
         console.log('All strategies failed for:', linkText);
       }
     } else {
@@ -93,6 +107,30 @@ function restoreSpecificHyperlinks(originalText: string, newText: string): strin
   
   const finalLinkCount = (restoredText.match(/<a href=/g) || []).length;
   console.log('Hyperlink restoration complete - Final link count:', finalLinkCount);
+  
+  // Final fallback: If we're still missing the Also Read link, manually insert it
+  if (finalLinkCount < originalLinks.length) {
+    const missingLinks = originalLinks.filter(link => !restoredText.includes(link));
+    for (const missingLink of missingLinks) {
+      if (missingLink.includes('Also Read:')) {
+        console.log('Final fallback - manually inserting Also Read link');
+        // Insert after the first paragraph or after "What To Know"
+        const lines = restoredText.split('\n');
+        let insertIndex = 1; // After first paragraph
+        
+        for (let i = 0; i < lines.length; i++) {
+          if (lines[i].includes('What To Know:') || lines[i].includes('What Happened:')) {
+            insertIndex = i + 1;
+            break;
+          }
+        }
+        
+        lines.splice(insertIndex, 0, missingLink);
+        restoredText = lines.join('\n');
+        console.log('Final fallback success - Also Read link inserted');
+      }
+    }
+  }
   
   return restoredText;
 }
@@ -231,7 +269,7 @@ Return the finalized, editorially improved story that is 350-400 words while pre
     const originalHyperlinkCount = (existingStory.match(/<a href=/g) || []).length;
     const finalHyperlinkCount = (finalStory.match(/<a href=/g) || []).length;
     const hasPriceAction = finalStory.includes('Price Action:');
-    const hasAnalystRatings = finalStory.includes('Analyst sentiment') || finalStory.includes('rating with $');
+    const hasAnalystRatings = finalStory.includes('Analyst sentiment') || finalStory.includes('rating with $') || finalStory.includes('maintaining') && finalStory.includes('rating');
     
     console.log('Finalize verification:');
     console.log(`- Original hyperlinks: ${originalHyperlinkCount}`);
