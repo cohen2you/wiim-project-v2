@@ -13,22 +13,34 @@ async function fetchPriceData(ticker: string) {
     
     const data = await response.json();
     
+    // Debug: Log the raw API response
+    console.log('Price Action Debug - Raw API Response:', JSON.stringify(data, null, 2));
+    
     if (data && typeof data === 'object') {
       const quote = data[ticker.toUpperCase()];
+      console.log('Price Action Debug - Quote Object:', JSON.stringify(quote, null, 2));
       if (quote && typeof quote === 'object') {
         const priceData = {
           last: quote.lastTradePrice || 0,
           change: quote.change || 0,
-          change_percent: quote.changePercent || 0,
+          change_percent: quote.changePercent || quote.change_percent || 0,
           volume: quote.volume || 0,
           high: quote.high || 0,
           low: quote.low || 0,
           open: quote.open || 0,
+          close: quote.close || quote.lastTradePrice || 0,
           previousClose: quote.previousClose || 0,
-          afterHours: quote.afterHours || 0,
-          afterHoursChange: quote.afterHoursChange || 0,
-          afterHoursChangePercent: quote.afterHoursChangePercent || 0
+          // Extended hours data with multiple field name support
+          extendedHoursPrice: quote.ethPrice || quote.extendedHoursPrice || quote.afterHoursPrice || quote.ahPrice || quote.extendedPrice || null,
+          extendedHoursChange: quote.ethChange || quote.extendedHoursChange || quote.afterHoursChange || quote.ahChange || quote.extendedChange || null,
+          extendedHoursChangePercent: quote.ethChangePercent || quote.extendedHoursChangePercent || quote.afterHoursChangePercent || quote.ahChangePercent || quote.extendedChangePercent || null,
+          extendedHoursTime: quote.ethTime || quote.extendedHoursTime || quote.afterHoursTime || quote.ahTime || quote.extendedTime || null,
+          extendedHoursVolume: quote.ethVolume || null
         };
+        
+        // Debug: Log the constructed price data
+        console.log('Price Action Debug - Constructed Price Data:', JSON.stringify(priceData, null, 2));
+        
         return priceData;
       }
     }
@@ -40,54 +52,126 @@ async function fetchPriceData(ticker: string) {
   }
 }
 
+// Helper function to determine market session
+function getMarketSession(): 'premarket' | 'regular' | 'afterhours' | 'closed' {
+  const now = new Date();
+  const nyTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+  const hour = nyTime.getHours();
+  const minute = nyTime.getMinutes();
+  const time = hour * 100 + minute;
+  const day = nyTime.getDay();
+  
+  // Weekend
+  if (day === 0 || day === 6) {
+    return 'closed';
+  }
+  
+  // Pre-market (4:00 AM - 9:30 AM ET)
+  if (time >= 400 && time < 930) {
+    return 'premarket';
+  }
+  
+  // Regular trading (9:30 AM - 4:00 PM ET)
+  if (time >= 930 && time < 1600) {
+    return 'regular';
+  }
+  
+  // After-hours (4:00 PM - 8:00 PM ET)
+  if (time >= 1600 && time < 2000) {
+    return 'afterhours';
+  }
+  
+  // Closed (8:00 PM - 4:00 AM ET)
+  return 'closed';
+}
+
+// Helper function to get current day name
+function getCurrentDayName() {
+  const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  return days[new Date().getDay()];
+}
+
 // Helper function to generate price action line
 function generatePriceActionLine(ticker: string, priceData: any): string {
   if (!priceData) {
     return `${ticker} Price Action: Price data unavailable, according to <a href="https://pro.benzinga.com">Benzinga Pro</a>.`;
   }
 
-  const dayName = getLastTradingDayName();
+  const marketSession = getMarketSession();
+  const dayName = getCurrentDayName();
   
-  // Format regular session data
-  const regularLast = priceData.last.toFixed(2);
-  const regularChange = priceData.change.toFixed(2);
-  const regularChangePercent = priceData.change_percent.toFixed(2);
+  // Debug logging
+  console.log('Price Action Debug - Market Session:', marketSession);
+  console.log('Price Action Debug - Raw Price Data:', JSON.stringify(priceData, null, 2));
+  
+  // Regular session data
+  const regularLast = parseFloat(priceData.close || priceData.last || 0).toFixed(2);
+  const regularChangePercent = parseFloat(priceData.change_percent || 0).toFixed(2);
   const regularDisplayChangePercent = regularChangePercent.startsWith('-') ? regularChangePercent.substring(1) : regularChangePercent;
   
-  // Check if there's after-hours data
-  if (priceData.afterHours && priceData.afterHours !== 0) {
-    const afterHoursChange = priceData.afterHoursChange.toFixed(2);
-    const afterHoursChangePercent = priceData.afterHoursChangePercent.toFixed(2);
-    const afterHoursDisplayChangePercent = afterHoursChangePercent.startsWith('-') ? afterHoursChangePercent.substring(1) : afterHoursChangePercent;
-    
-    const afterHoursDirection = afterHoursChangePercent.startsWith('-') ? 'fell' : 'rose';
-    const regularDirection = regularChangePercent.startsWith('-') ? 'fell' : 'rose';
-    return `${ticker} Price Action: ${ticker} shares ${regularDirection} ${regularDisplayChangePercent}% to $${regularLast} during regular trading hours on ${dayName}. The stock ${afterHoursDirection} ${afterHoursDisplayChangePercent}% to $${priceData.afterHours.toFixed(2)} in after-hours trading, according to <a href="https://pro.benzinga.com">Benzinga Pro</a>.`;
+  // Extended hours data
+  const hasExtendedHours = priceData.extendedHoursPrice;
+  const extPrice = hasExtendedHours ? parseFloat(priceData.extendedHoursPrice || 0).toFixed(2) : null;
+  const extChangePercent = priceData.extendedHoursChangePercent ? parseFloat(priceData.extendedHoursChangePercent || 0).toFixed(2) : null;
+  const extDisplayChangePercent = extChangePercent && extChangePercent.startsWith('-') ? extChangePercent.substring(1) : extChangePercent;
+  
+  // Calculate extended hours change if we have the price but not the change percentage
+  const regularClose = parseFloat(priceData.close || priceData.last || 0);
+  const calculatedExtChangePercent = priceData.extendedHoursPrice && !priceData.extendedHoursChangePercent ? 
+    ((parseFloat(priceData.extendedHoursPrice) - regularClose) / regularClose * 100).toFixed(2) : null;
+  
+  const finalExtChangePercent = extChangePercent || calculatedExtChangePercent;
+  const finalHasExtendedHours = priceData.extendedHoursPrice && finalExtChangePercent;
+  const finalExtDisplayChangePercent = finalExtChangePercent && finalExtChangePercent.startsWith('-') ? finalExtChangePercent.substring(1) : finalExtChangePercent;
+  
+  // Debug logging for extended hours data
+  console.log('Price Action Debug - Extended Hours Price:', priceData.extendedHoursPrice);
+  console.log('Price Action Debug - Extended Hours Change %:', extChangePercent);
+  console.log('Price Action Debug - Calculated Change %:', calculatedExtChangePercent);
+  console.log('Price Action Debug - Final Change %:', finalExtChangePercent);
+  console.log('Price Action Debug - Regular Close:', regularClose);
+  
+  if (marketSession === 'regular') {
+    return `${ticker} Price Action: ${ticker} shares were ${regularChangePercent.startsWith('-') ? 'down' : 'up'} ${regularDisplayChangePercent}% at $${regularLast} during regular trading hours on ${dayName}, according to <a href="https://pro.benzinga.com">Benzinga Pro</a>.`;
+  } else if (marketSession === 'premarket') {
+    // For premarket, use the change_percent field directly if available
+    if (priceData.change_percent && priceData.change_percent !== 0) {
+      const premarketChangePercent = parseFloat(priceData.change_percent).toFixed(2);
+      const premarketDisplayChangePercent = premarketChangePercent.startsWith('-') ? premarketChangePercent.substring(1) : premarketChangePercent;
+      const premarketPrice = priceData.extendedHoursPrice ? parseFloat(priceData.extendedHoursPrice).toFixed(2) : parseFloat(priceData.last).toFixed(2);
+      return `${ticker} Price Action: ${ticker} shares were ${premarketChangePercent.startsWith('-') ? 'down' : 'up'} ${premarketDisplayChangePercent}% at $${premarketPrice} during pre-market trading on ${dayName}, according to <a href="https://pro.benzinga.com">Benzinga Pro</a>.`;
+    } else if (finalHasExtendedHours && finalExtChangePercent && finalExtDisplayChangePercent) {
+      return `${ticker} Price Action: ${ticker} shares were ${finalExtChangePercent.startsWith('-') ? 'down' : 'up'} ${finalExtDisplayChangePercent}% at $${extPrice} during pre-market trading on ${dayName}, according to <a href="https://pro.benzinga.com">Benzinga Pro</a>.`;
+    } else if (priceData.extendedHoursPrice) {
+      // We have premarket price but no change percentage, calculate it manually
+      const previousClose = parseFloat(priceData.previousClose || priceData.close || priceData.last || 0);
+      const premarketPrice = parseFloat(priceData.extendedHoursPrice);
+      if (previousClose > 0 && premarketPrice > 0) {
+        const manualChangePercent = ((premarketPrice - previousClose) / previousClose * 100).toFixed(2);
+        const manualDisplayChangePercent = manualChangePercent.startsWith('-') ? manualChangePercent.substring(1) : manualChangePercent;
+        return `${ticker} Price Action: ${ticker} shares were ${manualChangePercent.startsWith('-') ? 'down' : 'up'} ${manualDisplayChangePercent}% at $${premarketPrice.toFixed(2)} during pre-market trading on ${dayName}, according to <a href="https://pro.benzinga.com">Benzinga Pro</a>.`;
+      }
+    }
+    return `${ticker} Price Action: ${ticker} shares were trading during pre-market hours on ${dayName}, according to <a href="https://pro.benzinga.com">Benzinga Pro</a>.`;
+  } else if (marketSession === 'afterhours') {
+    if (finalHasExtendedHours && finalExtChangePercent && finalExtDisplayChangePercent) {
+      // Show both regular session and after-hours changes
+      const regularDirection = regularChangePercent.startsWith('-') ? 'fell' : 'rose';
+      const extDirection = finalExtChangePercent.startsWith('-') ? 'down' : 'up';
+      
+      return `${ticker} Price Action: ${ticker} shares ${regularDirection} ${regularDisplayChangePercent}% to $${regularLast} during regular trading hours, and were ${extDirection} ${finalExtDisplayChangePercent}% at $${extPrice} during after-hours trading on ${dayName}, according to <a href="https://pro.benzinga.com">Benzinga Pro</a>.`;
+    } else {
+      // Show regular session data with after-hours indication
+      const regularDirection = regularChangePercent.startsWith('-') ? 'fell' : 'rose';
+      return `${ticker} Price Action: ${ticker} shares ${regularDirection} ${regularDisplayChangePercent}% to $${regularLast} during regular trading hours on ${dayName}. The stock is currently trading in after-hours session, according to <a href="https://pro.benzinga.com">Benzinga Pro</a>.`;
+    }
   } else {
     // Market is closed, use last regular session data
     return `${ticker} Price Action: ${ticker} shares ${regularChangePercent.startsWith('-') ? 'fell' : 'rose'} ${regularDisplayChangePercent}% to $${regularLast} during regular trading hours on ${dayName}, according to <a href="https://pro.benzinga.com">Benzinga Pro</a>.`;
   }
 }
 
-// Helper function to get the last trading day name
-function getLastTradingDayName() {
-  const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-  const today = new Date();
-  const currentDay = today.getDay(); // 0 = Sunday, 6 = Saturday
-  
-  // If it's Saturday (6), go back to Friday (5)
-  // If it's Sunday (0), go back to Friday (5)
-  let lastTradingDay;
-  if (currentDay === 0) { // Sunday
-    lastTradingDay = 5; // Friday
-  } else if (currentDay === 6) { // Saturday
-    lastTradingDay = 5; // Friday
-  } else {
-    lastTradingDay = currentDay; // Weekday, use current day
-  }
-  
-  return days[lastTradingDay];
-}
+
 
 // Helper function to remove existing Price Action lines
 function removeExistingPriceAction(story: string): string {

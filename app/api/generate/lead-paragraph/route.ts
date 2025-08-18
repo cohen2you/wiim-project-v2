@@ -75,23 +75,62 @@ export async function POST(request: Request) {
     const priceData = await fetchPriceData(ticker);
     const companyNameFormatted = getCompanyNameFormat(ticker, priceData);
     
-    // Get the last trading day name
+    // Helper function to determine market session
+    function getMarketSession(): 'premarket' | 'regular' | 'afterhours' | 'closed' {
+      const now = new Date();
+      const nyTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+      const hour = nyTime.getHours();
+      const minute = nyTime.getMinutes();
+      const time = hour * 100 + minute;
+      const day = nyTime.getDay();
+      
+      // Weekend
+      if (day === 0 || day === 6) {
+        return 'closed';
+      }
+      
+      // Pre-market (4:00 AM - 9:30 AM ET)
+      if (time >= 400 && time < 930) {
+        return 'premarket';
+      }
+      
+      // Regular trading (9:30 AM - 4:00 PM ET)
+      if (time >= 930 && time < 1600) {
+        return 'regular';
+      }
+      
+      // After-hours (4:00 PM - 8:00 PM ET)
+      if (time >= 1600 && time < 2000) {
+        return 'afterhours';
+      }
+      
+      // Closed (8:00 PM - 4:00 AM ET)
+      return 'closed';
+    }
+
+    // Get current market session and day
+    const marketSession = getMarketSession();
     const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
     const today = new Date();
-    const currentDay = today.getDay(); // 0 = Sunday, 6 = Saturday
+    const currentDay = today.getDay();
+    const tradingDay = days[currentDay];
     
-    // If it's Saturday (6), go back to Friday (5)
-    // If it's Sunday (0), go back to Friday (5)
-    let lastTradingDay;
-    if (currentDay === 0) { // Sunday
-      lastTradingDay = 5; // Friday
-    } else if (currentDay === 6) { // Saturday
-      lastTradingDay = 5; // Friday
-    } else {
-      lastTradingDay = currentDay; // Weekday, use current day
+    // Determine the appropriate time context based on market session
+    let timeContext = '';
+    switch (marketSession) {
+      case 'premarket':
+        timeContext = 'during pre-market hours';
+        break;
+      case 'regular':
+        timeContext = 'during regular trading hours';
+        break;
+      case 'afterhours':
+        timeContext = 'during after-hours trading';
+        break;
+      case 'closed':
+        timeContext = 'during regular trading hours';
+        break;
     }
-    
-    const tradingDay = days[lastTradingDay];
     
     const prompt = `
 Generate ONLY a 2-sentence lead paragraph for ${ticker}.
@@ -102,6 +141,7 @@ Second sentence: What's driving momentum (technical factors only)
 Rules:
 - Use the exact company name format provided: "${companyNameFormatted}"
 - INCLUDE the trading day (${tradingDay}) in the first sentence
+- Use the correct time context: "${timeContext}"
 - NO specific percentages
 - NO exact prices
 - Exactly 2 sentences
@@ -112,7 +152,7 @@ Rules:
 - Return only the paragraph text, no formatting
 
 Example format:
-Nvidia Corp. (NASDAQ: NVDA) traded higher during regular trading hours on ${currentDay} as investors responded to strong technical indicators.
+Nvidia Corp. (NASDAQ: NVDA) traded higher ${timeContext} on ${tradingDay} as investors responded to strong technical indicators.
 
 Price context: ${priceData ? `Change: ${priceData.changePercent}%, Volume: ${priceData.volume}` : 'No price data available'}
 

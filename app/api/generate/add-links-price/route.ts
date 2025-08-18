@@ -89,13 +89,17 @@ async function fetchPriceData(ticker: string) {
     
     const data = await response.json();
     
+    // Debug: Log the raw API response
+    console.log('Add Links Price Debug - Raw API Response:', JSON.stringify(data, null, 2));
+    
     if (data && typeof data === 'object') {
       const quote = data[ticker.toUpperCase()];
+      console.log('Add Links Price Debug - Quote Object:', JSON.stringify(quote, null, 2));
       if (quote && typeof quote === 'object') {
         const priceData = {
           last: quote.lastTradePrice || 0,
           change: quote.change || 0,
-          change_percent: quote.changePercent || 0,
+          change_percent: quote.changePercent || quote.change_percent || 0,
           volume: quote.volume || 0,
           high: quote.high || 0,
           low: quote.low || 0,
@@ -108,6 +112,9 @@ async function fetchPriceData(ticker: string) {
           extendedHoursTime: quote.ethTime || quote.extendedHoursTime || quote.afterHoursTime || quote.ahTime || quote.extendedTime || null,
           extendedHoursVolume: quote.ethVolume || null
         };
+        
+        // Debug: Log the constructed price data
+        console.log('Add Links Price Debug - Constructed Price Data:', JSON.stringify(priceData, null, 2));
         
         return priceData;
       }
@@ -161,6 +168,10 @@ function generatePriceActionLine(ticker: string, priceData: any) {
   const marketSession = getMarketSession();
   const dayName = getCurrentDayName();
   
+  // Debug logging
+  console.log('Add Links Price Debug - Market Session:', marketSession);
+  console.log('Add Links Price Debug - Raw Price Data:', JSON.stringify(priceData, null, 2));
+  
   // Regular session data
   const regularLast = parseFloat(priceData.close || priceData.last || 0).toFixed(2);
   const regularChangePercent = parseFloat(priceData.change_percent || 0).toFixed(2);
@@ -184,7 +195,13 @@ function generatePriceActionLine(ticker: string, priceData: any) {
   if (marketSession === 'regular') {
     return `${ticker} Price Action: ${ticker} shares were ${regularChangePercent.startsWith('-') ? 'down' : 'up'} ${regularDisplayChangePercent}% at $${regularLast} during regular trading hours on ${dayName}, according to <a href="https://pro.benzinga.com">Benzinga Pro</a>.`;
   } else if (marketSession === 'premarket') {
-    if (finalHasExtendedHours && finalExtChangePercent && finalExtDisplayChangePercent) {
+    // For premarket, use the change_percent field directly if available
+    if (priceData.change_percent && priceData.change_percent !== 0) {
+      const premarketChangePercent = parseFloat(priceData.change_percent).toFixed(2);
+      const premarketDisplayChangePercent = premarketChangePercent.startsWith('-') ? premarketChangePercent.substring(1) : premarketChangePercent;
+      const premarketPrice = priceData.extendedHoursPrice ? parseFloat(priceData.extendedHoursPrice).toFixed(2) : parseFloat(priceData.last).toFixed(2);
+      return `${ticker} Price Action: ${ticker} shares were ${premarketChangePercent.startsWith('-') ? 'down' : 'up'} ${premarketDisplayChangePercent}% at $${premarketPrice} during pre-market trading on ${dayName}, according to <a href="https://pro.benzinga.com">Benzinga Pro</a>.`;
+    } else if (finalHasExtendedHours && finalExtChangePercent && finalExtDisplayChangePercent) {
       return `${ticker} Price Action: ${ticker} shares were ${finalExtChangePercent.startsWith('-') ? 'down' : 'up'} ${finalExtDisplayChangePercent}% at $${extPrice} during pre-market trading on ${dayName}, according to <a href="https://pro.benzinga.com">Benzinga Pro</a>.`;
     } else {
       return `${ticker} Price Action: ${ticker} shares were trading during pre-market hours on ${dayName}, according to <a href="https://pro.benzinga.com">Benzinga Pro</a>.`;
