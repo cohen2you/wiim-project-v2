@@ -35,21 +35,19 @@ async function fetchAnalystRatings(ticker: string) {
           console.log('Add Analyst Ratings: Raw firm:', rating.firm);
           
           const firmName = (rating.action_company || rating.firm || 'Analyst').split(' - ')[0].split(':')[0].trim();
-<<<<<<< HEAD
           console.log('Add Analyst Ratings: Extracted firm name:', firmName);
           
           // Check if firm name is too generic or empty
           if (!firmName || firmName === 'Analyst' || firmName.length < 2) {
             console.log('Add Analyst Ratings: Firm name too generic, skipping this rating');
             return null;
-=======
+          }
           
           // Format the date
           let dateStr = '';
           if (rating.date) {
             const date = new Date(rating.date);
             dateStr = ` on ${date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
->>>>>>> 476675a4f79cff8570f4690b0aabbf3b198f37a5
           }
           
           let line = `${firmName} maintains ${rating.rating_current} rating`;
@@ -125,8 +123,7 @@ INSTRUCTIONS:
    - If ratings are mixed (some positive, some neutral/negative): "Analyst ratings show mixed sentiment"
    - If ratings are mostly negative (Sell, Underweight, Underperform): "Analyst sentiment appears cautious"
    - If ratings are mostly neutral (Hold, Market Perform, Equal Weight): "Analyst ratings reflect neutral sentiment"
-<<<<<<< HEAD
-4. Format EXACTLY as: "[SENTIMENT COMMENTARY], with [FIRST FIRM] maintaining [FIRST RATING] rating with $[FIRST PRICE] price target, [SECOND FIRM] maintaining [SECOND RATING] rating with $[SECOND PRICE] price target"
+4. Format EXACTLY as: "[SENTIMENT COMMENTARY], with [FIRST FIRM] maintaining [FIRST RATING] rating with $[FIRST PRICE] price target on [FIRST DATE], [SECOND FIRM] maintaining [SECOND RATING] rating with $[SECOND PRICE] price target on [SECOND DATE]"
 5. DO NOT use generic phrases like "a prominent financial firm", "another firm", "a firm", "a third firm", etc.
 6. DO NOT use placeholder text like "[FIRM NAME]" - use the actual firm names from the data
 7. ALWAYS use the specific firm name from the data (e.g., "Morgan Stanley", "Goldman Sachs", "JP Morgan")
@@ -135,17 +132,7 @@ INSTRUCTIONS:
 10. Keep the rest of the story exactly as it is
 11. Maintain the same writing style and tone
 12. If no analyst ratings are available, skip adding this section
-=======
-4. Format EXACTLY as: "[SENTIMENT COMMENTARY], with [FIRST FIRM] maintaining [FIRST RATING] rating with $[FIRST PRICE] price target on [FIRST DATE], [SECOND FIRM] maintaining [SECOND RATING] rating with $[SECOND PRICE] price target on [SECOND DATE]"
-5. DO NOT use generic phrases like "a prominent financial firm" or "another firm"
-6. DO NOT use placeholder text like "[FIRM NAME]" - use the actual firm names from the data
-7. DO NOT add any additional commentary or analysis beyond the sentiment and firm ratings
-8. DO NOT add sentences like "This positive outlook from analysts reinforces..." - just the ratings line
-9. Keep the rest of the story exactly as it is
-10. Maintain the same writing style and tone
-11. If no analyst ratings are available, skip adding this section
-12. ALWAYS include the firm names and dates in the ratings - this is critical for credibility
->>>>>>> 476675a4f79cff8570f4690b0aabbf3b198f37a5
+13. ALWAYS include the firm names and dates in the ratings - this is critical for credibility
 
 EXAMPLE: If the data shows "Morgan Stanley maintains Buy rating with $810 price target on Dec 15, 2024", your output should be "Analyst sentiment remains positive, with Morgan Stanley maintaining Buy rating with $810 price target on Dec 15, 2024"
 
