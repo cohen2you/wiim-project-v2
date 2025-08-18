@@ -37,10 +37,16 @@ export default function PRStoryGeneratorPage() {
   const [contextError, setContextError] = useState('');
   const [copied, setCopied] = useState(false);
   const [loadingStandardStory, setLoadingStandardStory] = useState(false);
+  const [loadingBaseStory, setLoadingBaseStory] = useState(false);
   const [standardStoryError, setStandardStoryError] = useState('');
 
   // Mode state
   const [useModularApproach, setUseModularApproach] = useState(true);
+
+  // Debug useEffect to monitor state changes
+  useEffect(() => {
+    console.log('State changed - showManualInput:', showManualInput, 'primaryText length:', primaryText.length);
+  }, [showManualInput, primaryText]);
 
   const fetchPRs = async () => {
     if (!ticker.trim()) {
@@ -112,6 +118,7 @@ export default function PRStoryGeneratorPage() {
   const handleScrapeUrl = async () => {
     if (!sourceUrl.trim()) return;
 
+    console.log('Starting scrape for URL:', sourceUrl);
     setScrapingUrl(true);
     setScrapingError('');
 
@@ -122,11 +129,26 @@ export default function PRStoryGeneratorPage() {
         body: JSON.stringify({ url: sourceUrl }),
       });
 
+      console.log('Response status:', res.status);
       const data = await res.json();
+      console.log('Response data:', data);
+      
       if (!res.ok) throw new Error(data.error || 'Failed to scrape URL');
 
+      console.log('Scraped text received:', data.text?.substring(0, 100) + '...');
+      console.log('Text length:', data.text?.length);
+      
       setPrimaryText(data.text || '');
+      setShowManualInput(true); // Show the manual input section to display scraped content
+      console.log('showManualInput set to true');
+      
+      // Force a re-render check
+      setTimeout(() => {
+        console.log('After timeout - showManualInput:', showManualInput, 'primaryText length:', primaryText.length);
+      }, 100);
+      
     } catch (err: any) {
+      console.error('Scrape error:', err);
       setScrapingError(err.message || 'Failed to scrape URL');
     } finally {
       setScrapingUrl(false);
@@ -139,6 +161,37 @@ export default function PRStoryGeneratorPage() {
 
   const handleModularStoryUpdate = (story: string) => {
     setArticle(story);
+  };
+
+  const handleUseAsBaseStory = async () => {
+    if (!primaryText.trim() || !ticker.trim()) {
+      alert('Please ensure you have both scraped content and a ticker entered.');
+      return;
+    }
+
+    setLoadingBaseStory(true);
+    try {
+      const res = await fetch('/api/generate/base-story', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          ticker,
+          scrapedContent: primaryText,
+          scrapedUrl: sourceUrl
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.story) throw new Error(data.error || 'Failed to generate base story');
+
+      setArticle(data.story);
+      console.log('Base story generated successfully:', data.story.substring(0, 100) + '...');
+    } catch (err: any) {
+      console.error('Base story generation error:', err);
+      alert('Failed to generate base story: ' + err.message);
+    } finally {
+      setLoadingBaseStory(false);
+    }
   };
 
   const handleCustomContextGeneration = async (selectedArticles: any[]) => {
@@ -189,6 +242,7 @@ export default function PRStoryGeneratorPage() {
     setShowCustomizeModal(false);
     setLoadingCustomContext(false);
     setLoadingStandardStory(false);
+    setLoadingBaseStory(false);
     setPrFetchAttempted(false);
     setLastPrTicker('');
   };
@@ -306,6 +360,12 @@ export default function PRStoryGeneratorPage() {
         >
           Analyst Note Upload
         </button>
+        <button
+          onClick={() => setShowManualInput(!showManualInput)}
+          style={{ padding: '6px 12px' }}
+        >
+          {showManualInput ? 'Hide Manual Input' : 'Show Manual Input'}
+        </button>
       </div>
       
       {/* Standard Mode Buttons */}
@@ -414,12 +474,83 @@ export default function PRStoryGeneratorPage() {
       {contextError && <div style={{ color: 'red', marginBottom: 10 }}>{contextError}</div>}
       {standardStoryError && <div style={{ color: 'red', marginBottom: 10 }}>{standardStoryError}</div>}
       
+      {/* Manual Input Section - Always show when needed */}
+      {showManualInput && (
+        <div style={{ marginBottom: 20, backgroundColor: '#f9f9f9', padding: '16px', borderRadius: '8px', border: '1px solid #e5e7eb' }}>
+          <div style={{ fontSize: '12px', color: '#666', marginBottom: '4px' }}>
+            Debug: showManualInput is true, primaryText length: {primaryText.length}
+          </div>
+          <label style={{ display: 'block', marginBottom: 8 }}>
+            <strong>Scraped Article Content:</strong>
+            <textarea
+              value={primaryText}
+              onChange={e => setPrimaryText(e.target.value)}
+              placeholder="Paste the article content here..."
+              rows={8}
+              style={{ 
+                display: 'block', 
+                width: '100%', 
+                fontSize: 14, 
+                padding: 8, 
+                marginTop: 4,
+                border: '1px solid #ccc',
+                borderRadius: 4,
+                fontFamily: 'monospace'
+              }}
+            />
+          </label>
+          {primaryText.trim() && (
+            <div style={{ marginTop: '12px', display: 'flex', gap: '8px' }}>
+                             <button
+                 onClick={handleUseAsBaseStory}
+                 disabled={loadingBaseStory}
+                 style={{ 
+                   padding: '8px 16px', 
+                   backgroundColor: loadingBaseStory ? '#6b7280' : '#059669', 
+                   color: 'white', 
+                   border: 'none', 
+                   borderRadius: '4px',
+                   fontSize: '14px',
+                   cursor: loadingBaseStory ? 'not-allowed' : 'pointer'
+                 }}
+               >
+                 {loadingBaseStory ? 'Generating...' : 'Use as Base Story'}
+               </button>
+              <button
+                onClick={() => setPrimaryText('')}
+                style={{ 
+                  padding: '8px 16px', 
+                  backgroundColor: '#dc2626', 
+                  color: 'white', 
+                  border: 'none', 
+                  borderRadius: '4px',
+                  fontSize: '14px',
+                  cursor: 'pointer'
+                }}
+              >
+                Clear Content
+              </button>
+            </div>
+          )}
+          {article && (
+            <div style={{ fontSize: '12px', color: '#059669', marginTop: '8px' }}>
+              ✓ Base story generated successfully! You can now use the Modular Story Builder components below.
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Modular Story Builder */}
       {ticker && useModularApproach && (
         <div style={{ marginBottom: 20 }}>
+          {article && (
+            <div style={{ fontSize: '12px', color: '#059669', marginBottom: '8px', padding: '8px', backgroundColor: '#f0fdf4', borderRadius: '4px', border: '1px solid #bbf7d0' }}>
+              ✓ Using generated base story for Modular Story Builder
+            </div>
+          )}
           <ModularStoryBuilder 
             ticker={ticker} 
-            currentArticle={article}
+            currentArticle={article || primaryText}
             onStoryUpdate={handleModularStoryUpdate} 
           />
         </div>
@@ -469,30 +600,6 @@ export default function PRStoryGeneratorPage() {
                 .join('')
             }}
           />
-        </div>
-      )}
-      
-      {showManualInput && (
-        <div style={{ marginBottom: 20 }}>
-          <label style={{ display: 'block', marginBottom: 8 }}>
-            Enter Article Content Manually:
-            <textarea
-              value={primaryText}
-              onChange={e => setPrimaryText(e.target.value)}
-              placeholder="Paste the article content here..."
-              rows={8}
-              style={{ 
-                display: 'block', 
-                width: '100%', 
-                fontSize: 14, 
-                padding: 8, 
-                marginTop: 4,
-                border: '1px solid #ccc',
-                borderRadius: 4,
-                fontFamily: 'monospace'
-              }}
-            />
-          </label>
         </div>
       )}
       

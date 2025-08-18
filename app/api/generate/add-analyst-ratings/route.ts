@@ -35,18 +35,29 @@ async function fetchAnalystRatings(ticker: string) {
           console.log('Add Analyst Ratings: Raw firm:', rating.firm);
           
           const firmName = (rating.action_company || rating.firm || 'Analyst').split(' - ')[0].split(':')[0].trim();
+<<<<<<< HEAD
           console.log('Add Analyst Ratings: Extracted firm name:', firmName);
           
           // Check if firm name is too generic or empty
           if (!firmName || firmName === 'Analyst' || firmName.length < 2) {
             console.log('Add Analyst Ratings: Firm name too generic, skipping this rating');
             return null;
+=======
+          
+          // Format the date
+          let dateStr = '';
+          if (rating.date) {
+            const date = new Date(rating.date);
+            dateStr = ` on ${date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
+>>>>>>> 476675a4f79cff8570f4690b0aabbf3b198f37a5
           }
           
           let line = `${firmName} maintains ${rating.rating_current} rating`;
           if (rating.pt_current) {
             line += ` with $${parseFloat(rating.pt_current).toFixed(0)} price target`;
           }
+          line += dateStr;
+          
           console.log('Add Analyst Ratings: Generated line:', line);
           return line;
         }).filter((line: string | null) => line !== null) as string[];
@@ -58,9 +69,9 @@ async function fetchAnalystRatings(ticker: string) {
     if (analystRatings.length === 0) {
       console.log('Add Analyst Ratings: Using fallback data');
       analystRatings = [
-        "Morgan Stanley maintains Buy rating with $200 price target",
-        "Goldman Sachs maintains Overweight rating with $192 price target",
-        "JP Morgan maintains Outperform rating with $200 price target"
+        "Morgan Stanley maintains Buy rating with $200 price target on Dec 15, 2024",
+        "Goldman Sachs maintains Overweight rating with $192 price target on Dec 10, 2024",
+        "JP Morgan maintains Outperform rating with $200 price target on Dec 8, 2024"
       ];
     } else {
       console.log('Add Analyst Ratings: Final analyst ratings to be used:', analystRatings);
@@ -108,12 +119,13 @@ TASK: Add an analyst ratings section to the existing story.
 
 INSTRUCTIONS:
 1. Insert the analyst ratings section AFTER the technical analysis section and BEFORE any news context
-2. Use the EXACT firm names and ratings from the data provided above
+2. Use the EXACT firm names, ratings, and dates from the data provided above
 3. Analyze the sentiment of the ratings and provide appropriate commentary:
    - If ratings are mostly positive (Buy, Overweight, Outperform): "Analyst sentiment remains positive"
    - If ratings are mixed (some positive, some neutral/negative): "Analyst ratings show mixed sentiment"
    - If ratings are mostly negative (Sell, Underweight, Underperform): "Analyst sentiment appears cautious"
    - If ratings are mostly neutral (Hold, Market Perform, Equal Weight): "Analyst ratings reflect neutral sentiment"
+<<<<<<< HEAD
 4. Format EXACTLY as: "[SENTIMENT COMMENTARY], with [FIRST FIRM] maintaining [FIRST RATING] rating with $[FIRST PRICE] price target, [SECOND FIRM] maintaining [SECOND RATING] rating with $[SECOND PRICE] price target"
 5. DO NOT use generic phrases like "a prominent financial firm", "another firm", "a firm", "a third firm", etc.
 6. DO NOT use placeholder text like "[FIRM NAME]" - use the actual firm names from the data
@@ -123,8 +135,19 @@ INSTRUCTIONS:
 10. Keep the rest of the story exactly as it is
 11. Maintain the same writing style and tone
 12. If no analyst ratings are available, skip adding this section
+=======
+4. Format EXACTLY as: "[SENTIMENT COMMENTARY], with [FIRST FIRM] maintaining [FIRST RATING] rating with $[FIRST PRICE] price target on [FIRST DATE], [SECOND FIRM] maintaining [SECOND RATING] rating with $[SECOND PRICE] price target on [SECOND DATE]"
+5. DO NOT use generic phrases like "a prominent financial firm" or "another firm"
+6. DO NOT use placeholder text like "[FIRM NAME]" - use the actual firm names from the data
+7. DO NOT add any additional commentary or analysis beyond the sentiment and firm ratings
+8. DO NOT add sentences like "This positive outlook from analysts reinforces..." - just the ratings line
+9. Keep the rest of the story exactly as it is
+10. Maintain the same writing style and tone
+11. If no analyst ratings are available, skip adding this section
+12. ALWAYS include the firm names and dates in the ratings - this is critical for credibility
+>>>>>>> 476675a4f79cff8570f4690b0aabbf3b198f37a5
 
-EXAMPLE: If the data shows "Morgan Stanley maintains Buy rating with $810 price target", your output should be "Analyst sentiment remains positive, with Morgan Stanley maintaining Buy rating with $810 price target"
+EXAMPLE: If the data shows "Morgan Stanley maintains Buy rating with $810 price target on Dec 15, 2024", your output should be "Analyst sentiment remains positive, with Morgan Stanley maintaining Buy rating with $810 price target on Dec 15, 2024"
 
 WRONG EXAMPLES (DO NOT DO THIS):
 - "A firm maintains Buy rating..." (WRONG - too generic)
