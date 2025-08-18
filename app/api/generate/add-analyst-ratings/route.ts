@@ -47,7 +47,9 @@ async function fetchAnalystRatings(ticker: string) {
           let dateStr = '';
           if (rating.date) {
             const date = new Date(rating.date);
-            dateStr = ` on ${date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
+            const month = date.toLocaleDateString('en-US', { month: 'short' });
+            const day = date.getDate();
+            dateStr = ` on ${month}. ${day}`;
           }
           
           let line = `${firmName} maintains ${rating.rating_current} rating`;
@@ -67,9 +69,9 @@ async function fetchAnalystRatings(ticker: string) {
     if (analystRatings.length === 0) {
       console.log('Add Analyst Ratings: Using fallback data');
       analystRatings = [
-        "Morgan Stanley maintains Buy rating with $200 price target on Dec 15, 2024",
-        "Goldman Sachs maintains Overweight rating with $192 price target on Dec 10, 2024",
-        "JP Morgan maintains Outperform rating with $200 price target on Dec 8, 2024"
+        "Morgan Stanley maintains Buy rating with $200 price target on Dec. 15",
+        "Goldman Sachs maintains Overweight rating with $192 price target on Dec. 10",
+        "JP Morgan maintains Outperform rating with $200 price target on Dec. 8"
       ];
     } else {
       console.log('Add Analyst Ratings: Final analyst ratings to be used:', analystRatings);
@@ -134,7 +136,7 @@ INSTRUCTIONS:
 12. If no analyst ratings are available, skip adding this section
 13. ALWAYS include the firm names and dates in the ratings - this is critical for credibility
 
-EXAMPLE: If the data shows "Morgan Stanley maintains Buy rating with $810 price target on Dec 15, 2024", your output should be "Analyst sentiment remains positive, with Morgan Stanley maintaining Buy rating with $810 price target on Dec 15, 2024"
+EXAMPLE: If the data shows "Morgan Stanley maintains Buy rating with $810 price target on Dec. 15", your output should be "Analyst sentiment remains positive, with Morgan Stanley maintaining Buy rating with $810 price target on Dec. 15"
 
 WRONG EXAMPLES (DO NOT DO THIS):
 - "A firm maintains Buy rating..." (WRONG - too generic)
