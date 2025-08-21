@@ -32,20 +32,28 @@ export async function POST(req: Request) {
       console.error('Benzinga API response (not array):', data);
       return NextResponse.json({ error: 'Invalid response format from Benzinga', raw: data }, { status: 500 });
     }
-    // Exclude PRs by filtering out items with PR channel names
+    // Exclude PRs and insights URLs by filtering out items with PR channel names or insights URLs
     const prChannelNames = ['press releases', 'press-releases', 'pressrelease', 'pr'];
     const normalize = (str: string) => str.toLowerCase().replace(/[-_]/g, ' ');
     const articles = data
-      .filter(item =>
-        !(
-          Array.isArray(item.channels) &&
+      .filter(item => {
+        // Exclude press releases
+        if (Array.isArray(item.channels) &&
           item.channels.some(
             (ch: any) =>
               typeof ch.name === 'string' &&
               prChannelNames.includes(normalize(ch.name))
-          )
-        )
-      )
+          )) {
+          return false;
+        }
+        
+        // Exclude insights URLs
+        if (item.url && item.url.includes('/insights/')) {
+          return false;
+        }
+        
+        return true;
+      })
       .map((item: any) => ({
         id: item.id,
         headline: item.headline || item.title || '[No Headline]',

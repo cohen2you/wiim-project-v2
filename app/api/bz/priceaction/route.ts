@@ -26,17 +26,14 @@ function getMarketStatus(): 'open' | 'premarket' | 'afterhours' | 'closed' {
 export async function POST(req: Request) {
   try {
     const { ticker } = await req.json();
-    console.log('Price action request for ticker:', ticker); // Log the ticker
     if (!ticker) return NextResponse.json({ error: 'Ticker is required' }, { status: 400 });
     const url = `${BZ_PRICE_URL}?token=${BENZINGA_API_KEY}&symbols=${encodeURIComponent(ticker)}`;
     const res = await fetch(url);
     if (!res.ok) {
       const text = await res.text();
-      console.error('Benzinga API error response:', text);
       throw new Error(`Benzinga API error: ${text}`);
     }
     const data = await res.json();
-    console.log('Raw Benzinga API data:', data); // Log the raw API data
     if (!data || typeof data !== 'object') {
       return NextResponse.json({ error: 'Invalid Benzinga response' });
     }
@@ -44,25 +41,55 @@ export async function POST(req: Request) {
     if (!quote || typeof quote !== 'object') {
       return NextResponse.json({ error: 'No price data found.' });
     }
+    
     const symbol = quote.symbol ?? ticker.toUpperCase();
     const companyName = quote.companyStandardName || quote.name || symbol;
-    const changePercent = typeof quote.changePercent === 'number' ? quote.changePercent : 0;
-    const lastPrice = formatPrice(quote.lastTradePrice);
-    const upDown = changePercent > 0 ? 'up' : changePercent < 0 ? 'down' : 'unchanged';
-    const absChange = Math.abs(changePercent).toFixed(2);
     const date = quote.closeDate ? new Date(quote.closeDate) : new Date();
     const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
     const dayOfWeek = dayNames[date.getDay()];
     const marketStatus = getMarketStatus();
-    let marketStatusPhrase = '';
-    if (marketStatus === 'premarket') {
-      marketStatusPhrase = ' during premarket trading';
+    
+    // Regular session data
+    const regularChangePercent = typeof quote.changePercent === 'number' ? quote.changePercent : 0;
+    const regularLastPrice = formatPrice(quote.lastTradePrice);
+    const regularUpDown = regularChangePercent > 0 ? 'up' : regularChangePercent < 0 ? 'down' : 'unchanged';
+    const regularAbsChange = Math.abs(regularChangePercent).toFixed(2);
+    
+    // Extended hours data
+    const hasExtendedHours = quote.extendedHoursPrice && quote.extendedHoursChangePercent;
+    const extChangePercent = hasExtendedHours ? (typeof quote.extendedHoursChangePercent === 'number' ? quote.extendedHoursChangePercent : 0) : 0;
+    const extLastPrice = hasExtendedHours ? formatPrice(quote.extendedHoursPrice) : null;
+    const extUpDown = extChangePercent > 0 ? 'up' : extChangePercent < 0 ? 'down' : 'unchanged';
+    const extAbsChange = Math.abs(extChangePercent).toFixed(2);
+    
+    let priceActionText = '';
+    
+    if (marketStatus === 'open') {
+      priceActionText = `${symbol} Price Action: ${companyName} shares were ${regularUpDown} ${regularAbsChange}% at $${regularLastPrice} during regular trading hours on ${dayOfWeek}, according to Benzinga Pro.`;
+    } else if (marketStatus === 'premarket') {
+      if (hasExtendedHours) {
+        priceActionText = `${symbol} Price Action: ${companyName} shares were ${extUpDown} ${extAbsChange}% at $${extLastPrice} during premarket trading on ${dayOfWeek}, according to Benzinga Pro.`;
+      } else {
+        priceActionText = `${symbol} Price Action: ${companyName} shares were trading during premarket hours on ${dayOfWeek}, according to Benzinga Pro.`;
+      }
     } else if (marketStatus === 'afterhours') {
-      marketStatusPhrase = ' during after-hours trading';
-    } else if (marketStatus === 'closed') {
-      marketStatusPhrase = ' while the market was closed';
+      if (hasExtendedHours) {
+        // Show both regular session and after-hours changes
+        const regularVerb = regularChangePercent > 0 ? 'rose' : regularChangePercent < 0 ? 'fell' : 'were unchanged';
+        const extVerb = extChangePercent > 0 ? 'up' : extChangePercent < 0 ? 'down' : 'unchanged';
+        
+        priceActionText = `${symbol} Price Action: ${companyName} shares ${regularVerb} ${regularAbsChange}% to $${regularLastPrice} during regular trading hours, and were ${extVerb} ${extAbsChange}% at $${extLastPrice} during after-hours trading on ${dayOfWeek}, according to Benzinga Pro.`;
+      } else {
+        // Fallback to regular session data
+        const regularVerb = regularChangePercent > 0 ? 'rose' : regularChangePercent < 0 ? 'fell' : 'were unchanged';
+        priceActionText = `${symbol} Price Action: ${companyName} shares ${regularVerb} ${regularAbsChange}% to $${regularLastPrice} during regular trading hours on ${dayOfWeek}, according to Benzinga Pro.`;
+      }
+    } else {
+      // Market is closed
+      const regularVerb = regularChangePercent > 0 ? 'rose' : regularChangePercent < 0 ? 'fell' : 'were unchanged';
+      priceActionText = `${symbol} Price Action: ${companyName} shares ${regularVerb} ${regularAbsChange}% to $${regularLastPrice} during regular trading hours on ${dayOfWeek}, according to Benzinga Pro.`;
     }
-    let priceActionText = `${symbol} Price Action: ${companyName} shares were ${upDown} ${absChange}% at $${lastPrice}${marketStatusPhrase} on ${dayOfWeek}, according to Benzinga Pro.`;
+    
     return NextResponse.json({ priceAction: priceActionText });
   } catch (error: any) {
     console.error('Error generating price action:', error);

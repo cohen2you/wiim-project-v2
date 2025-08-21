@@ -49,6 +49,12 @@ async function fetchRelatedArticles(ticker: string, excludeUrl?: string): Promis
           return false;
         }
         
+        // Exclude insights URLs
+        if (item.url && item.url.includes('/insights/')) {
+          console.log('Filtering out insights URL:', item.headline || item.title);
+          return false;
+        }
+        
         // Exclude the current article URL if provided
         if (excludeUrl && item.url === excludeUrl) {
           console.log('Filtering out current article URL:', item.headline || item.title);

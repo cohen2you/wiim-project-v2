@@ -181,7 +181,16 @@ export async function POST(request: Request) {
     // Ensure we have exactly 2 articles for the context
     const articlesForContext = validArticles.slice(0, 2);
 
-
+    console.log('Articles being used for context:');
+    articlesForContext.forEach((article, index) => {
+      console.log(`Article ${index + 1}:`);
+      console.log(`- Headline: ${article.headline}`);
+      console.log(`- URL: ${article.url}`);
+      console.log(`- Created: ${article.created}`);
+      console.log(`- Created type: ${typeof article.created}`);
+      console.log(`- Full article object:`, JSON.stringify(article, null, 2));
+      console.log(`- Content length: ${article.body?.length || 0}`);
+    });
 
     // Prepare article data for the prompt
     const articlesData = articlesForContext.map((article, index) => 
@@ -192,7 +201,7 @@ URL: ${article.url}`
     ).join('\n\n');
 
     // Generate enhanced story with integrated context
-    const prompt = `
+    let prompt = `
 You are a financial journalist. You have an existing story and two recent news articles about the same ticker. Your task is to intelligently integrate content from these articles into the existing story.
 
 EXISTING STORY:
@@ -217,6 +226,7 @@ INSTRUCTIONS:
 11. Ensure all prices are formatted to exactly 2 decimal places
 12. DO NOT use phrases like "according to Benzinga" or "according to recent reports" - these are awkward since this is for Benzinga
 13. Integrate the content directly without attribution phrases
+14. **CRITICAL: DO NOT use any time references like "last week", "recently", "earlier this week", "this week", etc. - these articles may be from different time periods and using time references creates false information**
 
 MANDATORY HYPERLINK REQUIREMENTS:
 - Article 1 URL: ${articlesForContext[0].url} - MUST be used in paragraph 1 or 2
@@ -228,8 +238,11 @@ MANDATORY HYPERLINK REQUIREMENTS:
 
 HYPERLINK INTEGRATION RULES:
 - Integrate content naturally without attribution phrases
-- Avoid phrases like "according to Benzinga" or "according to recent reports"
+- Avoid phrases like "according to Benzinga", "according to recent reports", "as reported", "as mentioned"
 - Present information directly as factual content
+- Use descriptive phrases like "recent hedge fund activity", "market developments", "sector trends", "company performance"
+- DO NOT use phrases that sound like citations or attributions
+- Make the hyperlinks feel like natural parts of the sentence, not added references
 
 CRITICAL RULES:
 - Article 1 hyperlink goes in paragraph 1 or 2
@@ -238,32 +251,167 @@ CRITICAL RULES:
 - No standalone hyperlink lines
 - Maintain existing story structure and flow
 - Format all prices to exactly 2 decimal places
+- PRESERVE ALL EXISTING HYPERLINKS - Do not remove or modify any existing hyperlinks in the story
+- The final story must contain ALL original hyperlinks PLUS the 2 new ones
 
-VERIFICATION: Before submitting, count your hyperlinks. You must have exactly 2 integrated hyperlinks.
+VERIFICATION: Before submitting, count your hyperlinks. You must have exactly 2 NEW integrated hyperlinks PLUS all existing hyperlinks from the original story.
+
+HYPERLINK EXAMPLES:
+❌ WRONG: "Berkshire Hathaway reduced its stake as reported"
+❌ WRONG: "TSMC's performance declined as mentioned"
+✅ CORRECT: "Berkshire Hathaway reduced its stake in recent hedge fund activity"
+✅ CORRECT: "TSMC's performance declined amid market developments"
 
 Return the complete enhanced story with integrated context:`;
 
-    const completion = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages: [{ role: 'user', content: prompt }],
-      max_tokens: 2000,
-      temperature: 0.7,
-    });
+    let enhancedStory = '';
+    let attempts = 0;
+    const maxAttempts = 3;
+    
+    while (attempts < maxAttempts) {
+      attempts++;
+      console.log(`Attempt ${attempts} to generate story with both hyperlinks...`);
+      
+      const completion = await openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [{ role: 'user', content: prompt }],
+        max_tokens: 2000,
+        temperature: 0.7,
+      });
 
-    const enhancedStory = completion.choices[0].message?.content?.trim() || '';
+      enhancedStory = completion.choices[0].message?.content?.trim() || '';
 
-    if (!enhancedStory) {
-      return NextResponse.json({ error: 'Failed to generate enhanced story.' }, { status: 500 });
+      if (!enhancedStory) {
+        return NextResponse.json({ error: 'Failed to generate enhanced story.' }, { status: 500 });
+      }
+
+      // Debug: Count hyperlinks in the result
+      const hyperlinkCount = (enhancedStory.match(/<a href=/g) || []).length;
+      const hasArticle1 = enhancedStory.includes(articlesForContext[0].url);
+      const hasArticle2 = enhancedStory.includes(articlesForContext[1].url);
+      
+      // Count existing hyperlinks from the original story
+      const existingHyperlinkCount = (existingStory.match(/<a href=/g) || []).length;
+      const totalExpectedHyperlinks = existingHyperlinkCount + 2; // Original + 2 new ones
+      
+      console.log(`Enhanced story hyperlink count: ${hyperlinkCount}`);
+      console.log(`Original story hyperlink count: ${existingHyperlinkCount}`);
+      console.log(`Expected total hyperlinks: ${totalExpectedHyperlinks}`);
+      console.log(`Article 1 URL appears: ${hasArticle1}`);
+      console.log(`Article 2 URL appears: ${hasArticle2}`);
+      
+      // Check if both new hyperlinks are present AND all existing hyperlinks are preserved
+      if (hyperlinkCount >= totalExpectedHyperlinks && hasArticle1 && hasArticle2) {
+        console.log(`Success! Both new hyperlinks included and existing hyperlinks preserved on attempt ${attempts}`);
+        break;
+      } else {
+        console.log(`Attempt ${attempts} failed - missing hyperlinks or lost existing ones. Retrying...`);
+        if (attempts < maxAttempts) {
+          // Add a more explicit instruction for the retry
+          const retryPrompt = prompt + `\n\nCRITICAL RETRY INSTRUCTION: Your previous response was missing required hyperlinks or lost existing ones. You MUST include EXACTLY 2 NEW hyperlinks - one from each article. Article 1 URL: ${articlesForContext[0].url} and Article 2 URL: ${articlesForContext[1].url}. Both must be present in the final story. MOST IMPORTANTLY: You MUST PRESERVE ALL EXISTING HYPERLINKS from the original story. Do not remove or modify any existing hyperlinks.`;
+          prompt = retryPrompt;
+        }
+      }
     }
+    
+         // If we still don't have both hyperlinks after all attempts, try a more natural approach
+     if (!enhancedStory.includes(articlesForContext[0].url) || !enhancedStory.includes(articlesForContext[1].url)) {
+       console.log('Falling back to natural hyperlink integration...');
+       
+       // Check if we lost existing hyperlinks
+       const existingHyperlinkCount = (existingStory.match(/<a href=/g) || []).length;
+       const currentHyperlinkCount = (enhancedStory.match(/<a href=/g) || []).length;
+       
+       if (currentHyperlinkCount < existingHyperlinkCount) {
+         console.log('WARNING: Lost existing hyperlinks during AI processing. Restoring original story and adding new hyperlinks naturally.');
+         enhancedStory = existingStory; // Restore original story to preserve existing hyperlinks
+       }
+       
+       // Split the story into paragraphs
+       const paragraphs = enhancedStory.split('\n\n').filter(p => p.trim());
+       
+       if (paragraphs.length >= 2) {
+         // For Article 1: Find a natural place in the first or second paragraph
+         const targetParagraph1 = paragraphs.length >= 2 ? 1 : 0;
+         let paragraph1 = paragraphs[targetParagraph1];
+         
+         // Look for natural integration points in the first paragraph
+         const integrationPoints1 = [
+           { pattern: /(shares have been|stock has been|company has been)/i, replacement: `$1 <a href="${articlesForContext[0].url}">amid recent developments</a>` },
+           { pattern: /(performance throughout|rally has extended|surge has continued)/i, replacement: `$1 <a href="${articlesForContext[0].url}">with strong momentum</a>` },
+           { pattern: /(analysts expressing|market sentiment|investor confidence)/i, replacement: `$1 <a href="${articlesForContext[0].url}">in the sector</a>` }
+         ];
+         
+         let integrated1 = false;
+         for (const point of integrationPoints1) {
+           if (point.pattern.test(paragraph1)) {
+             paragraph1 = paragraph1.replace(point.pattern, point.replacement);
+             integrated1 = true;
+             break;
+           }
+         }
+         
+         // If no natural point found, add at the end of the sentence before the last period
+         if (!integrated1) {
+           const sentences = paragraph1.split('.');
+           if (sentences.length > 1) {
+             const lastSentence = sentences[sentences.length - 2];
+             if (lastSentence.trim()) {
+               sentences[sentences.length - 2] = lastSentence + ` <a href="${articlesForContext[0].url}">amid recent developments</a>`;
+               paragraph1 = sentences.join('.');
+             }
+           }
+         }
+         
+         // For Article 2: Find a natural place in middle paragraphs
+         const targetParagraph2 = Math.min(3, paragraphs.length - 1);
+         let paragraph2 = paragraphs[targetParagraph2];
+         
+         const integrationPoints2 = [
+           { pattern: /(market conditions|trading activity|sector performance)/i, replacement: `$1 <a href="${articlesForContext[1].url}">shows continued strength</a>` },
+           { pattern: /(valuation outlook|price targets|analyst ratings)/i, replacement: `$1 <a href="${articlesForContext[1].url}">reflect market sentiment</a>` },
+           { pattern: /(execution risks|inherent challenges|market dynamics)/i, replacement: `$1 <a href="${articlesForContext[1].url}">in the current environment</a>` }
+         ];
+         
+         let integrated2 = false;
+         for (const point of integrationPoints2) {
+           if (point.pattern.test(paragraph2)) {
+             paragraph2 = paragraph2.replace(point.pattern, point.replacement);
+             integrated2 = true;
+             break;
+           }
+         }
+         
+         // If no natural point found, add at the end of the sentence before the last period
+         if (!integrated2) {
+           const sentences = paragraph2.split('.');
+           if (sentences.length > 1) {
+             const lastSentence = sentences[sentences.length - 2];
+             if (lastSentence.trim()) {
+               sentences[sentences.length - 2] = lastSentence + ` <a href="${articlesForContext[1].url}">amid market developments</a>`;
+               paragraph2 = sentences.join('.');
+             }
+           }
+         }
+         
+         // Update the paragraphs
+         paragraphs[targetParagraph1] = paragraph1;
+         paragraphs[targetParagraph2] = paragraph2;
+         
+         enhancedStory = paragraphs.join('\n\n');
+         console.log('Natural hyperlink integration completed');
+       }
+     }
 
-         // Return just the enhanced story with integrated context (no price action or additional links)
-     const completeStory = enhancedStory;
+    // Return the enhanced story with integrated context
+    const finalStory = enhancedStory;
     
     return NextResponse.json({ 
-      story: completeStory,
+      story: finalStory,
       contextSources: articlesForContext.map(article => ({
         headline: article.headline,
-        url: article.url
+        url: article.url,
+        created: article.created
       }))
     });
   } catch (error: any) {

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import OpenAI from 'openai';
+import { preserveHyperlinks } from '../../../../lib/hyperlink-preservation';
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const BENZINGA_API_KEY = process.env.BENZINGA_API_KEY!;
@@ -36,7 +37,7 @@ async function fetchPriceData(ticker: string) {
 
 export async function POST(request: Request) {
   try {
-    const { ticker } = await request.json();
+    const { ticker, existingStory } = await request.json();
     
     if (!ticker) {
       return NextResponse.json({ error: 'Ticker is required.' }, { status: 400 });
@@ -148,10 +149,18 @@ EXAMPLES OF WHAT TO WRITE:
       return NextResponse.json({ error: 'Failed to generate technical analysis.' }, { status: 500 });
     }
 
+    // If we have an existing story, preserve hyperlinks
+    let finalTechnicalAnalysis = technicalAnalysis;
+    if (existingStory) {
+      // Create a combined story with the new technical analysis
+      const combinedStory = existingStory + '\n\n' + technicalAnalysis;
+      finalTechnicalAnalysis = preserveHyperlinks(existingStory, combinedStory);
+    }
+
     console.log(`Generated technical analysis for ${ticker}: ${technicalAnalysis}`);
 
     return NextResponse.json({ 
-      technicalAnalysis,
+      technicalAnalysis: finalTechnicalAnalysis,
       step: 3
     });
   } catch (error: any) {

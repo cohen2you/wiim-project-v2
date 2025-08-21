@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import OpenAI from 'openai';
+import { preserveHyperlinks, removeExistingSection } from '../../../../lib/hyperlink-preservation';
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const BENZINGA_EDGE_API_KEY = process.env.BENZINGA_EDGE_API_KEY!;
@@ -185,10 +186,13 @@ Add the Benzinga Edge ratings section after the analyst ratings section now.`;
       return NextResponse.json({ error: 'Failed to add Edge ratings.' }, { status: 500 });
     }
 
+    // Preserve existing hyperlinks
+    const finalStory = preserveHyperlinks(existingStory, updatedStory);
+
     console.log('Add Edge Ratings: Successfully added Edge ratings to story');
 
     return NextResponse.json({ 
-      story: updatedStory,
+      story: finalStory,
       edgeData
     });
   } catch (error: any) {

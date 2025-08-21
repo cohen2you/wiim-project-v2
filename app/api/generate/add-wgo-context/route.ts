@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import OpenAI from 'openai';
+import { preserveHyperlinks, ensureProperPriceActionPlacement } from '../../../../lib/hyperlink-preservation';
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const BENZINGA_API_KEY = process.env.BENZINGA_API_KEY!;
@@ -38,6 +39,11 @@ async function fetchRelatedArticles(ticker: string, excludeUrl?: string): Promis
           return false;
         }
         
+        // Exclude insights URLs
+        if (item.url && item.url.includes('/insights/')) {
+          return false;
+        }
+        
         // Exclude the current article URL if provided
         if (excludeUrl && item.url === excludeUrl) {
           return false;
@@ -64,8 +70,6 @@ async function fetchRelatedArticles(ticker: string, excludeUrl?: string): Promis
 export async function POST(request: Request) {
   try {
     const { ticker, existingStory } = await request.json();
-    console.log('Finalize request received for ticker:', ticker);
-    console.log('Existing story length:', existingStory?.length);
     
     if (!ticker || !existingStory) {
       return NextResponse.json({ error: 'Ticker and existing story are required.' }, { status: 400 });
@@ -73,7 +77,6 @@ export async function POST(request: Request) {
 
     // Fetch related articles for context (needed for the Read Next link)
     const relatedArticles = await fetchRelatedArticles(ticker);
-    console.log('Found related articles:', relatedArticles.length);
     
     if (relatedArticles.length < 2) {
       return NextResponse.json({ error: 'Not enough related articles found for context.' }, { status: 404 });
@@ -151,11 +154,9 @@ Return the AGGRESSIVELY condensed story (350-400 words) with all elements preser
     });
 
     const condensedStory = condensationCompletion.choices[0].message?.content?.trim() || existingStory;
-    console.log('Condensed story length:', condensedStory.length);
 
     // Check if "Also Read" line is missing and add it back if needed
     if (!condensedStory.includes('Also Read:')) {
-      console.log('Also Read line missing, adding it back...');
       // Find the "Also Read" line in the original story
       const alsoReadMatch = existingStory.match(/Also Read:.*?(?=\n\n|\n[A-Z]|$)/);
       if (alsoReadMatch) {
@@ -165,7 +166,6 @@ Return the AGGRESSIVELY condensed story (350-400 words) with all elements preser
         const insertIndex = Math.min(3, parts.length - 2); // Insert after technical analysis
         parts.splice(insertIndex, 0, alsoReadLine);
         const finalStory = parts.join('\n\n');
-        console.log('Final story length with Also Read restored:', finalStory.length);
         
         return NextResponse.json({ 
           story: finalStory,
@@ -211,11 +211,9 @@ Return the corrected story:`;
     });
 
     const correctedStory = rulesCompletion.choices[0].message?.content?.trim() || condensedStory;
-    console.log('Final story length after rule enforcement:', correctedStory.length);
 
     // If the story is still too long, do a second aggressive cut
     if (correctedStory.length > 2500) {
-      console.log('Story still too long, doing second cut...');
       const secondCutPrompt = `
 The story is still too long. Make a FINAL aggressive cut to get it to 350-400 words maximum.
 
@@ -244,10 +242,15 @@ Return the FINAL condensed story:`;
       });
 
       const finalStory = secondCutCompletion.choices[0].message?.content?.trim() || correctedStory;
-      console.log('Final story length after second cut:', finalStory.length);
+      
+      // Preserve existing hyperlinks
+      let preservedStory = preserveHyperlinks(existingStory, finalStory);
+      
+      // Ensure proper placement of price action and Read Next links after condensation
+      preservedStory = ensureProperPriceActionPlacement(preservedStory, '', '');
       
       return NextResponse.json({ 
-        story: finalStory,
+        story: preservedStory,
         relatedArticles: relatedArticles.map(article => ({
           headline: article.headline,
           url: article.url
@@ -255,10 +258,14 @@ Return the FINAL condensed story:`;
       });
     }
 
-    console.log('Final story length:', correctedStory.length);
+    // Preserve existing hyperlinks
+    let finalStory = preserveHyperlinks(existingStory, correctedStory);
+    
+    // Ensure proper placement of price action and Read Next links after condensation
+    finalStory = ensureProperPriceActionPlacement(finalStory, '', '');
 
     return NextResponse.json({ 
-      story: correctedStory,
+      story: finalStory,
       relatedArticles: relatedArticles.map(article => ({
         headline: article.headline,
         url: article.url
@@ -287,11 +294,16 @@ async function fetchPriceData(ticker: string) {
         return {
           last: quote.lastTradePrice || 0,
           change: quote.change || 0,
-          change_percent: quote.changePercent || 0,
+          change_percent: quote.changePercent || quote.change_percent || 0,
           volume: quote.volume || 0,
           high: quote.high || 0,
           low: quote.low || 0,
-          open: quote.open || 0
+          open: quote.open || 0,
+          // Add extended hours data if available
+          extendedHoursPrice: quote.extendedHoursPrice || null,
+          extendedHoursChange: quote.extendedHoursChange || null,
+          extendedHoursChangePercent: quote.extendedHoursChangePercent || null,
+          extendedHoursTime: quote.extendedHoursTime || null
         };
       }
     }
@@ -302,24 +314,73 @@ async function fetchPriceData(ticker: string) {
   }
 }
 
+// Helper function to determine market session
+function getMarketSession(): 'premarket' | 'regular' | 'afterhours' | 'closed' {
+  const now = new Date();
+  const nyTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+  const hour = nyTime.getHours();
+  const minute = nyTime.getMinutes();
+  const time = hour * 100 + minute;
+  const day = nyTime.getDay();
+  
+  // Weekend
+  if (day === 0 || day === 6) return 'closed';
+  
+  // Pre-market (4:00 AM - 9:30 AM ET)
+  if (time >= 400 && time < 930) return 'premarket';
+  
+  // Regular trading (9:30 AM - 4:00 PM ET)
+  if (time >= 930 && time < 1600) return 'regular';
+  
+  // After-hours (4:00 PM - 8:00 PM ET)
+  if (time >= 1600 && time < 2000) return 'afterhours';
+  
+  // Closed (8:00 PM - 4:00 AM ET)
+  return 'closed';
+}
+
 // Helper function to generate price action line
 function generatePriceActionLine(ticker: string, priceData: any) {
   if (!priceData) {
     return `${ticker} Price Action: ${ticker} shares were trading during regular market hours, according to <a href="https://pro.benzinga.com">Benzinga Pro</a>.`;
   }
   
-  const last = parseFloat(priceData.last || 0).toFixed(2);
-  const change = parseFloat(priceData.change || 0).toFixed(2);
-  const changePercent = parseFloat(priceData.change_percent || 0).toFixed(2);
+  const marketSession = getMarketSession();
+  const dayName = getCurrentDayName();
   
-  // Check if market is open (rough estimate - you might want to add proper market hours logic)
-  const now = new Date();
-  const isMarketOpen = now.getHours() >= 9 && now.getHours() < 16; // Simplified market hours
+  // Regular session data
+  const regularLast = parseFloat(priceData.last || 0).toFixed(2);
+  const regularChangePercent = parseFloat(priceData.change_percent || 0).toFixed(2);
+  const regularDisplayChangePercent = regularChangePercent.startsWith('-') ? regularChangePercent.substring(1) : regularChangePercent;
   
-  if (isMarketOpen) {
-    return `${ticker} Price Action: ${ticker} shares were ${changePercent.startsWith('-') ? 'down' : 'up'} ${changePercent}% at $${last} during regular trading hours on ${getCurrentDayName()}, according to <a href="https://pro.benzinga.com">Benzinga Pro</a>.`;
+  // Extended hours data
+  const hasExtendedHours = priceData.extendedHoursPrice && priceData.extendedHoursChangePercent;
+  const extPrice = hasExtendedHours ? parseFloat(priceData.extendedHoursPrice || 0).toFixed(2) : null;
+  const extChangePercent = hasExtendedHours ? parseFloat(priceData.extendedHoursChangePercent || 0).toFixed(2) : null;
+  const extDisplayChangePercent = extChangePercent && extChangePercent.startsWith('-') ? extChangePercent.substring(1) : extChangePercent;
+  
+  if (marketSession === 'regular') {
+    return `${ticker} Price Action: ${ticker} shares were ${regularChangePercent.startsWith('-') ? 'down' : 'up'} ${regularDisplayChangePercent}% at $${regularLast} during regular trading hours on ${dayName}, according to <a href="https://pro.benzinga.com">Benzinga Pro</a>.`;
+  } else if (marketSession === 'premarket') {
+    if (hasExtendedHours && extChangePercent) {
+      return `${ticker} Price Action: ${ticker} shares were ${extChangePercent.startsWith('-') ? 'down' : 'up'} ${extDisplayChangePercent}% at $${extPrice} during pre-market trading on ${dayName}, according to <a href="https://pro.benzinga.com">Benzinga Pro</a>.`;
+    } else {
+      return `${ticker} Price Action: ${ticker} shares were trading during pre-market hours on ${dayName}, according to <a href="https://pro.benzinga.com">Benzinga Pro</a>.`;
+    }
+  } else if (marketSession === 'afterhours') {
+    if (hasExtendedHours && extChangePercent) {
+      // Show both regular session and after-hours changes
+      const regularDirection = regularChangePercent.startsWith('-') ? 'fell' : 'rose';
+      const extDirection = extChangePercent.startsWith('-') ? 'down' : 'up';
+      
+      return `${ticker} Price Action: ${ticker} shares ${regularDirection} ${regularDisplayChangePercent}% to $${regularLast} during regular trading hours, and were ${extDirection} ${extDisplayChangePercent}% at $${extPrice} during after-hours trading on ${dayName}, according to <a href="https://pro.benzinga.com">Benzinga Pro</a>.`;
+    } else {
+      // Fallback to regular session data if no extended hours data
+      return `${ticker} Price Action: ${ticker} shares ${regularChangePercent.startsWith('-') ? 'fell' : 'rose'} ${regularDisplayChangePercent}% to $${regularLast} during regular trading hours on ${dayName}, according to <a href="https://pro.benzinga.com">Benzinga Pro</a>.`;
+    }
   } else {
-    return `${ticker} Price Action: ${ticker} shares ${changePercent.startsWith('-') ? 'fell' : 'rose'} ${changePercent}% to $${last} during regular trading hours on ${getCurrentDayName()}, according to <a href="https://pro.benzinga.com">Benzinga Pro</a>.`;
+    // Market is closed, use last regular session data
+    return `${ticker} Price Action: ${ticker} shares ${regularChangePercent.startsWith('-') ? 'fell' : 'rose'} ${regularDisplayChangePercent}% to $${regularLast} during regular trading hours on ${dayName}, according to <a href="https://pro.benzinga.com">Benzinga Pro</a>.`;
   }
 }
 

@@ -65,15 +65,6 @@ async function fetchAnalystRatings(ticker: string) {
           }
           line += dateStr;
           
-          // Hyperlink the last three words to the analyst ratings page
-          const words = line.split(' ');
-          if (words.length >= 3) {
-            const lastThreeWords = words.slice(-3).join(' ');
-            const analystRatingsUrl = `https://www.benzinga.com/quote/${ticker}/analyst-ratings`;
-            const hyperlinkedWords = `<a href="${analystRatingsUrl}">${lastThreeWords}</a>`;
-            line = words.slice(0, -3).join(' ') + ' ' + hyperlinkedWords;
-          }
-          
           console.log('Add Analyst Ratings: Generated line:', line);
           return line;
         }).filter((line: string | null) => line !== null) as string[];
