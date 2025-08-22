@@ -38,7 +38,26 @@ export default function PRStoryGeneratorPage() {
   const [copied, setCopied] = useState(false);
   const [loadingStandardStory, setLoadingStandardStory] = useState(false);
   const [loadingBaseStory, setLoadingBaseStory] = useState(false);
+  const [baseStoryError, setBaseStoryError] = useState('');
   const [standardStoryError, setStandardStoryError] = useState('');
+  
+  // URL-based source inputs
+  const [primarySourceUrl, setPrimarySourceUrl] = useState('');
+  const [contextSourceUrl, setContextSourceUrl] = useState('');
+  const [scrapedPrimaryContent, setScrapedPrimaryContent] = useState('');
+  const [scrapedContextContent, setScrapedContextContent] = useState('');
+  const [loadingPrimaryScrape, setLoadingPrimaryScrape] = useState(false);
+  const [loadingContextScrape, setLoadingContextScrape] = useState(false);
+  const [primaryScrapeError, setPrimaryScrapeError] = useState('');
+  const [contextScrapeError, setContextScrapeError] = useState('');
+  
+  // PR and News Post selection states
+  const [fetchedPRs, setFetchedPRs] = useState<PR[]>([]);
+  const [fetchedNewsPosts, setFetchedNewsPosts] = useState<PR[]>([]);
+  const [showPRResults, setShowPRResults] = useState(false);
+  const [showNewsResults, setShowNewsResults] = useState(false);
+  const [selectedPRForPrimary, setSelectedPRForPrimary] = useState<PR | null>(null);
+  const [selectedNewsForContext, setSelectedNewsForContext] = useState<PR | null>(null);
 
   // Mode state
   const [useModularApproach, setUseModularApproach] = useState(true);
@@ -71,6 +90,8 @@ export default function PRStoryGeneratorPage() {
       if (!res.ok) throw new Error(data.error || 'Failed to fetch press releases');
 
       setPrs(data.prs || []);
+      setFetchedPRs(data.prs || []);
+      setShowPRResults(true);
       setPrFetchAttempted(true);
     } catch (err: any) {
       setPrError(err.message || 'Failed to fetch press releases');
@@ -85,7 +106,7 @@ export default function PRStoryGeneratorPage() {
       return;
     }
 
-    setLoadingPRs(true);
+    setLoadingTenArticles(true);
     setPrError('');
     setPrs([]);
     setSelectedPR(null);
@@ -95,24 +116,38 @@ export default function PRStoryGeneratorPage() {
       const res = await fetch('/api/bz/articles', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ticker }),
+        body: JSON.stringify({ ticker, count: 10 }),
       });
 
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to fetch articles');
 
       setPrs(data.articles || []);
+      setFetchedNewsPosts(data.articles || []);
+      setShowNewsResults(true);
       setPrFetchAttempted(true);
     } catch (err: any) {
       setPrError(err.message || 'Failed to fetch articles');
     } finally {
-      setLoadingPRs(false);
+      setLoadingTenArticles(false);
     }
   };
 
   const handleSelectPR = (pr: PR) => {
     setSelectedPR(selectedPR?.id === pr.id ? null : pr);
     setPrimaryText(pr.body);
+  };
+
+  const handleSelectPRForPrimary = (pr: PR) => {
+    setSelectedPRForPrimary(pr);
+    setPrimarySourceUrl(pr.url || '');
+    setShowPRResults(false);
+  };
+
+  const handleSelectNewsForContext = (news: PR) => {
+    setSelectedNewsForContext(news);
+    setContextSourceUrl(news.url || '');
+    setShowNewsResults(false);
   };
 
   const handleScrapeUrl = async () => {
@@ -155,6 +190,63 @@ export default function PRStoryGeneratorPage() {
     }
   };
 
+  const handleScrapePrimarySource = async () => {
+    if (!primarySourceUrl.trim()) return;
+
+    console.log('Starting scrape for primary source URL:', primarySourceUrl);
+    setLoadingPrimaryScrape(true);
+    setPrimaryScrapeError('');
+
+    try {
+      const res = await fetch('/api/scrape', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: primarySourceUrl }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to scrape primary source URL');
+
+      setScrapedPrimaryContent(data.text || '');
+      setPrimaryText(data.text || ''); // Also set the legacy primaryText for compatibility
+      console.log('Primary source scraped successfully');
+      
+    } catch (err: any) {
+      console.error('Primary source scrape error:', err);
+      setPrimaryScrapeError(err.message || 'Failed to scrape primary source URL');
+    } finally {
+      setLoadingPrimaryScrape(false);
+    }
+  };
+
+  const handleScrapeContextSource = async () => {
+    if (!contextSourceUrl.trim()) return;
+
+    console.log('Starting scrape for context source URL:', contextSourceUrl);
+    setLoadingContextScrape(true);
+    setContextScrapeError('');
+
+    try {
+      const res = await fetch('/api/scrape', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: contextSourceUrl }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to scrape context source URL');
+
+      setScrapedContextContent(data.text || '');
+      console.log('Context source scraped successfully');
+      
+    } catch (err: any) {
+      console.error('Context source scrape error:', err);
+      setContextScrapeError(err.message || 'Failed to scrape context source URL');
+    } finally {
+      setLoadingContextScrape(false);
+    }
+  };
+
   const handleAnalystNoteTextExtracted = (text: string) => {
     setPrimaryText(text);
   };
@@ -189,6 +281,40 @@ export default function PRStoryGeneratorPage() {
     } catch (err: any) {
       console.error('Base story generation error:', err);
       alert('Failed to generate base story: ' + err.message);
+    } finally {
+      setLoadingBaseStory(false);
+    }
+  };
+
+  const handleGenerateStoryFromUrls = async () => {
+    if (!scrapedPrimaryContent.trim() || !ticker.trim()) {
+      setBaseStoryError('Please ensure you have scraped primary source content and a ticker entered.');
+      return;
+    }
+
+    setLoadingBaseStory(true);
+    setBaseStoryError('');
+    try {
+      const res = await fetch('/api/generate/base-story', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          ticker,
+          scrapedContent: scrapedPrimaryContent,
+          scrapedUrl: primarySourceUrl,
+          contextContent: scrapedContextContent,
+          contextUrl: contextSourceUrl
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.story) throw new Error(data.error || 'Failed to generate story from URLs');
+
+      setArticle(data.story);
+      console.log('Story generated from URLs successfully:', data.story.substring(0, 100) + '...');
+    } catch (err: any) {
+      console.error('URL-based story generation error:', err);
+      setBaseStoryError('Failed to generate story from URLs: ' + err.message);
     } finally {
       setLoadingBaseStory(false);
     }
@@ -237,6 +363,7 @@ export default function PRStoryGeneratorPage() {
     setPrError('');
     setContextError('');
     setStandardStoryError('');
+    setBaseStoryError('');
     setShowManualInput(false);
     setShowUploadSection(false);
     setShowCustomizeModal(false);
@@ -337,6 +464,264 @@ export default function PRStoryGeneratorPage() {
         {tickerError && (
           <div style={{ color: 'red', fontSize: 14, marginTop: 4 }}>
             {tickerError}
+          </div>
+        )}
+      </div>
+
+      {/* URL-based Source Inputs */}
+      <div style={{ marginBottom: 20, padding: '16px', backgroundColor: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+        <h3 style={{ fontSize: '16px', fontWeight: '600', marginBottom: '12px', color: '#1e293b' }}>
+          Source URLs (Recommended)
+        </h3>
+        
+        {/* Primary Source URL */}
+        <div style={{ marginBottom: '16px' }}>
+          <label style={{ display: 'block', marginBottom: '8px', fontWeight: '500', color: '#374151' }}>
+            Primary Source URL (Benzinga PR) *
+          </label>
+          
+          {/* PR Selection Section */}
+          {showPRResults && (
+            <div style={{ marginBottom: '12px', padding: '12px', backgroundColor: '#f0f9ff', borderRadius: '6px', border: '1px solid #0ea5e9' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                <span style={{ fontSize: '14px', fontWeight: '500', color: '#0c4a6e' }}>
+                  Select a PR for Primary Source:
+                </span>
+                <button
+                  onClick={() => setShowPRResults(false)}
+                  style={{ 
+                    padding: '4px 8px', 
+                    background: '#dc2626', 
+                    color: 'white', 
+                    border: 'none', 
+                    borderRadius: '4px',
+                    fontSize: '12px',
+                    cursor: 'pointer'
+                  }}
+                >
+                  Hide
+                </button>
+              </div>
+              <div style={{ maxHeight: '200px', overflowY: 'auto' }}>
+                {fetchedPRs.map((pr, index) => (
+                  <div
+                    key={pr.id}
+                    onClick={() => handleSelectPRForPrimary(pr)}
+                    style={{
+                      padding: '8px 12px',
+                      marginBottom: '4px',
+                      backgroundColor: selectedPRForPrimary?.id === pr.id ? '#dbeafe' : 'white',
+                      border: '1px solid #d1d5db',
+                      borderRadius: '4px',
+                      cursor: 'pointer',
+                      fontSize: '13px',
+                      lineHeight: '1.4'
+                    }}
+                  >
+                    <div style={{ fontWeight: '500', marginBottom: '4px' }}>
+                      {pr.headline}
+                    </div>
+                    <div style={{ fontSize: '12px', color: '#6b7280' }}>
+                      {new Date(pr.created).toLocaleDateString()} • {pr.body.substring(0, 100)}...
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            <input
+              type="url"
+              value={primarySourceUrl}
+              onChange={e => setPrimarySourceUrl(e.target.value)}
+              placeholder="https://www.benzinga.com/pressreleases/..."
+              style={{ 
+                flex: 1,
+                fontSize: 14, 
+                padding: '8px 12px', 
+                border: '1px solid #d1d5db',
+                borderRadius: '6px',
+                backgroundColor: 'white'
+              }}
+            />
+            {primarySourceUrl.trim() && (
+              <button
+                onClick={handleScrapePrimarySource}
+                disabled={loadingPrimaryScrape}
+                style={{ 
+                  padding: '8px 16px', 
+                  background: loadingPrimaryScrape ? '#6b7280' : '#059669', 
+                  color: 'white', 
+                  border: 'none', 
+                  borderRadius: '6px',
+                  fontSize: 14,
+                  fontWeight: '500',
+                  cursor: loadingPrimaryScrape ? 'not-allowed' : 'pointer',
+                  whiteSpace: 'nowrap'
+                }}
+              >
+                {loadingPrimaryScrape ? 'Scraping...' : 'Scrape PR'}
+              </button>
+            )}
+          </div>
+          {selectedPRForPrimary && (
+            <div style={{ color: '#059669', fontSize: '12px', marginTop: '4px' }}>
+              ✓ Selected PR: {selectedPRForPrimary.headline}
+            </div>
+          )}
+          {primaryScrapeError && (
+            <div style={{ color: '#dc2626', fontSize: 12, marginTop: '4px' }}>
+              {primaryScrapeError}
+            </div>
+          )}
+          {scrapedPrimaryContent && (
+            <div style={{ color: '#059669', fontSize: 12, marginTop: '4px' }}>
+              ✓ Primary source scraped successfully ({scrapedPrimaryContent.length} characters)
+            </div>
+          )}
+        </div>
+
+        {/* Context Source URL */}
+        <div style={{ marginBottom: '8px' }}>
+          <label style={{ display: 'block', marginBottom: '8px', fontWeight: '500', color: '#374151' }}>
+            Context Source URL (Benzinga Article) - Optional
+          </label>
+          
+          {/* News Post Selection Section */}
+          {showNewsResults && (
+            <div style={{ marginBottom: '12px', padding: '12px', backgroundColor: '#fef3c7', borderRadius: '6px', border: '1px solid #f59e0b' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                <span style={{ fontSize: '14px', fontWeight: '500', color: '#92400e' }}>
+                  Select a News Post for Context Source:
+                </span>
+                <button
+                  onClick={() => setShowNewsResults(false)}
+                  style={{ 
+                    padding: '4px 8px', 
+                    background: '#dc2626', 
+                    color: 'white', 
+                    border: 'none', 
+                    borderRadius: '4px',
+                    fontSize: '12px',
+                    cursor: 'pointer'
+                  }}
+                >
+                  Hide
+                </button>
+              </div>
+              <div style={{ maxHeight: '200px', overflowY: 'auto' }}>
+                {fetchedNewsPosts.map((news, index) => (
+                  <div
+                    key={news.id}
+                    onClick={() => handleSelectNewsForContext(news)}
+                    style={{
+                      padding: '8px 12px',
+                      marginBottom: '4px',
+                      backgroundColor: selectedNewsForContext?.id === news.id ? '#fef3c7' : 'white',
+                      border: '1px solid #d1d5db',
+                      borderRadius: '4px',
+                      cursor: 'pointer',
+                      fontSize: '13px',
+                      lineHeight: '1.4'
+                    }}
+                  >
+                    <div style={{ fontWeight: '500', marginBottom: '4px' }}>
+                      {news.headline}
+                    </div>
+                    <div style={{ fontSize: '12px', color: '#6b7280' }}>
+                      {new Date(news.created).toLocaleDateString()} • {news.body.substring(0, 100)}...
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            <input
+              type="url"
+              value={contextSourceUrl}
+              onChange={e => setContextSourceUrl(e.target.value)}
+              placeholder="https://www.benzinga.com/news/..."
+              style={{ 
+                flex: 1,
+                fontSize: 14, 
+                padding: '8px 12px', 
+                border: '1px solid #d1d5db',
+                borderRadius: '6px',
+                backgroundColor: 'white'
+              }}
+            />
+            {contextSourceUrl.trim() && (
+              <button
+                onClick={handleScrapeContextSource}
+                disabled={loadingContextScrape}
+                style={{ 
+                  padding: '8px 16px', 
+                  background: loadingContextScrape ? '#6b7280' : '#2563eb', 
+                  color: 'white', 
+                  border: 'none', 
+                  borderRadius: '6px',
+                  fontSize: 14,
+                  fontWeight: '500',
+                  cursor: loadingContextScrape ? 'not-allowed' : 'pointer',
+                  whiteSpace: 'nowrap'
+                }}
+              >
+                {loadingContextScrape ? 'Scraping...' : 'Scrape Article'}
+              </button>
+            )}
+          </div>
+          {selectedNewsForContext && (
+            <div style={{ color: '#2563eb', fontSize: '12px', marginTop: '4px' }}>
+              ✓ Selected News: {selectedNewsForContext.headline}
+            </div>
+          )}
+          {contextScrapeError && (
+            <div style={{ color: '#dc2626', fontSize: 12, marginTop: '4px' }}>
+              {contextScrapeError}
+            </div>
+          )}
+          {scrapedContextContent && (
+            <div style={{ color: '#2563eb', fontSize: 12, marginTop: '4px' }}>
+              ✓ Context source scraped successfully ({scrapedContextContent.length} characters)
+            </div>
+          )}
+        </div>
+
+        <div style={{ fontSize: 12, color: '#6b7280', marginTop: '8px', fontStyle: 'italic' }}>
+          * Primary source is required. Context source is optional but recommended for better story quality.
+        </div>
+        
+        {/* Generate Story from URLs Button */}
+        {scrapedPrimaryContent && (
+          <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid #e2e8f0' }}>
+            <button
+              onClick={handleGenerateStoryFromUrls}
+              disabled={loadingBaseStory}
+              style={{ 
+                padding: '12px 24px', 
+                background: loadingBaseStory ? '#6b7280' : '#059669', 
+                color: 'white', 
+                border: 'none', 
+                borderRadius: '8px',
+                fontSize: 16,
+                fontWeight: '600',
+                cursor: loadingBaseStory ? 'not-allowed' : 'pointer',
+                width: '100%'
+              }}
+            >
+              {loadingBaseStory ? 'Generating Story...' : 'Generate Story from URLs'}
+            </button>
+            {baseStoryError && (
+              <div style={{ fontSize: 12, color: '#dc2626', marginTop: '8px', textAlign: 'center', padding: '8px', backgroundColor: '#fef2f2', borderRadius: '4px', border: '1px solid #fecaca' }}>
+                {baseStoryError}
+              </div>
+            )}
+            <div style={{ fontSize: 12, color: '#6b7280', marginTop: '8px', textAlign: 'center' }}>
+              This will create a base story using your scraped content, then you can add enhancements below.
+            </div>
           </div>
         )}
       </div>
@@ -616,61 +1001,7 @@ export default function PRStoryGeneratorPage() {
         loading={loadingCustomContext}
       />
       
-      {prError && <div style={{ color: 'red', marginBottom: 10 }}>{prError}</div>}
-      {prs.length === 0 && !loadingPRs && lastPrTicker && prFetchAttempted && (
-        <div style={{ color: '#b91c1c', marginBottom: 20 }}>
-          No press releases found for the past 7 days for {lastPrTicker}.
-        </div>
-      )}
-      {prs.length > 0 && (
-        <div style={{ marginBottom: 20 }}>
-          <h2>Select a Press Release</h2>
-          <ul style={{ listStyle: 'none', padding: 0 }}>
-            {prs.map(pr => {
-              if (hideUnselectedPRs && selectedPR?.id !== pr.id) {
-                return null;
-              }
-              return (
-                <li key={pr.id} style={{ marginBottom: 10 }}>
-                  <button
-                    style={{
-                      background: selectedPR?.id === pr.id ? '#2563eb' : '#f3f4f6',
-                      color: selectedPR?.id === pr.id ? 'white' : 'black',
-                      border: '1px solid #ccc',
-                      borderRadius: 4,
-                      padding: 8,
-                      width: '100%',
-                      textAlign: 'left',
-                      cursor: 'pointer',
-                    }}
-                    onClick={() => handleSelectPR(pr)}
-                  >
-                    <strong>{pr.headline || '[No Headline]'}</strong>
-                    <br />
-                    <span style={{ fontSize: 12, color: '#666' }}>
-                      <LocalDate dateString={pr.created} />
-                    </span>
-                    <br />
-                    <span style={{ fontSize: 13, color: selectedPR?.id === pr.id ? 'white' : '#444' }}>
-                      {pr.body && pr.body !== '[No body text]'
-                        ? pr.body.substring(0, 100) + (pr.body.length > 100 ? '...' : '')
-                        : '[No body text]'}
-                    </span>
-                    {pr.url && (
-                      <>
-                        <br />
-                        <a href={pr.url} target="_blank" rel="noopener noreferrer" style={{ color: selectedPR?.id === pr.id ? 'white' : '#2563eb', textDecoration: 'underline', fontSize: 13 }}>
-                          View Original
-                        </a>
-                      </>
-                    )}
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        </div>
-      )}
+
     </div>
   );
 }

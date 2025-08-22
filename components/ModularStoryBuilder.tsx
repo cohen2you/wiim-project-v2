@@ -23,9 +23,7 @@ export default function ModularStoryBuilder({ ticker, currentArticle, onStoryUpd
   const [error, setError] = useState<string>('');
   const [showCustomizeModal, setShowCustomizeModal] = useState(false);
   const [loadingCustomContext, setLoadingCustomContext] = useState(false);
-  const [loadingFinalize, setLoadingFinalize] = useState(false);
   const [originalStory, setOriginalStory] = useState<string>('');
-  const [isFinalized, setIsFinalized] = useState(false);
   const [hasBaseStory, setHasBaseStory] = useState(false);
   const articleRef = useRef<HTMLDivElement>(null);
 
@@ -285,43 +283,7 @@ export default function ModularStoryBuilder({ ticker, currentArticle, onStoryUpd
     }
   };
 
-  const handleFinalize = async () => {
-    setLoadingFinalize(true);
-    setError('');
-    
-    try {
-      // Store the original story before finalizing
-      setOriginalStory(currentArticle);
-      
-      const res = await fetch('/api/generate/finalize', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ticker,
-          existingStory: currentArticle
-        }),
-      });
-      
-      const data = await res.json();
-      if (!res.ok || !data.story) throw new Error(data.error || 'Failed to finalize story');
-      
-      // Update the story with the finalized version
-      onStoryUpdate(data.story);
-      setIsFinalized(true);
-    } catch (err: any) {
-      setError(err.message || 'Failed to finalize story');
-    } finally {
-      setLoadingFinalize(false);
-    }
-  };
 
-  const handleUndoFinalize = () => {
-    if (originalStory) {
-      onStoryUpdate(originalStory);
-      setIsFinalized(false);
-      setOriginalStory('');
-    }
-  };
 
   // Toggle component visibility
   const toggleComponent = (id: string) => {
@@ -516,26 +478,7 @@ export default function ModularStoryBuilder({ ticker, currentArticle, onStoryUpd
         </div>
         {error && <p style={{ color: '#dc2626', fontSize: '14px', marginTop: '8px' }}>{error}</p>}
         
-        {/* Finalize button */}
-        <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid #e5e7eb' }}>
-          <button
-            onClick={handleFinalize}
-            disabled={loadingFinalize}
-            style={{
-              padding: '8px 16px',
-              fontSize: '14px',
-              backgroundColor: loadingFinalize ? '#6b7280' : '#7c3aed',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: loadingFinalize ? 'not-allowed' : 'pointer',
-              opacity: loadingFinalize ? 0.5 : 1,
-              width: '100%'
-            }}
-          >
-            {loadingFinalize ? 'Checking Price Action...' : 'Finalize (Check Price Action)'}
-          </button>
-        </div>
+
       </div>
 
       {/* Component List */}
@@ -645,23 +588,6 @@ export default function ModularStoryBuilder({ ticker, currentArticle, onStoryUpd
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
           <h3 style={{ fontSize: '18px', fontWeight: '600' }}>Story Preview</h3>
           <div style={{ display: 'flex', gap: '8px' }}>
-            {isFinalized && (
-              <button
-                onClick={handleUndoFinalize}
-                style={{
-                  padding: '8px 16px',
-                  backgroundColor: '#dc2626',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '4px',
-                  fontSize: '14px',
-                  cursor: 'pointer',
-                  transition: 'background-color 0.2s'
-                }}
-              >
-                Undo Finalize
-              </button>
-            )}
             <button
               onClick={handleCopyArticle}
               style={{
