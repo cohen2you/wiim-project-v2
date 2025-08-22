@@ -5,36 +5,245 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
+// Helper function to fetch company name from Benzinga API
+async function fetchCompanyName(ticker: string): Promise<string> {
+  try {
+    const response = await fetch(`https://api.benzinga.com/api/v2/quoteDelayed?token=${process.env.BENZINGA_API_KEY}&symbols=${encodeURIComponent(ticker)}`);
+    
+    if (!response.ok) {
+      console.error('Failed to fetch company name from Benzinga API');
+      return ticker.toUpperCase();
+    }
+    
+    const data = await response.json();
+    
+    if (data && typeof data === 'object') {
+      const quote = data[ticker.toUpperCase()];
+      if (quote && typeof quote === 'object') {
+        return quote.companyStandardName || quote.name || ticker.toUpperCase();
+      }
+    }
+    
+    return ticker.toUpperCase();
+  } catch (error) {
+    console.error('Error fetching company name:', error);
+    return ticker.toUpperCase();
+  }
+}
+
 export async function POST(req: Request) {
   try {
-    const { ticker, scrapedContent, scrapedUrl } = await req.json();
+    const { ticker, scrapedContent, scrapedUrl, contextContent, contextUrl } = await req.json();
+
+    // Extract publication date from article content
+    let prDate = '';
+    let publicationDate = null;
+    
+    // Look for publication date patterns in the content
+    const publicationDatePatterns = [
+      /(\w+)\s+(\d{1,2}),?\s+(\d{4})\s+\d{1,2}:\d{2}\s+[AP]M/i, // "August 19, 2025 7:56 AM"
+      /(\w+)\s+(\d{1,2}),?\s+(\d{4})/i, // "August 19, 2025"
+      /(\d{1,2})\/(\d{1,2})\/(\d{4})/i, // "8/19/2025"
+      /(\d{1,2})-(\d{1,2})-(\d{4})/i, // "8-19-2025"
+    ];
+    
+    for (const pattern of publicationDatePatterns) {
+      const match = scrapedContent.match(pattern);
+      if (match) {
+        const monthNames = ['january', 'february', 'march', 'april', 'may', 'june', 
+                           'july', 'august', 'september', 'october', 'november', 'december'];
+        
+        let month, day, year;
+        if (match[1].length <= 2) {
+          // Numeric format: 8/19/2025 or 8-19-2025
+          [, month, day, year] = match;
+          month = parseInt(month) - 1; // Convert to 0-based index
+        } else {
+          // Text format: August 19, 2025
+          const monthName = match[1].toLowerCase();
+          month = monthNames.indexOf(monthName);
+          day = parseInt(match[2]);
+          year = parseInt(match[3]);
+        }
+        
+        if (month !== -1 && day && year) {
+          publicationDate = new Date(year, month, day);
+          
+          // Format in AP style: Aug. 19 (no year if current year)
+          const monthNames = ['Jan.', 'Feb.', 'Mar.', 'Apr.', 'May', 'Jun.', 'Jul.', 'Aug.', 'Sep.', 'Oct.', 'Nov.', 'Dec.'];
+          const monthAbbr = monthNames[month];
+          const currentYear = new Date().getFullYear();
+          
+          if (year === currentYear) {
+            prDate = `${monthAbbr} ${day}`;
+          } else {
+            prDate = `${monthAbbr} ${day}, ${year}`;
+          }
+          
+          console.log('Extracted publication date:', prDate, 'from content');
+          break;
+        }
+      }
+    }
+
+    // Extract publication date from context content if available
+    let contextDate = '';
+    let contextPublicationDate = null;
+    
+    if (contextContent) {
+      // Look for publication date patterns in the context content
+      const publicationDatePatterns = [
+        /(\w+)\s+(\d{1,2}),?\s+(\d{4})\s+\d{1,2}:\d{2}\s+[AP]M/i, // "August 19, 2025 7:56 AM"
+        /(\w+)\s+(\d{1,2}),?\s+(\d{4})/i, // "August 19, 2025"
+        /(\d{1,2})\/(\d{1,2})\/(\d{4})/i, // "8/19/2025"
+        /(\d{1,2})-(\d{1,2})-(\d{4})/i, // "8-19-2025"
+      ];
+      
+      for (const pattern of publicationDatePatterns) {
+        const match = contextContent.match(pattern);
+        if (match) {
+          const monthNames = ['january', 'february', 'march', 'april', 'may', 'june', 
+                             'july', 'august', 'september', 'october', 'november', 'december'];
+          
+          let month, day, year;
+          if (match[1].length <= 2) {
+            // Numeric format: 8/19/2025 or 8-19-2025
+            [, month, day, year] = match;
+            month = parseInt(month) - 1; // Convert to 0-based index
+          } else {
+            // Text format: August 19, 2025
+            const monthName = match[1].toLowerCase();
+            month = monthNames.indexOf(monthName);
+            day = parseInt(match[2]);
+            year = parseInt(match[3]);
+          }
+          
+          if (month !== -1 && day && year) {
+            contextPublicationDate = new Date(year, month, day);
+            
+            // Format in AP style: Aug. 19 (no year if current year)
+            const monthNames = ['Jan.', 'Feb.', 'Mar.', 'Apr.', 'May', 'Jun.', 'Jul.', 'Aug.', 'Sep.', 'Oct.', 'Nov.', 'Dec.'];
+            const monthAbbr = monthNames[month];
+            const currentYear = new Date().getFullYear();
+            
+            if (year === currentYear) {
+              contextDate = `${monthAbbr} ${day}`;
+            } else {
+              contextDate = `${monthAbbr} ${day}, ${year}`;
+            }
+            
+            console.log('Extracted context publication date:', contextDate, 'from content');
+            break;
+          }
+        }
+      }
+    }
 
     if (!ticker || !scrapedContent) {
       return NextResponse.json({ error: 'Ticker and scraped content are required' }, { status: 400 });
     }
 
-    // Get company name and exchange info
-    const companyNames: { [key: string]: string } = {
-      'NVDA': 'Nvidia Corp.',
-      'META': 'Meta Platforms Inc.',
-      'AAPL': 'Apple Inc.',
-      'MSFT': 'Microsoft Corp.',
-      'GOOGL': 'Alphabet Inc.',
-      'AMZN': 'Amazon.com Inc.',
-      'TSLA': 'Tesla Inc.',
-      'NFLX': 'Netflix Inc.',
-      'AMD': 'Advanced Micro Devices Inc.',
-      'INTC': 'Intel Corp.'
-    };
-    
-    const companyName = companyNames[ticker.toUpperCase()] || ticker.toUpperCase();
-    const companyNameFormatted = `${companyName} (NASDAQ: ${ticker.toUpperCase()})`;
+    // Get company name from Benzinga API
+    const companyName = await fetchCompanyName(ticker);
+    const companyNameFormatted = `<strong>${companyName}</strong> (NASDAQ: ${ticker.toUpperCase()})`;
     
     // Get current day
     const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
     const today = new Date();
     const currentDay = today.getDay();
     const tradingDay = days[currentDay];
+
+    // Extract event dates from article content and determine time context
+    let timeContext = '';
+    let eventDates = [];
+    
+    // Look for event date patterns in the content
+    const eventDatePatterns = [
+      /(?:earnings|results|report|announcement|release|opening|event).*?(?:on|for|scheduled for|after|took place on).*?(\w+)\s+(\d{1,2})/gi,
+      /(?:earnings|results|report|announcement|release|opening|event).*?(\d{1,2})\/(\d{1,2})/gi,
+      /(?:earnings|results|report|announcement|release|opening|event).*?(\d{1,2})-(\d{1,2})/gi,
+      // Also look for day of week + date patterns
+      /(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)\s*,?\s*(\w+)\s+(\d{1,2})/gi,
+    ];
+    
+    for (const pattern of eventDatePatterns) {
+      const matches = [...scrapedContent.matchAll(pattern)];
+      for (const match of matches) {
+        const monthNames = ['january', 'february', 'march', 'april', 'may', 'june', 
+                           'july', 'august', 'september', 'october', 'november', 'december'];
+        
+        let month, day, dayOfWeek = null;
+        
+        // Check if this is a day of week pattern
+        const dayOfWeekMatch = match[0].match(/(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)/i);
+        if (dayOfWeekMatch) {
+          dayOfWeek = dayOfWeekMatch[1];
+        }
+        
+        if (match[1].length <= 2) {
+          // Numeric format: 8/19 or 8-19
+          month = parseInt(match[1]) - 1;
+          day = parseInt(match[2]);
+        } else {
+          // Text format: August 19
+          const monthName = match[1].toLowerCase();
+          month = monthNames.indexOf(monthName);
+          day = parseInt(match[2]);
+        }
+        
+        if (month !== -1 && day) {
+          // Assume current year for event dates
+          const eventDate = new Date(today.getFullYear(), month, day);
+          
+          // Validate day of week if provided
+          if (dayOfWeek) {
+            const actualDayOfWeek = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][eventDate.getDay()];
+            if (actualDayOfWeek.toLowerCase() === dayOfWeek.toLowerCase()) {
+              eventDates.push({ date: eventDate, dayOfWeek, context: match[0] });
+            } else {
+              console.log(`Day of week mismatch: expected ${dayOfWeek}, got ${actualDayOfWeek} for date ${eventDate.toDateString()}`);
+            }
+          } else {
+            eventDates.push({ date: eventDate, context: match[0] });
+          }
+        }
+      }
+    }
+    
+    // Determine time context based on publication date and event dates
+    if (publicationDate) {
+      const daysSincePublication = Math.floor((today.getTime() - publicationDate.getTime()) / (1000 * 60 * 60 * 24));
+      
+      if (daysSincePublication > 0) {
+        timeContext = ` This article was published ${daysSincePublication} day${daysSincePublication !== 1 ? 's' : ''} ago.`;
+      } else if (daysSincePublication === 0) {
+        timeContext = ' This article was published today.';
+      } else {
+        timeContext = ` This article was published ${Math.abs(daysSincePublication)} day${Math.abs(daysSincePublication) !== 1 ? 's' : ''} in the future.`;
+      }
+      
+      // Add event date context
+      if (eventDates.length > 0) {
+        const eventInfo = eventDates[0]; // Use the first event date found
+        const eventDate = eventInfo.date;
+        const daysSinceEvent = Math.floor((today.getTime() - eventDate.getTime()) / (1000 * 60 * 60 * 24));
+        
+        // Determine event type from context
+        let eventType = 'event';
+        if (eventInfo.context.toLowerCase().includes('earnings')) eventType = 'earnings';
+        else if (eventInfo.context.toLowerCase().includes('opening')) eventType = 'opening';
+        else if (eventInfo.context.toLowerCase().includes('report')) eventType = 'report';
+        else if (eventInfo.context.toLowerCase().includes('announcement')) eventType = 'announcement';
+        
+        if (daysSinceEvent > 0) {
+          timeContext += ` The main ${eventType} mentioned in this article occurred ${daysSinceEvent} day${daysSinceEvent !== 1 ? 's' : ''} ago.`;
+        } else if (daysSinceEvent === 0) {
+          timeContext += ` The main ${eventType} mentioned in this article is scheduled for today.`;
+        } else {
+          timeContext += ` The main ${eventType} mentioned in this article is scheduled for ${Math.abs(daysSinceEvent)} day${Math.abs(daysSinceEvent) !== 1 ? 's' : ''} from now.`;
+        }
+      }
+    }
 
     // Clean the scraped content to extract only the relevant article text
     let cleanContent = scrapedContent;
@@ -214,33 +423,73 @@ export async function POST(req: Request) {
     let hyperlinkInstructions = '';
     if (scrapedUrl) {
       const isBenzinga = scrapedUrl.includes('benzinga.com') || scrapedUrl.includes('benzinga');
+      const dateContext = prDate ? ` Include the date "${prDate}" when referencing this announcement.` : '';
+      
       if (isBenzinga) {
-        hyperlinkInstructions = `- HYPERLINK: In the second paragraph, naturally hyperlink relevant text to the source URL. Do NOT mention "Benzinga" - just hyperlink existing text naturally. Format as: <a href="${scrapedUrl}" target="_blank">[relevant text]</a>`;
-             } else {
-         // Extract domain for other sources
-         const urlObj = new URL(scrapedUrl);
-         const domain = urlObj.hostname.replace('www.', '');
-         const sourceName = domain.split('.')[0].toUpperCase();
-         hyperlinkInstructions = `- HYPERLINK: In the second paragraph, include "According to ${sourceName}" with "According" hyperlinked to the source URL. Format as: <a href="${scrapedUrl}" target="_blank">According</a> to ${sourceName}`;
-       }
+        hyperlinkInstructions = `- PRIMARY SOURCE HYPERLINK: In the lead paragraph, you MUST hyperlink the phrase "recent announcement" or "announcement" or "news" to the primary source URL.${dateContext} Format as: <a href="${scrapedUrl}" target="_blank">recent announcement</a> or <a href="${scrapedUrl}" target="_blank">announcement</a>`;
+      } else {
+        // Extract domain for other sources
+        const urlObj = new URL(scrapedUrl);
+        const domain = urlObj.hostname.replace('www.', '');
+        const sourceName = domain.split('.')[0].toUpperCase();
+        hyperlinkInstructions = `- PRIMARY SOURCE HYPERLINK: In the lead paragraph, include "According to ${sourceName}" with "According" hyperlinked to the source URL.${dateContext} Format as: <a href="${scrapedUrl}" target="_blank">According</a> to ${sourceName}`;
+      }
+    }
+
+    // Clean context content if provided
+    let cleanContextContent = '';
+    if (contextContent) {
+      cleanContextContent = contextContent
+        .replace(/\\n+/g, ' ')
+        .replace(/\\s+/g, ' ')
+        .trim();
+      
+      // Apply the same cleaning patterns to context content
+      patternsToRemove.forEach(pattern => {
+        cleanContextContent = cleanContextContent.replace(pattern, '');
+      });
+    }
+
+    // Determine context hyperlink instructions
+    let contextHyperlinkInstructions = '';
+    if (contextUrl) {
+      const isBenzinga = contextUrl.includes('benzinga.com') || contextUrl.includes('benzinga');
+      if (isBenzinga) {
+        const dateContext = contextDate ? ` When referencing this context information, include the date: "${contextDate}"` : '';
+        contextHyperlinkInstructions = `- CONTEXT HYPERLINK: In the main content (NOT the lead paragraph), naturally hyperlink any three consecutive words to the context URL.${dateContext} Do NOT mention "Benzinga" - just hyperlink existing text naturally. Format as: <a href="${contextUrl}" target="_blank">[three word phrase]</a>`;
+      } else {
+        const urlObj = new URL(contextUrl);
+        const domain = urlObj.hostname.replace('www.', '');
+        const sourceName = domain.split('.')[0].toUpperCase();
+        const dateContext = contextDate ? ` When referencing this context information, include the date: "${contextDate}"` : '';
+        contextHyperlinkInstructions = `- CONTEXT HYPERLINK: In the main content (NOT the lead paragraph), include "According to ${sourceName}" with "According" hyperlinked to the context URL.${dateContext} Format as: <a href="${contextUrl}" target="_blank">According</a> to ${sourceName}`;
+      }
     }
 
     const prompt = `You are a financial journalist creating a news story about ${ticker}. 
 
 IMPORTANT: You must create a NEW, ORIGINAL story based on the information provided. DO NOT return the raw scraped content or copy it directly.
 
-Based on the following cleaned article content, create a complete news story with the EXACT structure:
+TIME CONTEXT:${timeContext} Use this information to determine if events mentioned in the article have already happened or are scheduled to happen in the future. Write accordingly.
+
+CURRENT DATE: Today is ${today.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}. Use this as your reference point for determining if events are past, present, or future.
+
+Based on the following cleaned article content${contextContent ? ' and context information' : ''}, create a complete news story with the EXACT structure:
 
 1. HEADLINE: Format as "[Company] Stock Is Trending ${tradingDay}: What's Going On?" (no quotes, no bold formatting)
 2. LEAD PARAGRAPH: ${companyNameFormatted} + movement + time context + day of the week (exactly 2 sentences)
-3. MAIN CONTENT: 2-3 paragraphs incorporating the key information from the article (2 sentences max per paragraph)
+3. MAIN CONTENT: 2-3 paragraphs incorporating the key information from the article${contextContent ? ' and context' : ''} (2 sentences max per paragraph)
 
-Article Content:
-${cleanContent}
+Primary Article Content:
+${cleanContent}${contextContent ? `
+
+Context Information:
+${cleanContextContent}` : ''}
 
 REQUIRED FORMAT:
 - Headline: [Company] Stock Is Trending ${tradingDay}: What's Going On?
 - Lead: Use exact format "${companyNameFormatted}" + general movement + ${tradingDay}
+- Lead Hyperlinks: Include exactly ${scrapedUrl ? '1' : '0'} primary source hyperlink in the lead paragraph${contextUrl ? ' (context source hyperlink goes in main content)' : ''}
 - Content: Professional financial journalism style
 - Paragraphs: Separate with double line breaks (\\n\\n)
 - No quotes around any content
@@ -249,7 +498,13 @@ REQUIRED FORMAT:
 - Focus on the key news and financial implications
 - Do NOT include any website navigation, menus, or promotional content
 - DO NOT copy the original text - write a new story based on the information
-${hyperlinkInstructions}
+- Use appropriate tense: past tense for events that have already occurred, present tense for current events, future tense only for scheduled future events
+${hyperlinkInstructions}${contextHyperlinkInstructions}
+
+HYPERLINK REQUIREMENTS:
+- Primary source hyperlink: Must be in the lead paragraph, use any three consecutive words naturally
+- Context source hyperlink: Must be in the main content (NOT the lead paragraph), use any three consecutive words naturally
+- Do NOT mention "Benzinga" or source names - just hyperlink existing text
 
 Generate the complete story with this exact structure:`;
 
@@ -275,7 +530,56 @@ Generate the complete story with this exact structure:`;
       return NextResponse.json({ error: 'Failed to generate story' }, { status: 500 });
     }
 
-    return NextResponse.json({ story });
+    // Post-processing: Ensure source hyperlink is added if missing
+    let finalStory = story;
+    if (scrapedUrl) {
+      const hasHyperlink = finalStory.includes('<a href="') && finalStory.includes(scrapedUrl);
+      
+      if (!hasHyperlink) {
+        console.log('Source hyperlink missing, adding it to lead paragraph...');
+        
+        // Split into paragraphs
+        const paragraphs = finalStory.split('\n\n').filter(p => p.trim());
+        
+        if (paragraphs.length > 0) {
+          const leadParagraph = paragraphs[0];
+          
+          // Try to add hyperlink to "recent announcement" or "announcement" or "news"
+          let updatedLead = leadParagraph;
+          
+          if (leadParagraph.includes('recent announcement')) {
+            updatedLead = leadParagraph.replace(
+              'recent announcement',
+              `<a href="${scrapedUrl}" target="_blank">recent announcement</a>`
+            );
+          } else if (leadParagraph.includes('announcement')) {
+            updatedLead = leadParagraph.replace(
+              'announcement',
+              `<a href="${scrapedUrl}" target="_blank">announcement</a>`
+            );
+          } else if (leadParagraph.includes('news')) {
+            updatedLead = leadParagraph.replace(
+              'news',
+              `<a href="${scrapedUrl}" target="_blank">news</a>`
+            );
+          } else {
+            // If no suitable phrase found, add hyperlink at the beginning of the lead paragraph
+            updatedLead = `<a href="${scrapedUrl}" target="_blank">recent announcement</a> ${leadParagraph}`;
+          }
+          
+          paragraphs[0] = updatedLead;
+          finalStory = paragraphs.join('\n\n');
+          console.log('Source hyperlink added to lead paragraph');
+        }
+      }
+    }
+
+    // Post-processing: Remove any "Headline:" prefix and section labels
+    finalStory = finalStory.replace(/^Headline:\s*/i, '');
+    finalStory = finalStory.replace(/^Lead Paragraph:\s*/i, '');
+    finalStory = finalStory.replace(/^Main Content:\s*/i, '');
+
+    return NextResponse.json({ story: finalStory });
   } catch (error: any) {
     console.error('Error generating base story:', error);
     return NextResponse.json({ error: 'Failed to generate base story' }, { status: 500 });
