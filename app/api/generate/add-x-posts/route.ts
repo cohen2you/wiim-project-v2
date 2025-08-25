@@ -48,8 +48,8 @@ INSTRUCTIONS:
 8. Make the integrations feel natural and enhance the story's flow
 9. Do NOT reference "X posts" or "social media" - just embed the hyperlinks naturally
 10. Ensure all prices are formatted to exactly 2 decimal places
-11. DO NOT use phrases like "according to X" or "as posted on social media" - these are awkward
-12. Integrate the content directly without attribution phrases
+11. DO use phrases like "one X user commented", "a trader on X noted", "social media users discussed"
+12. Always attribute opinions and commentary to X users, not as general facts
 
 MANDATORY HYPERLINK REQUIREMENTS:
 ${selectedPosts.map((post: any, index: number) => 
@@ -57,11 +57,12 @@ ${selectedPosts.map((post: any, index: number) =>
 ).join('\n')}
 
 HYPERLINK INTEGRATION RULES:
-- Integrate content naturally without attribution phrases
-- Avoid phrases like "according to X" or "as posted on social media"
-- Present information directly as factual content
+- Integrate content naturally with clear X user attribution
+- Use phrases like "one X user commented", "a trader on X noted", "social media users discussed", "X users shared"
+- Present information as user commentary, not factual statements
 - Distribute hyperlinks throughout the story, not all in one place
 - Use phrases like "market sentiment", "investor reactions", "social commentary", "trading community"
+- Always attribute opinions and commentary to X users, not as general facts
 
 CRITICAL RULES:
 - Maximum 2 sentences per X post integration

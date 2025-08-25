@@ -10,6 +10,7 @@ interface XPost {
     username: string;
     name: string;
     verified: boolean;
+    followers_count: number;
   } | null;
   metrics: {
     retweet_count: number;
@@ -38,6 +39,7 @@ export default function XPostsModal({
   const [selectedPosts, setSelectedPosts] = useState<Set<string>>(new Set());
   const [fetchingPosts, setFetchingPosts] = useState(false);
   const [error, setError] = useState('');
+  const [minFollowers, setMinFollowers] = useState(1000);
 
   // Fetch X posts when modal opens
   useEffect(() => {
@@ -56,7 +58,8 @@ export default function XPostsModal({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           topic: ticker, 
-          count: 20 
+          count: 20,
+          minFollowers: minFollowers
         }),
       });
       
@@ -151,49 +154,67 @@ export default function XPostsModal({
         </div>
 
         <div style={{ marginBottom: '16px' }}>
-          <button
-            onClick={handleSelectAll}
-            style={{ 
-              padding: '8px 12px', 
-              marginRight: '8px',
-              backgroundColor: '#1da1f2', 
-              color: 'white', 
-              border: 'none', 
-              borderRadius: '4px',
-              cursor: 'pointer'
-            }}
-          >
-            Select All (Max 5)
-          </button>
-          <button
-            onClick={handleSelectNone}
-            style={{ 
-              padding: '8px 12px', 
-              marginRight: '8px',
-              backgroundColor: '#6b7280', 
-              color: 'white', 
-              border: 'none', 
-              borderRadius: '4px',
-              cursor: 'pointer'
-            }}
-          >
-            Select None
-          </button>
-          <button
-            onClick={fetchPosts}
-            disabled={fetchingPosts}
-            style={{ 
-              padding: '8px 12px',
-              backgroundColor: fetchingPosts ? '#6b7280' : '#10b981', 
-              color: 'white', 
-              border: 'none', 
-              borderRadius: '4px',
-              cursor: fetchingPosts ? 'not-allowed' : 'pointer',
-              opacity: fetchingPosts ? 0.5 : 1
-            }}
-          >
-            {fetchingPosts ? 'Refreshing...' : 'Refresh Posts'}
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '12px' }}>
+            <label style={{ fontSize: '14px', fontWeight: '500' }}>
+              Min Followers:
+            </label>
+            <input
+              type="number"
+              value={minFollowers}
+              onChange={(e) => setMinFollowers(parseInt(e.target.value) || 1000)}
+              style={{
+                padding: '4px 8px',
+                border: '1px solid #d1d5db',
+                borderRadius: '4px',
+                width: '100px'
+              }}
+              min="100"
+              max="1000000"
+            />
+          </div>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button
+              onClick={handleSelectAll}
+              style={{ 
+                padding: '8px 12px',
+                backgroundColor: '#1da1f2', 
+                color: 'white', 
+                border: 'none', 
+                borderRadius: '4px',
+                cursor: 'pointer'
+              }}
+            >
+              Select All (Max 5)
+            </button>
+            <button
+              onClick={handleSelectNone}
+              style={{ 
+                padding: '8px 12px',
+                backgroundColor: '#6b7280', 
+                color: 'white', 
+                border: 'none', 
+                borderRadius: '4px',
+                cursor: 'pointer'
+              }}
+            >
+              Select None
+            </button>
+            <button
+              onClick={fetchPosts}
+              disabled={fetchingPosts}
+              style={{ 
+                padding: '8px 12px',
+                backgroundColor: fetchingPosts ? '#6b7280' : '#10b981', 
+                color: 'white', 
+                border: 'none', 
+                borderRadius: '4px',
+                cursor: fetchingPosts ? 'not-allowed' : 'pointer',
+                opacity: fetchingPosts ? 0.5 : 1
+              }}
+            >
+              {fetchingPosts ? 'Refreshing...' : 'Refresh Posts'}
+            </button>
+          </div>
         </div>
 
         {error && (
@@ -248,20 +269,23 @@ export default function XPostsModal({
                       style={{ marginTop: '2px' }}
                     />
                     <div style={{ flex: 1 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-                        <span style={{ fontWeight: '600', color: '#1f2937' }}>
-                          {post.author?.name || 'Unknown'}
-                        </span>
-                        <span style={{ color: '#6b7280' }}>
-                          @{post.author?.username || 'unknown'}
-                        </span>
-                        {post.author?.verified && (
-                          <span style={{ color: '#1da1f2', fontSize: '14px' }}>✓</span>
-                        )}
-                        <span style={{ color: '#9ca3af', fontSize: '12px' }}>
-                          {formatDate(post.created_at)}
-                        </span>
-                      </div>
+                                             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                         <span style={{ fontWeight: '600', color: '#1f2937' }}>
+                           {post.author?.name || 'Unknown'}
+                         </span>
+                         <span style={{ color: '#6b7280' }}>
+                           @{post.author?.username || 'unknown'}
+                         </span>
+                         {post.author?.verified && (
+                           <span style={{ color: '#1da1f2', fontSize: '14px' }}>✓</span>
+                         )}
+                         <span style={{ color: '#059669', fontSize: '12px', fontWeight: '500' }}>
+                           {post.author?.followers_count?.toLocaleString() || 0} followers
+                         </span>
+                         <span style={{ color: '#9ca3af', fontSize: '12px' }}>
+                           {formatDate(post.created_at)}
+                         </span>
+                       </div>
                       
                       <p style={{ 
                         fontSize: '14px', 

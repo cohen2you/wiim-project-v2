@@ -5,7 +5,7 @@ const X_API_URL = 'https://api.twitter.com/2/tweets/search/recent';
 
 export async function POST(req: Request) {
   try {
-    const { topic, count = 10 } = await req.json();
+    const { topic, count = 10, minFollowers = 1000 } = await req.json();
     
     if (!topic) {
       return NextResponse.json({ error: 'Topic is required' }, { status: 400 });
@@ -18,7 +18,7 @@ export async function POST(req: Request) {
     // Construct search query - you can customize this based on your needs
     const searchQuery = `${topic} -is:retweet lang:en`;
     
-    const searchUrl = `${X_API_URL}?query=${encodeURIComponent(searchQuery)}&max_results=${Math.min(count, 100)}&tweet.fields=created_at,author_id,public_metrics,context_annotations&user.fields=username,name,verified&expansions=author_id&media.fields=url,preview_image_url`;
+    const searchUrl = `${X_API_URL}?query=${encodeURIComponent(searchQuery)}&max_results=${Math.min(count * 3, 100)}&tweet.fields=created_at,author_id,public_metrics,context_annotations&user.fields=username,name,verified,public_metrics&expansions=author_id&media.fields=url,preview_image_url`;
     
     console.log('Fetching X posts for topic:', topic);
     console.log('X API URL:', searchUrl);
@@ -58,7 +58,17 @@ export async function POST(req: Request) {
       .filter((tweet: any) => {
         // Filter out tweets that are too short or likely spam
         const text = tweet.text;
-        return text && text.length > 20 && !text.startsWith('RT @');
+        if (!text || text.length <= 20 || text.startsWith('RT @')) {
+          return false;
+        }
+        
+        // Filter by follower count
+        const user = usersMap.get(tweet.author_id);
+        if (user && user.public_metrics && user.public_metrics.followers_count) {
+          return user.public_metrics.followers_count >= minFollowers;
+        }
+        
+        return false; // Exclude users without follower data
       })
       .map((tweet: any) => {
         const user = usersMap.get(tweet.author_id);
@@ -69,7 +79,8 @@ export async function POST(req: Request) {
           author: user ? {
             username: user.username,
             name: user.name,
-            verified: user.verified
+            verified: user.verified,
+            followers_count: user.public_metrics?.followers_count || 0
           } : null,
           metrics: tweet.public_metrics || {},
           url: `https://twitter.com/${user?.username || 'unknown'}/status/${tweet.id}`
