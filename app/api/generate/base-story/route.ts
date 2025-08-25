@@ -5,6 +5,7 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
+<<<<<<< HEAD
 // Helper function to fetch company name from Benzinga API
 async function fetchCompanyName(ticker: string): Promise<string> {
   try {
@@ -138,14 +139,38 @@ export async function POST(req: Request) {
         }
       }
     }
+=======
+export async function POST(req: Request) {
+  try {
+    const { ticker, scrapedContent, scrapedUrl } = await req.json();
+>>>>>>> 8e3f4bf
 
     if (!ticker || !scrapedContent) {
       return NextResponse.json({ error: 'Ticker and scraped content are required' }, { status: 400 });
     }
 
+<<<<<<< HEAD
     // Get company name from Benzinga API
     const companyName = await fetchCompanyName(ticker);
     const companyNameFormatted = `<strong>${companyName}</strong> (NASDAQ: ${ticker.toUpperCase()})`;
+=======
+    // Get company name and exchange info
+    const companyNames: { [key: string]: string } = {
+      'NVDA': 'Nvidia Corp.',
+      'META': 'Meta Platforms Inc.',
+      'AAPL': 'Apple Inc.',
+      'MSFT': 'Microsoft Corp.',
+      'GOOGL': 'Alphabet Inc.',
+      'AMZN': 'Amazon.com Inc.',
+      'TSLA': 'Tesla Inc.',
+      'NFLX': 'Netflix Inc.',
+      'AMD': 'Advanced Micro Devices Inc.',
+      'INTC': 'Intel Corp.'
+    };
+    
+    const companyName = companyNames[ticker.toUpperCase()] || ticker.toUpperCase();
+    const companyNameFormatted = `${companyName} (NASDAQ: ${ticker.toUpperCase()})`;
+>>>>>>> 8e3f4bf
     
     // Get current day
     const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -153,6 +178,7 @@ export async function POST(req: Request) {
     const currentDay = today.getDay();
     const tradingDay = days[currentDay];
 
+<<<<<<< HEAD
     // Extract event dates from article content and determine time context
     let timeContext = '';
     let eventDates = [];
@@ -245,6 +271,8 @@ export async function POST(req: Request) {
       }
     }
 
+=======
+>>>>>>> 8e3f4bf
     // Clean the scraped content to extract only the relevant article text
     let cleanContent = scrapedContent;
     
@@ -423,6 +451,7 @@ export async function POST(req: Request) {
     let hyperlinkInstructions = '';
     if (scrapedUrl) {
       const isBenzinga = scrapedUrl.includes('benzinga.com') || scrapedUrl.includes('benzinga');
+<<<<<<< HEAD
       const dateContext = prDate ? ` Include the date "${prDate}" when referencing this announcement.` : '';
       
       if (isBenzinga) {
@@ -464,12 +493,24 @@ export async function POST(req: Request) {
         const dateContext = contextDate ? ` When referencing this context information, include the date: "${contextDate}"` : '';
         contextHyperlinkInstructions = `- CONTEXT HYPERLINK: In the main content (NOT the lead paragraph), include "According to ${sourceName}" with "According" hyperlinked to the context URL.${dateContext} Format as: <a href="${contextUrl}" target="_blank">According</a> to ${sourceName}`;
       }
+=======
+      if (isBenzinga) {
+        hyperlinkInstructions = `- HYPERLINK: In the second paragraph, naturally hyperlink relevant text to the source URL. Do NOT mention "Benzinga" - just hyperlink existing text naturally. Format as: <a href="${scrapedUrl}" target="_blank">[relevant text]</a>`;
+             } else {
+         // Extract domain for other sources
+         const urlObj = new URL(scrapedUrl);
+         const domain = urlObj.hostname.replace('www.', '');
+         const sourceName = domain.split('.')[0].toUpperCase();
+         hyperlinkInstructions = `- HYPERLINK: In the second paragraph, include "According to ${sourceName}" with "According" hyperlinked to the source URL. Format as: <a href="${scrapedUrl}" target="_blank">According</a> to ${sourceName}`;
+       }
+>>>>>>> 8e3f4bf
     }
 
     const prompt = `You are a financial journalist creating a news story about ${ticker}. 
 
 IMPORTANT: You must create a NEW, ORIGINAL story based on the information provided. DO NOT return the raw scraped content or copy it directly.
 
+<<<<<<< HEAD
 TIME CONTEXT:${timeContext} Use this information to determine if events mentioned in the article have already happened or are scheduled to happen in the future. Write accordingly.
 
 CURRENT DATE: Today is ${today.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}. Use this as your reference point for determining if events are past, present, or future.
@@ -485,11 +526,24 @@ ${cleanContent}${contextContent ? `
 
 Context Information:
 ${cleanContextContent}` : ''}
+=======
+Based on the following cleaned article content, create a complete news story with the EXACT structure:
+
+1. HEADLINE: Format as "[Company] Stock Is Trending ${tradingDay}: What's Going On?" (no quotes, no bold formatting)
+2. LEAD PARAGRAPH: ${companyNameFormatted} + movement + time context + day of the week (exactly 2 sentences)
+3. MAIN CONTENT: 2-3 paragraphs incorporating the key information from the article (2 sentences max per paragraph)
+
+Article Content:
+${cleanContent}
+>>>>>>> 8e3f4bf
 
 REQUIRED FORMAT:
 - Headline: [Company] Stock Is Trending ${tradingDay}: What's Going On?
 - Lead: Use exact format "${companyNameFormatted}" + general movement + ${tradingDay}
+<<<<<<< HEAD
 - Lead Hyperlinks: Include exactly ${scrapedUrl ? '1' : '0'} primary source hyperlink in the lead paragraph${contextUrl ? ' (context source hyperlink goes in main content)' : ''}
+=======
+>>>>>>> 8e3f4bf
 - Content: Professional financial journalism style
 - Paragraphs: Separate with double line breaks (\\n\\n)
 - No quotes around any content
@@ -498,6 +552,7 @@ REQUIRED FORMAT:
 - Focus on the key news and financial implications
 - Do NOT include any website navigation, menus, or promotional content
 - DO NOT copy the original text - write a new story based on the information
+<<<<<<< HEAD
 - Use appropriate tense: past tense for events that have already occurred, present tense for current events, future tense only for scheduled future events
 ${hyperlinkInstructions}${contextHyperlinkInstructions}
 
@@ -505,6 +560,9 @@ HYPERLINK REQUIREMENTS:
 - Primary source hyperlink: Must be in the lead paragraph, use any three consecutive words naturally
 - Context source hyperlink: Must be in the main content (NOT the lead paragraph), use any three consecutive words naturally
 - Do NOT mention "Benzinga" or source names - just hyperlink existing text
+=======
+${hyperlinkInstructions}
+>>>>>>> 8e3f4bf
 
 Generate the complete story with this exact structure:`;
 
@@ -530,6 +588,7 @@ Generate the complete story with this exact structure:`;
       return NextResponse.json({ error: 'Failed to generate story' }, { status: 500 });
     }
 
+<<<<<<< HEAD
     // Post-processing: Ensure source hyperlink is added if missing
     let finalStory = story;
     if (scrapedUrl) {
@@ -580,6 +639,9 @@ Generate the complete story with this exact structure:`;
     finalStory = finalStory.replace(/^Main Content:\s*/i, '');
 
     return NextResponse.json({ story: finalStory });
+=======
+    return NextResponse.json({ story });
+>>>>>>> 8e3f4bf
   } catch (error: any) {
     console.error('Error generating base story:', error);
     return NextResponse.json({ error: 'Failed to generate base story' }, { status: 500 });

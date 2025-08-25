@@ -1,8 +1,12 @@
 import { NextResponse } from 'next/server';
+<<<<<<< HEAD
 import OpenAI from 'openai';
 import { preserveHyperlinks } from '../../../../lib/hyperlink-preservation';
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+=======
+import { generateFinalStory } from '@/lib/api';
+>>>>>>> 8e3f4bf
 
 export async function POST(req: Request) {
   try {
@@ -19,6 +23,7 @@ export async function POST(req: Request) {
       );
     }
 
+<<<<<<< HEAD
     // Create a comprehensive prompt for improving the story
     const improvePrompt = `
 You are a senior financial editor improving a news article. Your task is to enhance the writing quality while preserving ALL essential content and hyperlinks.
@@ -98,6 +103,11 @@ Return the improved story with better writing quality while preserving ALL essen
     return NextResponse.json({ result: finalStory });
   } catch (error: any) {
     console.error('Error improving story:', error);
+=======
+    // Simply return the story as-is, preserving all existing hyperlinks
+    return NextResponse.json({ result: story });
+  } catch (error: any) {
+>>>>>>> 8e3f4bf
     return NextResponse.json(
       { error: error.message || 'Unexpected error occurred' },
       { status: 500 }

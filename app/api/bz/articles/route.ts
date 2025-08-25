@@ -8,6 +8,7 @@ export async function POST(req: Request) {
     const { ticker, count } = await req.json();
     if (!ticker) return NextResponse.json({ error: 'Ticker is required' }, { status: 400 });
     // Fetch more items to ensure enough non-PR articles after filtering
+<<<<<<< HEAD
     const desiredCount = count && typeof count === 'number' ? count : 10;
     const items = Math.max(desiredCount * 3, 30);
     
@@ -17,6 +18,11 @@ export async function POST(req: Request) {
     startDate.setDate(startDate.getDate() - 30);
     
     const url = `${BZ_NEWS_URL}?token=${BENZINGA_API_KEY}&tickers=${encodeURIComponent(ticker)}&items=${items}&fields=headline,title,created,body,teaser,id,url,channels&accept=application/json&displayOutput=full&dateFrom=${startDate.toISOString().split('T')[0]}&dateTo=${endDate.toISOString().split('T')[0]}`;
+=======
+    const desiredCount = count && typeof count === 'number' ? count : 6;
+    const items = Math.max(desiredCount * 2, 20);
+    const url = `${BZ_NEWS_URL}?token=${BENZINGA_API_KEY}&tickers=${encodeURIComponent(ticker)}&items=${items}&fields=headline,title,created,body,teaser,id,url,channels&accept=application/json&displayOutput=full`;
+>>>>>>> 8e3f4bf
     const res = await fetch(url, {
       headers: {
         Accept: 'application/json',
@@ -38,6 +44,7 @@ export async function POST(req: Request) {
       console.error('Benzinga API response (not array):', data);
       return NextResponse.json({ error: 'Invalid response format from Benzinga', raw: data }, { status: 500 });
     }
+<<<<<<< HEAD
     
     console.log(`Benzinga API returned ${data.length} articles for ticker ${ticker}`);
     console.log(`Requested ${desiredCount} articles, fetching ${items} items initially`);
@@ -53,6 +60,13 @@ export async function POST(req: Request) {
           return false;
         }
         
+=======
+    // Exclude PRs and insights URLs by filtering out items with PR channel names or insights URLs
+    const prChannelNames = ['press releases', 'press-releases', 'pressrelease', 'pr'];
+    const normalize = (str: string) => str.toLowerCase().replace(/[-_]/g, ' ');
+    const articles = data
+      .filter(item => {
+>>>>>>> 8e3f4bf
         // Exclude press releases
         if (Array.isArray(item.channels) &&
           item.channels.some(
@@ -68,6 +82,7 @@ export async function POST(req: Request) {
           return false;
         }
         
+<<<<<<< HEAD
         // Ensure the article actually mentions the ticker prominently
         const tickerUpper = ticker.toUpperCase();
         const headlineUpper = headline.toUpperCase();
@@ -92,6 +107,9 @@ export async function POST(req: Request) {
         }
         
         return isRelevant;
+=======
+        return true;
+>>>>>>> 8e3f4bf
       })
       .map((item: any) => ({
         id: item.id,
@@ -99,6 +117,7 @@ export async function POST(req: Request) {
         created: item.created,
         body: item.body || item.teaser || '[No body text]',
         url: item.url || '',
+<<<<<<< HEAD
       }))
       .filter(item => item.headline !== '[No Headline]' && item.headline !== 'undefined');
     articles.sort((a, b) => new Date(b.created).getTime() - new Date(a.created).getTime());
@@ -106,6 +125,10 @@ export async function POST(req: Request) {
     console.log(`After filtering: ${articles.length} articles remain`);
     console.log(`Returning ${Math.min(articles.length, desiredCount)} articles`);
     
+=======
+      }));
+    articles.sort((a, b) => new Date(b.created).getTime() - new Date(a.created).getTime());
+>>>>>>> 8e3f4bf
     return NextResponse.json({ articles: articles.slice(0, desiredCount) });
   } catch (error: any) {
     return NextResponse.json({ error: error.message || 'Failed to fetch articles' }, { status: 500 });

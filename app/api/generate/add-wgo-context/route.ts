@@ -294,7 +294,11 @@ async function fetchPriceData(ticker: string) {
         return {
           last: quote.lastTradePrice || 0,
           change: quote.change || 0,
+<<<<<<< HEAD
           change_percent: quote.changePercent || quote.change_percent || 0,
+=======
+          change_percent: quote.changePercent || 0,
+>>>>>>> 8e3f4bf
           volume: quote.volume || 0,
           high: quote.high || 0,
           low: quote.low || 0,

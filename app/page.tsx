@@ -886,21 +886,21 @@ export default function PRStoryGeneratorPage() {
           </label>
           {primaryText.trim() && (
             <div style={{ marginTop: '12px', display: 'flex', gap: '8px' }}>
-                             <button
-                 onClick={handleUseAsBaseStory}
-                 disabled={loadingBaseStory}
-                 style={{ 
-                   padding: '8px 16px', 
-                   backgroundColor: loadingBaseStory ? '#6b7280' : '#059669', 
-                   color: 'white', 
-                   border: 'none', 
-                   borderRadius: '4px',
-                   fontSize: '14px',
-                   cursor: loadingBaseStory ? 'not-allowed' : 'pointer'
-                 }}
-               >
-                 {loadingBaseStory ? 'Generating...' : 'Use as Base Story'}
-               </button>
+              <button
+                onClick={handleUseAsBaseStory}
+                disabled={loadingBaseStory}
+                style={{ 
+                  padding: '8px 16px', 
+                  backgroundColor: loadingBaseStory ? '#6b7280' : '#059669', 
+                  color: 'white', 
+                  border: 'none', 
+                  borderRadius: '4px',
+                  fontSize: '14px',
+                  cursor: loadingBaseStory ? 'not-allowed' : 'pointer'
+                }}
+              >
+                {loadingBaseStory ? 'Generating...' : 'Use as Base Story'}
+              </button>
               <button
                 onClick={() => setPrimaryText('')}
                 style={{ 
@@ -1001,7 +1001,61 @@ export default function PRStoryGeneratorPage() {
         loading={loadingCustomContext}
       />
       
-
+      {prError && <div style={{ color: 'red', marginBottom: 10 }}>{prError}</div>}
+      {prs.length === 0 && !loadingPRs && lastPrTicker && prFetchAttempted && (
+        <div style={{ color: '#b91c1c', marginBottom: 20 }}>
+          No press releases found for the past 7 days for {lastPrTicker}.
+        </div>
+      )}
+      {prs.length > 0 && (
+        <div style={{ marginBottom: 20 }}>
+          <h2>Select a Press Release</h2>
+          <ul style={{ listStyle: 'none', padding: 0 }}>
+            {prs.map(pr => {
+              if (hideUnselectedPRs && selectedPR?.id !== pr.id) {
+                return null;
+              }
+              return (
+                <li key={pr.id} style={{ marginBottom: 10 }}>
+                  <button
+                    style={{
+                      background: selectedPR?.id === pr.id ? '#2563eb' : '#f3f4f6',
+                      color: selectedPR?.id === pr.id ? 'white' : 'black',
+                      border: '1px solid #ccc',
+                      borderRadius: 4,
+                      padding: 8,
+                      width: '100%',
+                      textAlign: 'left',
+                      cursor: 'pointer',
+                    }}
+                    onClick={() => handleSelectPR(pr)}
+                  >
+                    <strong>{pr.headline || '[No Headline]'}</strong>
+                    <br />
+                    <span style={{ fontSize: 12, color: '#666' }}>
+                      <LocalDate dateString={pr.created} />
+                    </span>
+                    <br />
+                    <span style={{ fontSize: 13, color: selectedPR?.id === pr.id ? 'white' : '#444' }}>
+                      {pr.body && pr.body !== '[No body text]'
+                        ? pr.body.substring(0, 100) + (pr.body.length > 100 ? '...' : '')
+                        : '[No body text]'}
+                    </span>
+                    {pr.url && (
+                      <>
+                        <br />
+                        <a href={pr.url} target="_blank" rel="noopener noreferrer" style={{ color: selectedPR?.id === pr.id ? 'white' : '#2563eb', textDecoration: 'underline', fontSize: 13 }}>
+                          View Original
+                        </a>
+                      </>
+                    )}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }

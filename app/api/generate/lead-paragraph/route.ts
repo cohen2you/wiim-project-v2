@@ -75,6 +75,7 @@ export async function POST(request: Request) {
     const priceData = await fetchPriceData(ticker);
     const companyNameFormatted = getCompanyNameFormat(ticker, priceData);
     
+<<<<<<< HEAD
     // Helper function to determine market session
     function getMarketSession(): 'premarket' | 'regular' | 'afterhours' | 'closed' {
       const now = new Date();
@@ -132,6 +133,26 @@ export async function POST(request: Request) {
         break;
     }
     
+=======
+    // Get the last trading day name
+    const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const today = new Date();
+    const currentDay = today.getDay(); // 0 = Sunday, 6 = Saturday
+    
+    // If it's Saturday (6), go back to Friday (5)
+    // If it's Sunday (0), go back to Friday (5)
+    let lastTradingDay;
+    if (currentDay === 0) { // Sunday
+      lastTradingDay = 5; // Friday
+    } else if (currentDay === 6) { // Saturday
+      lastTradingDay = 5; // Friday
+    } else {
+      lastTradingDay = currentDay; // Weekday, use current day
+    }
+    
+    const tradingDay = days[lastTradingDay];
+    
+>>>>>>> 8e3f4bf
     const prompt = `
 Generate ONLY a 2-sentence lead paragraph for ${ticker}.
 
@@ -141,7 +162,10 @@ Second sentence: What's driving momentum (technical factors only)
 Rules:
 - Use the exact company name format provided: "${companyNameFormatted}"
 - INCLUDE the trading day (${tradingDay}) in the first sentence
+<<<<<<< HEAD
 - Use the correct time context: "${timeContext}"
+=======
+>>>>>>> 8e3f4bf
 - NO specific percentages
 - NO exact prices
 - Exactly 2 sentences
@@ -152,7 +176,11 @@ Rules:
 - Return only the paragraph text, no formatting
 
 Example format:
+<<<<<<< HEAD
 Nvidia Corp. (NASDAQ: NVDA) traded higher ${timeContext} on ${tradingDay} as investors responded to strong technical indicators.
+=======
+Nvidia Corp. (NASDAQ: NVDA) traded higher during regular trading hours on ${currentDay} as investors responded to strong technical indicators.
+>>>>>>> 8e3f4bf
 
 Price context: ${priceData ? `Change: ${priceData.changePercent}%, Volume: ${priceData.volume}` : 'No price data available'}
 

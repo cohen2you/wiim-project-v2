@@ -2,10 +2,11 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import CustomizeContextModal from './CustomizeContextModal';
+import XPostsModal from './XPostsModal';
 
 interface StoryComponent {
   id: string;
-  type: 'headline' | 'lead' | 'technical' | 'analystRatings' | 'edgeRatings' | 'newsContext' | 'priceAction' | 'alsoReadLink';
+  type: 'headline' | 'lead' | 'technical' | 'analystRatings' | 'edgeRatings' | 'newsContext' | 'priceAction' | 'alsoReadLink' | 'xPosts';
   content: string;
   order: number;
   isActive: boolean;
@@ -22,8 +23,12 @@ export default function ModularStoryBuilder({ ticker, currentArticle, onStoryUpd
   const [loading, setLoading] = useState<string | null>(null);
   const [error, setError] = useState<string>('');
   const [showCustomizeModal, setShowCustomizeModal] = useState(false);
+  const [showXPostsModal, setShowXPostsModal] = useState(false);
   const [loadingCustomContext, setLoadingCustomContext] = useState(false);
+  const [loadingXPosts, setLoadingXPosts] = useState(false);
+  const [loadingFinalize, setLoadingFinalize] = useState(false);
   const [originalStory, setOriginalStory] = useState<string>('');
+  const [isFinalized, setIsFinalized] = useState(false);
   const [hasBaseStory, setHasBaseStory] = useState(false);
   const articleRef = useRef<HTMLDivElement>(null);
 
@@ -35,8 +40,6 @@ export default function ModularStoryBuilder({ ticker, currentArticle, onStoryUpd
       setHasBaseStory(false);
     }
   }, [currentArticle]);
-
-
 
   // Helper function to rebuild article from components
   const rebuildArticle = (updatedComponents: StoryComponent[]) => {
@@ -101,85 +104,47 @@ export default function ModularStoryBuilder({ ticker, currentArticle, onStoryUpd
           break;
         case 'priceAction':
           endpoint = '/api/generate/add-price-action';
-          requestBody.story = currentArticle;
+          requestBody.existingStory = currentArticle;
           break;
         case 'alsoReadLink':
           endpoint = '/api/generate/add-also-read';
-          requestBody.story = currentArticle;
+          requestBody.existingStory = currentArticle;
           break;
+        case 'xPosts':
+          setShowXPostsModal(true);
+          setLoading(null);
+          return;
       }
-      
+
       const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(requestBody),
       });
-      
+
       const data = await res.json();
-      if (!res.ok || !data) throw new Error(data.error || `Failed to generate ${type}`);
-      
-      let content = '';
-      if (type === 'priceAction' || type === 'alsoReadLink' || type === 'analystRatings' || type === 'edgeRatings' || type === 'newsContext') {
-        // For these types, use the complete story to preserve existing content (like integrated hyperlinks)
-        // The API returns the complete enhanced story with the new content integrated
+      if (!res.ok || !data.story) throw new Error(data.error || `Failed to generate ${type}`);
+
+      // For components that directly update the story (when we have a base story)
+      if (hasBaseStory && ['analystRatings', 'edgeRatings', 'newsContext', 'priceAction', 'alsoReadLink'].includes(type)) {
         onStoryUpdate(data.story);
-        
-        // If we have a base story, don't create separate components for these types
-        // since they modify the existing story rather than adding separate sections
-        if (hasBaseStory && (type === 'analystRatings' || type === 'edgeRatings' || type === 'newsContext')) {
-          return; // Exit early since we've updated the story directly
-        }
-        
-        // Extract content for display purposes only
-        if (type === 'analystRatings') {
-          const analystRatingsMatch = data.story.match(/Analyst sentiment[\s\S]*?(?=\n\n|$)/);
-          content = analystRatingsMatch ? analystRatingsMatch[0] : '';
-        } else if (type === 'edgeRatings') {
-          // For edge ratings, use the complete story to preserve existing content
-          // Don't create a separate component for edge ratings since it's integrated
-          return; // Exit early since we've updated the story directly
-        } else if (type === 'newsContext') {
-          // For news context, use the complete story to preserve integrated hyperlinks
-          // Don't create a separate component for news context since it's integrated
-          return; // Exit early since we've updated the story directly
-        } else {
-          // For priceAction and alsoReadLink, we don't need to extract content since we're not creating components
-          return; // Exit early since we've updated the story directly
-        }
       } else {
-        // Standard content extraction
-        content = data[type] || data.headline || data.lead || data.technicalAnalysis || '';
+        // For standalone components, add to the list
+        const newComponent: StoryComponent = {
+          id: Date.now().toString(),
+          type,
+          content: data.story,
+          order: components.length,
+          isActive: true,
+        };
+        
+        setComponents(prev => [...prev, newComponent]);
+        
+        // Rebuild the article with the new component
+        const updatedComponents = [...components, newComponent];
+        const rebuiltArticle = rebuildArticle(updatedComponents);
+        onStoryUpdate(rebuiltArticle);
       }
-      
-             // For components that should enhance the existing story, don't create separate components
-       if (hasBaseStory && ['analystRatings', 'edgeRatings', 'newsContext', 'priceAction', 'alsoReadLink'].includes(type)) {
-         // These components enhance the existing story, so we don't need to do anything else
-         // The story has already been updated via onStoryUpdate(data.story)
-         return;
-       }
-       
-       // For standalone components (headline, lead, technical), create separate components
-       const newComponent: StoryComponent = {
-         id: `${type}-${Date.now()}`,
-         type,
-         content,
-         order: components.length,
-         isActive: true
-       };
-       
-       const updatedComponents = [...components, newComponent];
-       setComponents(updatedComponents);
-       
-       // If we have a base story, append the new component to it instead of rebuilding
-       if (hasBaseStory) {
-         const baseStory = currentArticle;
-         const newStory = baseStory + '\n\n' + content;
-         onStoryUpdate(newStory);
-       } else {
-         // Update the story by rebuilding from components (original behavior)
-         const newStory = rebuildArticle(updatedComponents);
-         onStoryUpdate(newStory);
-       }
       
     } catch (err: any) {
       setError(err.message || `Failed to generate ${type}`);
@@ -188,453 +153,501 @@ export default function ModularStoryBuilder({ ticker, currentArticle, onStoryUpd
     }
   };
 
-  // Add headline and lead paragraph together
+  // Handle X Posts selection
+  const handleXPostsGeneration = async (selectedPosts: any[]) => {
+    if (!currentArticle) {
+      setError('No existing story to add X posts to');
+      return;
+    }
+    
+    setLoadingXPosts(true);
+    setError('');
+    
+    try {
+      const res = await fetch('/api/generate/add-x-posts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          ticker, 
+          existingStory: currentArticle,
+          selectedPosts 
+        }),
+      });
+      
+      const data = await res.json();
+      if (!res.ok || !data.story) throw new Error(data.error || 'Failed to add X posts to story');
+      
+      onStoryUpdate(data.story);
+    } catch (err: any) {
+      setError(err.message || 'Failed to add X posts to story');
+    } finally {
+      setLoadingXPosts(false);
+    }
+  };
+
+  // Add headline and lead to existing article
   const addHeadlineAndLead = async () => {
     setLoading('headlineAndLead');
     setError('');
     
     try {
-      // Generate headline
-      const headlineRes = await fetch('/api/generate/headline', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ticker }),
-      });
-      
-      const headlineData = await headlineRes.json();
-      if (!headlineRes.ok || !headlineData.headline) throw new Error(headlineData.error || 'Failed to generate headline');
-      
-      // Generate lead paragraph
-      const leadRes = await fetch('/api/generate/lead-paragraph', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ticker }),
-      });
-      
-      const leadData = await leadRes.json();
-      if (!leadRes.ok || !leadData.lead) throw new Error(leadData.error || 'Failed to generate lead paragraph');
-      
-      // Create headline component
-      const headlineComponent: StoryComponent = {
-        id: `headline-${Date.now()}`,
-        type: 'headline',
-        content: headlineData.headline,
-        order: components.length,
-        isActive: true
-      };
-      
-      // Create lead component
-      const leadComponent: StoryComponent = {
-        id: `lead-${Date.now() + 1}`,
-        type: 'lead',
-        content: leadData.lead,
-        order: components.length + 1,
-        isActive: true
-      };
-      
-             const updatedComponents = [...components, headlineComponent, leadComponent];
-       setComponents(updatedComponents);
-       
-       // If we have a base story, prepend the headline and lead to it
-       if (hasBaseStory) {
-         const baseStory = currentArticle;
-         const newStory = headlineData.headline + '\n\n' + leadData.lead + '\n\n' + baseStory;
-         onStoryUpdate(newStory);
-       } else {
-         // Update the story by rebuilding from components (original behavior)
-         const newStory = rebuildArticle(updatedComponents);
-         onStoryUpdate(newStory);
-       }
+      const [headlineRes, leadRes] = await Promise.all([
+        fetch('/api/generate/headline', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ticker }),
+        }),
+        fetch('/api/generate/lead-paragraph', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ticker }),
+        }),
+      ]);
+
+      const [headlineData, leadData] = await Promise.all([
+        headlineRes.json(),
+        leadRes.json(),
+      ]);
+
+      if (!headlineRes.ok || !leadRes.ok) {
+        throw new Error('Failed to generate headline or lead');
+      }
+
+      const combinedContent = `${headlineData.story}\n\n${leadData.story}\n\n${currentArticle}`;
+      onStoryUpdate(combinedContent);
       
     } catch (err: any) {
-      setError(err.message || 'Failed to generate headline and lead paragraph');
+      setError(err.message || 'Failed to generate headline and lead');
     } finally {
       setLoading(null);
     }
   };
 
-  // Handle custom context generation
-  const handleCustomContextGeneration = async (selectedArticles: any[]) => {
-    setLoadingCustomContext(true);
+  // Finalize the story
+  const handleFinalize = async () => {
+    if (!currentArticle) {
+      setError('No story to finalize');
+      return;
+    }
+    
+    setLoadingFinalize(true);
     setError('');
+    setOriginalStory(currentArticle);
     
     try {
-            const res = await fetch('/api/generate/add-custom-context', {
+      const res = await fetch('/api/generate/finalize', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ticker,
-          existingStory: currentArticle,
-          selectedArticles
+        body: JSON.stringify({ 
+          ticker, 
+          existingStory: currentArticle
         }),
       });
       
       const data = await res.json();
-      if (!res.ok || !data.story) throw new Error(data.error || 'Failed to add custom context');
+      if (!res.ok || !data.story) throw new Error(data.error || 'Failed to finalize story');
       
-      // The API now returns the complete enhanced story with integrated hyperlinks
-      // For custom context, we replace the entire story since hyperlinks are integrated throughout
       onStoryUpdate(data.story);
-      
+      setIsFinalized(true);
     } catch (err: any) {
-      setError(err.message || 'Failed to add custom context');
+      setError(err.message || 'Failed to finalize story');
     } finally {
-      setLoadingCustomContext(false);
+      setLoadingFinalize(false);
     }
   };
 
-
+  // Undo finalize
+  const handleUndoFinalize = () => {
+    if (originalStory) {
+      onStoryUpdate(originalStory);
+      setIsFinalized(false);
+    }
+  };
 
   // Toggle component visibility
   const toggleComponent = (id: string) => {
-    const updatedComponents = components.map(comp => 
+    setComponents(prev => prev.map(comp => 
       comp.id === id ? { ...comp, isActive: !comp.isActive } : comp
-    );
-    setComponents(updatedComponents);
-    
-    // Update the story
-    const newStory = rebuildArticle(updatedComponents);
-    onStoryUpdate(newStory);
+    ));
   };
 
   // Remove component
   const removeComponent = (id: string) => {
-    const updatedComponents = components.filter(comp => comp.id !== id);
-    setComponents(updatedComponents);
-    
-    // Update the story
-    const newStory = rebuildArticle(updatedComponents);
-    onStoryUpdate(newStory);
+    setComponents(prev => prev.filter(comp => comp.id !== id));
   };
 
-  // Reorder components
-  const moveComponent = (id: string, direction: 'up' | 'down') => {
-    const currentIndex = components.findIndex(comp => comp.id === id);
-    if (currentIndex === -1) return;
-    
-    const newIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
-    if (newIndex < 0 || newIndex >= components.length) return;
-    
-    const updatedComponents = [...components];
-    [updatedComponents[currentIndex], updatedComponents[newIndex]] = 
-    [updatedComponents[newIndex], updatedComponents[currentIndex]];
-    
-    // Update order numbers
-    updatedComponents.forEach((comp, index) => {
-      comp.order = index;
-    });
-    
-    setComponents(updatedComponents);
-    
-    // Update the story
-    const newStory = rebuildArticle(updatedComponents);
-    onStoryUpdate(newStory);
-  };
-
-  const getComponentLabel = (type: StoryComponent['type']) => {
-    switch (type) {
-      case 'headline': return 'Headline';
-      case 'lead': return 'Lead Paragraph';
-      case 'technical': return 'Technical Analysis';
-      case 'analystRatings': return 'Analyst Ratings';
-      case 'edgeRatings': return 'Edge Ratings';
-      case 'newsContext': return 'News Context';
-      case 'priceAction': return 'Price Action';
-      case 'alsoReadLink': return 'Also Read Link';
-      default: return type;
-    }
-  };
-
-  const [copied, setCopied] = useState(false);
-
-  const handleCopyArticle = async () => {
-    // Get the content from currentArticle (which includes integrated hyperlinks) or rebuild from components
-    const formattedText = currentArticle || rebuildArticle(components);
-    
-    console.log('Content to copy:', formattedText);
-    console.log('Content length:', formattedText.length);
-    
-    if (!formattedText || formattedText.trim().length === 0) {
-      console.log('No content to copy');
-      alert('No content to copy. Please add some story components first.');
-      return;
-    }
-    
-    // Create a temporary textarea element
-    const textArea = document.createElement('textarea');
-    textArea.value = formattedText;
-    textArea.style.position = 'fixed';
-    textArea.style.left = '-999999px';
-    textArea.style.top = '-999999px';
-    document.body.appendChild(textArea);
-    
-    // Select and copy the text
-    textArea.focus();
-    textArea.select();
-    
-    try {
-      const success = document.execCommand('copy');
-      if (success) {
-        console.log('Article copied successfully');
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000); // Reset after 2 seconds
-      } else {
-        throw new Error('execCommand returned false');
-      }
-    } catch (err) {
-      console.error('Failed to copy article:', err);
-      alert('Failed to copy article. Please try again.');
-    }
-    
-    // Clean up
-    document.body.removeChild(textArea);
+  const componentTypeToLabel: Record<StoryComponent['type'], string> = {
+    headline: 'Headline',
+    lead: 'Lead Paragraph',
+    technical: 'Technical Analysis',
+    analystRatings: 'Analyst Ratings',
+    edgeRatings: 'Edge Ratings',
+    newsContext: 'News Context',
+    priceAction: 'Price Action',
+    alsoReadLink: 'Also Read Link',
+    xPosts: 'X Posts',
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-      {hasBaseStory && (
+    <div style={{ backgroundColor: '#f8fafc', padding: '20px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+      <h3 style={{ fontSize: '18px', fontWeight: '600', marginBottom: '16px', color: '#1e293b' }}>
+        Modular Story Builder
+      </h3>
+      
+      {/* Component Buttons */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '20px' }}>
+        <button
+          onClick={addHeadlineAndLead}
+          disabled={loading === 'headlineAndLead'}
+          style={{ 
+            padding: '8px 16px', 
+            backgroundColor: loading === 'headlineAndLead' ? '#6b7280' : '#059669', 
+            color: 'white', 
+            border: 'none', 
+            borderRadius: '4px',
+            fontSize: '14px',
+            cursor: loading === 'headlineAndLead' ? 'not-allowed' : 'pointer'
+          }}
+        >
+          {loading === 'headlineAndLead' ? 'Generating...' : 'Add Headline & Lead'}
+        </button>
+        
+        <button
+          onClick={() => addComponent('technical')}
+          disabled={loading === 'technical'}
+          style={{ 
+            padding: '8px 16px', 
+            backgroundColor: loading === 'technical' ? '#6b7280' : '#2563eb', 
+            color: 'white', 
+            border: 'none', 
+            borderRadius: '4px',
+            fontSize: '14px',
+            cursor: loading === 'technical' ? 'not-allowed' : 'pointer'
+          }}
+        >
+          {loading === 'technical' ? 'Generating...' : 'Add Technical Analysis'}
+        </button>
+        
+        <button
+          onClick={() => addComponent('analystRatings')}
+          disabled={loading === 'analystRatings'}
+          style={{ 
+            padding: '8px 16px', 
+            backgroundColor: loading === 'analystRatings' ? '#6b7280' : '#7c3aed', 
+            color: 'white', 
+            border: 'none', 
+            borderRadius: '4px',
+            fontSize: '14px',
+            cursor: loading === 'analystRatings' ? 'not-allowed' : 'pointer'
+          }}
+        >
+          {loading === 'analystRatings' ? 'Generating...' : 'Add Analyst Ratings'}
+        </button>
+        
+        <button
+          onClick={() => addComponent('edgeRatings')}
+          disabled={loading === 'edgeRatings'}
+          style={{ 
+            padding: '8px 16px', 
+            backgroundColor: loading === 'edgeRatings' ? '#6b7280' : '#dc2626', 
+            color: 'white', 
+            border: 'none', 
+            borderRadius: '4px',
+            fontSize: '14px',
+            cursor: loading === 'edgeRatings' ? 'not-allowed' : 'pointer'
+          }}
+        >
+          {loading === 'edgeRatings' ? 'Generating...' : 'Add Edge Ratings'}
+        </button>
+        
+        <button
+          onClick={() => addComponent('newsContext')}
+          disabled={loading === 'newsContext'}
+          style={{ 
+            padding: '8px 16px', 
+            backgroundColor: loading === 'newsContext' ? '#6b7280' : '#059669', 
+            color: 'white', 
+            border: 'none', 
+            borderRadius: '4px',
+            fontSize: '14px',
+            cursor: loading === 'newsContext' ? 'not-allowed' : 'pointer'
+          }}
+        >
+          {loading === 'newsContext' ? 'Generating...' : 'Add Context'}
+        </button>
+        
+        <button
+          onClick={() => addComponent('priceAction')}
+          disabled={loading === 'priceAction'}
+          style={{ 
+            padding: '8px 16px', 
+            backgroundColor: loading === 'priceAction' ? '#6b7280' : '#f59e0b', 
+            color: 'white', 
+            border: 'none', 
+            borderRadius: '4px',
+            fontSize: '14px',
+            cursor: loading === 'priceAction' ? 'not-allowed' : 'pointer'
+          }}
+        >
+          {loading === 'priceAction' ? 'Generating...' : 'Add Price Action'}
+        </button>
+        
+        <button
+          onClick={() => addComponent('alsoReadLink')}
+          disabled={loading === 'alsoReadLink'}
+          style={{ 
+            padding: '8px 16px', 
+            backgroundColor: loading === 'alsoReadLink' ? '#6b7280' : '#10b981', 
+            color: 'white', 
+            border: 'none', 
+            borderRadius: '4px',
+            fontSize: '14px',
+            cursor: loading === 'alsoReadLink' ? 'not-allowed' : 'pointer'
+          }}
+        >
+          {loading === 'alsoReadLink' ? 'Generating...' : 'Add Also Read'}
+        </button>
+        
+        <button
+          onClick={() => addComponent('xPosts')}
+          disabled={loading === 'xPosts'}
+          style={{ 
+            padding: '8px 16px', 
+            backgroundColor: loading === 'xPosts' ? '#6b7280' : '#1da1f2', 
+            color: 'white', 
+            border: 'none', 
+            borderRadius: '4px',
+            fontSize: '14px',
+            cursor: loading === 'xPosts' ? 'not-allowed' : 'pointer'
+          }}
+        >
+          {loading === 'xPosts' ? 'Generating...' : 'Add X Posts'}
+        </button>
+        
+        <button
+          onClick={() => setShowCustomizeModal(true)}
+          style={{ 
+            padding: '8px 16px', 
+            backgroundColor: '#8b5cf6', 
+            color: 'white', 
+            border: 'none', 
+            borderRadius: '4px',
+            fontSize: '14px',
+            cursor: 'pointer'
+          }}
+        >
+          Customize Context
+        </button>
+      </div>
+
+      {/* Error Display */}
+      {error && (
         <div style={{ 
-          fontSize: '14px', 
-          color: '#059669', 
           padding: '12px', 
-          backgroundColor: '#f0fdf4', 
-          borderRadius: '6px', 
-          border: '1px solid #bbf7d0',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '8px'
+          backgroundColor: '#fef2f2', 
+          border: '1px solid #fecaca', 
+          borderRadius: '4px', 
+          color: '#dc2626', 
+          marginBottom: '16px' 
         }}>
-          <span style={{ fontSize: '16px' }}>✓</span>
-          <div>
-            <strong>Base Story Detected:</strong> Components like "Add Analyst Ratings", "Add Edge Ratings", and "Add Context" will enhance your existing story rather than replace it.
-          </div>
+          {error}
         </div>
       )}
-      
-      {/* Component Controls */}
-      <div style={{ backgroundColor: '#f9fafb', padding: '16px', borderRadius: '8px', border: '1px solid #e5e7eb' }}>
-        <h3 style={{ fontSize: '18px', fontWeight: '600', marginBottom: '16px' }}>Add Story Components</h3>
-        <p style={{ fontSize: '14px', color: '#6b7280', marginBottom: '16px' }}>
-          Click any button below to add that component to your story. Components can be reordered, toggled on/off, or removed independently.
-        </p>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '8px' }}>
-          {/* Combined Headline & Lead button */}
-          <button
-            onClick={addHeadlineAndLead}
-            disabled={loading === 'headlineAndLead'}
-            style={{
-              padding: '8px 12px',
-              fontSize: '14px',
-              backgroundColor: loading === 'headlineAndLead' ? '#6b7280' : '#059669',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: loading === 'headlineAndLead' ? 'not-allowed' : 'pointer',
-              opacity: loading === 'headlineAndLead' ? 0.5 : 1,
-              gridColumn: 'span 2'
-            }}
-          >
-            {loading === 'headlineAndLead' ? 'Generating...' : 'Add Headline & Lead'}
-          </button>
-          
-          {/* Individual component buttons */}
-          {(['technical', 'analystRatings', 'edgeRatings', 'newsContext', 'priceAction', 'alsoReadLink'] as const).map(type => (
-            <button
-              key={type}
-              onClick={() => addComponent(type)}
-              disabled={loading === type}
-              style={{
-                padding: '8px 12px',
-                fontSize: '14px',
-                backgroundColor: loading === type ? '#6b7280' : '#2563eb',
-                color: 'white',
-                border: 'none',
-                borderRadius: '4px',
-                cursor: loading === type ? 'not-allowed' : 'pointer',
-                opacity: loading === type ? 0.5 : 1
-              }}
-            >
-              {loading === type ? 'Adding...' : `Add ${getComponentLabel(type)}`}
-            </button>
-          ))}
-          
-          {/* Custom Context button */}
-          <button
-            onClick={() => setShowCustomizeModal(true)}
-            disabled={loadingCustomContext}
-            style={{
-              padding: '8px 12px',
-              fontSize: '14px',
-              backgroundColor: loadingCustomContext ? '#6b7280' : '#7c3aed',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: loadingCustomContext ? 'not-allowed' : 'pointer',
-              opacity: loadingCustomContext ? 0.5 : 1
-            }}
-          >
-            {loadingCustomContext ? 'Generating...' : 'Add Custom Context'}
-          </button>
-        </div>
-        {error && <p style={{ color: '#dc2626', fontSize: '14px', marginTop: '8px' }}>{error}</p>}
-        
 
+      {/* Finalize and Copy Buttons */}
+      <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
+        <button
+          onClick={handleFinalize}
+          disabled={loadingFinalize || !currentArticle}
+          style={{ 
+            padding: '10px 20px', 
+            backgroundColor: loadingFinalize || !currentArticle ? '#6b7280' : '#059669', 
+            color: 'white', 
+            border: 'none', 
+            borderRadius: '4px',
+            fontSize: '14px',
+            fontWeight: '500',
+            cursor: loadingFinalize || !currentArticle ? 'not-allowed' : 'pointer'
+          }}
+        >
+          {loadingFinalize ? 'Finalizing...' : 'Finalize'}
+        </button>
+        
+        {isFinalized && (
+          <button
+            onClick={handleUndoFinalize}
+            style={{ 
+              padding: '10px 20px', 
+              backgroundColor: '#f59e0b', 
+              color: 'white', 
+              border: 'none', 
+              borderRadius: '4px',
+              fontSize: '14px',
+              fontWeight: '500',
+              cursor: 'pointer'
+            }}
+          >
+            Undo Finalize
+          </button>
+        )}
+        
+        <button
+          onClick={() => {
+            navigator.clipboard.writeText(currentArticle);
+          }}
+          style={{ 
+            padding: '10px 20px', 
+            backgroundColor: '#2563eb', 
+            color: 'white', 
+            border: 'none', 
+            borderRadius: '4px',
+            fontSize: '14px',
+            fontWeight: '500',
+            cursor: 'pointer'
+          }}
+        >
+          Copy Article
+        </button>
       </div>
+
+      {/* Current Article Display */}
+      {currentArticle && (
+        <div style={{ marginBottom: '16px' }}>
+          <h4 style={{ fontSize: '16px', fontWeight: '600', marginBottom: '8px', color: '#374151' }}>
+            Current Article ({currentArticle.length} characters)
+          </h4>
+          <div
+            ref={articleRef}
+            style={{ 
+              maxHeight: '400px', 
+              overflowY: 'auto', 
+              border: '1px solid #e5e7eb', 
+              borderRadius: '4px', 
+              padding: '12px',
+              backgroundColor: 'white',
+              fontSize: '14px',
+              lineHeight: '1.6'
+            }}
+            dangerouslySetInnerHTML={{ 
+              __html: currentArticle
+                .split('\n\n')
+                .filter(p => p.trim())
+                .map(p => `<p style="margin-bottom: 16px;">${p}</p>`)
+                .join('')
+            }}
+          />
+        </div>
+      )}
 
       {/* Component List */}
       {components.length > 0 && (
-        <div style={{ backgroundColor: 'white', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '16px' }}>
-          <h3 style={{ fontSize: '18px', fontWeight: '600', marginBottom: '16px' }}>Story Components</h3>
-          <p style={{ fontSize: '14px', color: '#6b7280', marginBottom: '16px' }}>
-            Manage your story components. Use checkboxes to show/hide components, arrows to reorder, and X to remove.
-          </p>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            {components.map((component, index) => (
-              <div key={component.id} style={{ 
-                border: '1px solid #e5e7eb', 
-                borderRadius: '4px', 
-                padding: '12px',
-                backgroundColor: component.isActive ? '#f9fafb' : '#f3f4f6'
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <input
-                      type="checkbox"
-                      checked={component.isActive}
-                      onChange={() => toggleComponent(component.id)}
-                      style={{ borderRadius: '4px' }}
-                    />
-                    <span style={{ 
-                      fontWeight: '500',
-                      color: component.isActive ? '#111827' : '#6b7280'
-                    }}>
-                      {getComponentLabel(component.type)}
-                    </span>
-                    <span style={{ fontSize: '14px', color: '#6b7280' }}>(Order: {component.order + 1})</span>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+        <div>
+          <h4 style={{ fontSize: '16px', fontWeight: '600', marginBottom: '8px', color: '#374151' }}>
+            Generated Components
+          </h4>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            {components.map(component => (
+              <div
+                key={component.id}
+                style={{
+                  padding: '12px',
+                  backgroundColor: component.isActive ? '#f0fdf4' : '#f3f4f6',
+                  border: '1px solid #d1d5db',
+                  borderRadius: '4px',
+                  fontSize: '14px'
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                  <span style={{ fontWeight: '500', color: '#374151' }}>
+                    {componentTypeToLabel[component.type]}
+                  </span>
+                  <div style={{ display: 'flex', gap: '4px' }}>
                     <button
-                      onClick={() => moveComponent(component.id, 'up')}
-                      disabled={index === 0}
+                      onClick={() => toggleComponent(component.id)}
                       style={{
                         padding: '4px 8px',
-                        fontSize: '12px',
-                        backgroundColor: '#e5e7eb',
-                        color: '#374151',
+                        backgroundColor: component.isActive ? '#059669' : '#6b7280',
+                        color: 'white',
                         border: 'none',
-                        borderRadius: '4px',
-                        cursor: index === 0 ? 'not-allowed' : 'pointer',
-                        opacity: index === 0 ? 0.5 : 1
-                      }}
-                      title="Move up"
-                    >
-                      ↑
-                    </button>
-                    <button
-                      onClick={() => moveComponent(component.id, 'down')}
-                      disabled={index === components.length - 1}
-                      style={{
-                        padding: '4px 8px',
+                        borderRadius: '2px',
                         fontSize: '12px',
-                        backgroundColor: '#e5e7eb',
-                        color: '#374151',
-                        border: 'none',
-                        borderRadius: '4px',
-                        cursor: index === components.length - 1 ? 'not-allowed' : 'pointer',
-                        opacity: index === components.length - 1 ? 0.5 : 1
+                        cursor: 'pointer'
                       }}
-                      title="Move down"
                     >
-                      ↓
+                      {component.isActive ? 'Active' : 'Inactive'}
                     </button>
                     <button
                       onClick={() => removeComponent(component.id)}
                       style={{
                         padding: '4px 8px',
-                        fontSize: '12px',
-                        backgroundColor: '#ef4444',
+                        backgroundColor: '#dc2626',
                         color: 'white',
                         border: 'none',
-                        borderRadius: '4px',
+                        borderRadius: '2px',
+                        fontSize: '12px',
                         cursor: 'pointer'
                       }}
-                      title="Remove component"
                     >
-                      ×
+                      Remove
                     </button>
                   </div>
                 </div>
-                {component.isActive && (
-                  <div style={{ 
-                    fontSize: '14px', 
-                    color: '#374151', 
-                    maxHeight: '128px', 
-                    overflowY: 'auto', 
-                    borderTop: '1px solid #e5e7eb', 
-                    paddingTop: '8px' 
-                  }}>
-                    {component.content.substring(0, 200)}
-                    {component.content.length > 200 && '...'}
-                  </div>
-                )}
+                <div style={{ 
+                  maxHeight: '100px', 
+                  overflowY: 'auto', 
+                  fontSize: '12px', 
+                  color: '#6b7280',
+                  lineHeight: '1.4'
+                }}>
+                  {component.content.substring(0, 200)}...
+                </div>
               </div>
             ))}
           </div>
         </div>
       )}
 
-      {/* Preview */}
-      <div style={{ backgroundColor: 'white', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '16px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-          <h3 style={{ fontSize: '18px', fontWeight: '600' }}>Story Preview</h3>
-          <div style={{ display: 'flex', gap: '8px' }}>
-            <button
-              onClick={handleCopyArticle}
-              style={{
-                padding: '8px 16px',
-                backgroundColor: copied ? '#059669' : '#2563eb',
-                color: 'white',
-                border: 'none',
-                borderRadius: '4px',
-                fontSize: '14px',
-                cursor: 'pointer',
-                transition: 'background-color 0.2s'
-              }}
-            >
-              {copied ? 'Copied!' : 'Copy Article'}
-            </button>
-          </div>
-        </div>
-        <div
-          ref={articleRef}
-          data-modular-article="true"
-          style={{ maxWidth: 'none' }}
-          dangerouslySetInnerHTML={{ 
-            __html: (currentArticle || rebuildArticle(components))
-              .split('\n\n')
-              .filter(p => p.trim())
-              .map(p => `<p style="margin-bottom: 16px; line-height: 1.6;">${p}</p>`)
-              .join('')
-              .replace('[STOCK_CHART_PLACEHOLDER]', 
-                ticker ? `
-                  <div style="text-align: center; margin: 20px 0;">
-                    <p style="font-size: 14px; color: #666; margin-bottom: 10px;">
-                      [5-Day Stock Chart for ${ticker} - Chart will be embedded when pasted into WordPress]
-                    </p>
-                  </div>
-                ` : ''
-              ) 
-          }}
-        />
-      </div>
-      
       {/* Customize Context Modal */}
       <CustomizeContextModal
         isOpen={showCustomizeModal}
         onClose={() => setShowCustomizeModal(false)}
         ticker={ticker}
-        onArticlesSelected={handleCustomContextGeneration}
+        onArticlesSelected={async (selectedArticles) => {
+          setLoadingCustomContext(true);
+          setError('');
+          
+          try {
+            const res = await fetch('/api/generate/add-custom-context', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ 
+                ticker, 
+                existingStory: currentArticle,
+                selectedArticles 
+              }),
+            });
+            
+            const data = await res.json();
+            if (!res.ok || !data.story) throw new Error(data.error || 'Failed to add custom context');
+            
+            onStoryUpdate(data.story);
+            setShowCustomizeModal(false);
+          } catch (err: any) {
+            setError(err.message || 'Failed to add custom context');
+          } finally {
+            setLoadingCustomContext(false);
+          }
+        }}
         loading={loadingCustomContext}
+      />
+
+      {/* X Posts Modal */}
+      <XPostsModal
+        isOpen={showXPostsModal}
+        onClose={() => setShowXPostsModal(false)}
+        ticker={ticker}
+        onPostsSelected={handleXPostsGeneration}
+        loading={loadingXPosts}
       />
     </div>
   );
