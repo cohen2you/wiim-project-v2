@@ -2,10 +2,11 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import CustomizeContextModal from './CustomizeContextModal';
+import XPostsModal from './XPostsModal';
 
 interface StoryComponent {
   id: string;
-  type: 'headline' | 'lead' | 'technical' | 'analystRatings' | 'edgeRatings' | 'newsContext' | 'priceAction' | 'alsoReadLink';
+  type: 'headline' | 'lead' | 'technical' | 'analystRatings' | 'edgeRatings' | 'newsContext' | 'priceAction' | 'alsoReadLink' | 'xPosts';
   content: string;
   order: number;
   isActive: boolean;
@@ -22,7 +23,9 @@ export default function ModularStoryBuilder({ ticker, currentArticle, onStoryUpd
   const [loading, setLoading] = useState<string | null>(null);
   const [error, setError] = useState<string>('');
   const [showCustomizeModal, setShowCustomizeModal] = useState(false);
+  const [showXPostsModal, setShowXPostsModal] = useState(false);
   const [loadingCustomContext, setLoadingCustomContext] = useState(false);
+  const [loadingXPosts, setLoadingXPosts] = useState(false);
   const [loadingFinalize, setLoadingFinalize] = useState(false);
   const [originalStory, setOriginalStory] = useState<string>('');
   const [isFinalized, setIsFinalized] = useState(false);
@@ -109,6 +112,10 @@ export default function ModularStoryBuilder({ ticker, currentArticle, onStoryUpd
           endpoint = '/api/generate/add-also-read';
           requestBody.story = currentArticle;
           break;
+        case 'xPosts':
+          endpoint = '/api/generate/add-x-posts';
+          requestBody.existingStory = currentArticle;
+          break;
       }
       
       const res = await fetch(endpoint, {
@@ -120,17 +127,17 @@ export default function ModularStoryBuilder({ ticker, currentArticle, onStoryUpd
       const data = await res.json();
       if (!res.ok || !data) throw new Error(data.error || `Failed to generate ${type}`);
       
-      let content = '';
-      if (type === 'priceAction' || type === 'alsoReadLink' || type === 'analystRatings' || type === 'edgeRatings' || type === 'newsContext') {
+             let content = '';
+       if (type === 'priceAction' || type === 'alsoReadLink' || type === 'analystRatings' || type === 'edgeRatings' || type === 'newsContext' || type === 'xPosts') {
         // For these types, use the complete story to preserve existing content (like integrated hyperlinks)
         // The API returns the complete enhanced story with the new content integrated
         onStoryUpdate(data.story);
         
-        // If we have a base story, don't create separate components for these types
-        // since they modify the existing story rather than adding separate sections
-        if (hasBaseStory && (type === 'analystRatings' || type === 'edgeRatings' || type === 'newsContext')) {
-          return; // Exit early since we've updated the story directly
-        }
+                 // If we have a base story, don't create separate components for these types
+         // since they modify the existing story rather than adding separate sections
+         if (hasBaseStory && (type === 'analystRatings' || type === 'edgeRatings' || type === 'newsContext' || type === 'xPosts')) {
+           return; // Exit early since we've updated the story directly
+         }
         
         // Extract content for display purposes only
         if (type === 'analystRatings') {
@@ -140,21 +147,25 @@ export default function ModularStoryBuilder({ ticker, currentArticle, onStoryUpd
           // For edge ratings, use the complete story to preserve existing content
           // Don't create a separate component for edge ratings since it's integrated
           return; // Exit early since we've updated the story directly
-        } else if (type === 'newsContext') {
-          // For news context, use the complete story to preserve integrated hyperlinks
-          // Don't create a separate component for news context since it's integrated
-          return; // Exit early since we've updated the story directly
-        } else {
-          // For priceAction and alsoReadLink, we don't need to extract content since we're not creating components
-          return; // Exit early since we've updated the story directly
-        }
+                 } else if (type === 'newsContext') {
+           // For news context, use the complete story to preserve integrated hyperlinks
+           // Don't create a separate component for news context since it's integrated
+           return; // Exit early since we've updated the story directly
+         } else if (type === 'xPosts') {
+           // For X posts, use the complete story to preserve integrated hyperlinks
+           // Don't create a separate component for X posts since it's integrated
+           return; // Exit early since we've updated the story directly
+         } else {
+           // For priceAction and alsoReadLink, we don't need to extract content since we're not creating components
+           return; // Exit early since we've updated the story directly
+         }
       } else {
         // Standard content extraction
         content = data[type] || data.headline || data.lead || data.technicalAnalysis || '';
       }
       
-             // For components that should enhance the existing story, don't create separate components
-       if (hasBaseStory && ['analystRatings', 'edgeRatings', 'newsContext', 'priceAction', 'alsoReadLink'].includes(type)) {
+                           // For components that should enhance the existing story, don't create separate components
+        if (hasBaseStory && ['analystRatings', 'edgeRatings', 'newsContext', 'priceAction', 'alsoReadLink', 'xPosts'].includes(type)) {
          // These components enhance the existing story, so we don't need to do anything else
          // The story has already been updated via onStoryUpdate(data.story)
          return;
@@ -285,6 +296,35 @@ export default function ModularStoryBuilder({ ticker, currentArticle, onStoryUpd
     }
   };
 
+  // Handle X posts generation
+  const handleXPostsGeneration = async (selectedPosts: any[]) => {
+    setLoadingXPosts(true);
+    setError('');
+    
+    try {
+      const res = await fetch('/api/generate/add-x-posts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ticker,
+          existingStory: currentArticle,
+          selectedPosts
+        }),
+      });
+      
+      const data = await res.json();
+      if (!res.ok || !data.story) throw new Error(data.error || 'Failed to add X posts');
+      
+      // The API returns the complete enhanced story with integrated hyperlinks
+      onStoryUpdate(data.story);
+      
+    } catch (err: any) {
+      setError(err.message || 'Failed to add X posts');
+    } finally {
+      setLoadingXPosts(false);
+    }
+  };
+
   const handleFinalize = async () => {
     setLoadingFinalize(true);
     setError('');
@@ -379,6 +419,7 @@ export default function ModularStoryBuilder({ ticker, currentArticle, onStoryUpd
       case 'newsContext': return 'News Context';
       case 'priceAction': return 'Price Action';
       case 'alsoReadLink': return 'Also Read Link';
+      case 'xPosts': return 'X Posts';
       default: return type;
     }
   };
@@ -475,8 +516,8 @@ export default function ModularStoryBuilder({ ticker, currentArticle, onStoryUpd
             {loading === 'headlineAndLead' ? 'Generating...' : 'Add Headline & Lead'}
           </button>
           
-          {/* Individual component buttons */}
-          {(['technical', 'analystRatings', 'edgeRatings', 'newsContext', 'priceAction', 'alsoReadLink'] as const).map(type => (
+                     {/* Individual component buttons */}
+           {(['technical', 'analystRatings', 'edgeRatings', 'newsContext', 'priceAction', 'alsoReadLink', 'xPosts'] as const).map(type => (
             <button
               key={type}
               onClick={() => addComponent(type)}
@@ -496,23 +537,41 @@ export default function ModularStoryBuilder({ ticker, currentArticle, onStoryUpd
             </button>
           ))}
           
-          {/* Custom Context button */}
-          <button
-            onClick={() => setShowCustomizeModal(true)}
-            disabled={loadingCustomContext}
-            style={{
-              padding: '8px 12px',
-              fontSize: '14px',
-              backgroundColor: loadingCustomContext ? '#6b7280' : '#7c3aed',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: loadingCustomContext ? 'not-allowed' : 'pointer',
-              opacity: loadingCustomContext ? 0.5 : 1
-            }}
-          >
-            {loadingCustomContext ? 'Generating...' : 'Add Custom Context'}
-          </button>
+                     {/* Custom Context button */}
+           <button
+             onClick={() => setShowCustomizeModal(true)}
+             disabled={loadingCustomContext}
+             style={{
+               padding: '8px 12px',
+               fontSize: '14px',
+               backgroundColor: loadingCustomContext ? '#6b7280' : '#7c3aed',
+               color: 'white',
+               border: 'none',
+               borderRadius: '4px',
+               cursor: loadingCustomContext ? 'not-allowed' : 'pointer',
+               opacity: loadingCustomContext ? 0.5 : 1
+             }}
+           >
+             {loadingCustomContext ? 'Generating...' : 'Add Custom Context'}
+           </button>
+           
+           {/* X Posts button */}
+           <button
+             onClick={() => setShowXPostsModal(true)}
+             disabled={loadingXPosts}
+             style={{
+               padding: '8px 12px',
+               fontSize: '14px',
+               backgroundColor: loadingXPosts ? '#6b7280' : '#1da1f2',
+               color: 'white',
+               border: 'none',
+               borderRadius: '4px',
+               cursor: loadingXPosts ? 'not-allowed' : 'pointer',
+               opacity: loadingXPosts ? 0.5 : 1
+             }}
+           >
+             {loadingXPosts ? 'Generating...' : 'Add X Posts'}
+           </button>
         </div>
         {error && <p style={{ color: '#dc2626', fontSize: '14px', marginTop: '8px' }}>{error}</p>}
         
@@ -702,14 +761,23 @@ export default function ModularStoryBuilder({ ticker, currentArticle, onStoryUpd
         />
       </div>
       
-      {/* Customize Context Modal */}
-      <CustomizeContextModal
-        isOpen={showCustomizeModal}
-        onClose={() => setShowCustomizeModal(false)}
-        ticker={ticker}
-        onArticlesSelected={handleCustomContextGeneration}
-        loading={loadingCustomContext}
-      />
+             {/* Customize Context Modal */}
+       <CustomizeContextModal
+         isOpen={showCustomizeModal}
+         onClose={() => setShowCustomizeModal(false)}
+         ticker={ticker}
+         onArticlesSelected={handleCustomContextGeneration}
+         loading={loadingCustomContext}
+       />
+       
+       {/* X Posts Modal */}
+       <XPostsModal
+         isOpen={showXPostsModal}
+         onClose={() => setShowXPostsModal(false)}
+         ticker={ticker}
+         onPostsSelected={handleXPostsGeneration}
+         loading={loadingXPosts}
+       />
     </div>
   );
 } 
