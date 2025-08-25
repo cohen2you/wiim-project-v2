@@ -13,31 +13,21 @@ async function fetchPriceData(ticker: string) {
     
     const data = await response.json();
     
-<<<<<<< HEAD
     // Debug: Log the raw API response
     console.log('Price Action Debug - Raw API Response:', JSON.stringify(data, null, 2));
     
     if (data && typeof data === 'object') {
       const quote = data[ticker.toUpperCase()];
       console.log('Price Action Debug - Quote Object:', JSON.stringify(quote, null, 2));
-=======
-    if (data && typeof data === 'object') {
-      const quote = data[ticker.toUpperCase()];
->>>>>>> 8e3f4bf
       if (quote && typeof quote === 'object') {
         const priceData = {
           last: quote.lastTradePrice || 0,
           change: quote.change || 0,
-<<<<<<< HEAD
           change_percent: quote.changePercent || quote.change_percent || 0,
-=======
-          change_percent: quote.changePercent || 0,
->>>>>>> 8e3f4bf
           volume: quote.volume || 0,
           high: quote.high || 0,
           low: quote.low || 0,
           open: quote.open || 0,
-<<<<<<< HEAD
           close: quote.close || quote.lastTradePrice || 0,
           previousClose: quote.previousClose || 0,
           // Company name
@@ -53,13 +43,6 @@ async function fetchPriceData(ticker: string) {
         // Debug: Log the constructed price data
         console.log('Price Action Debug - Constructed Price Data:', JSON.stringify(priceData, null, 2));
         
-=======
-          previousClose: quote.previousClose || 0,
-          afterHours: quote.afterHours || 0,
-          afterHoursChange: quote.afterHoursChange || 0,
-          afterHoursChangePercent: quote.afterHoursChangePercent || 0
-        };
->>>>>>> 8e3f4bf
         return priceData;
       }
     }
@@ -71,7 +54,6 @@ async function fetchPriceData(ticker: string) {
   }
 }
 
-<<<<<<< HEAD
 // Helper function to determine market session
 function getMarketSession(): 'premarket' | 'regular' | 'afterhours' | 'closed' {
   const now = new Date();
@@ -192,58 +174,6 @@ function generatePriceActionLine(ticker: string, priceData: any): string {
   }
 }
 
-
-=======
-// Helper function to generate price action line
-function generatePriceActionLine(ticker: string, priceData: any): string {
-  if (!priceData) {
-    return `${ticker} Price Action: Price data unavailable, according to <a href="https://pro.benzinga.com">Benzinga Pro</a>.`;
-  }
-
-  const dayName = getLastTradingDayName();
-  
-  // Format regular session data
-  const regularLast = priceData.last.toFixed(2);
-  const regularChange = priceData.change.toFixed(2);
-  const regularChangePercent = priceData.change_percent.toFixed(2);
-  const regularDisplayChangePercent = regularChangePercent.startsWith('-') ? regularChangePercent.substring(1) : regularChangePercent;
-  
-  // Check if there's after-hours data
-  if (priceData.afterHours && priceData.afterHours !== 0) {
-    const afterHoursChange = priceData.afterHoursChange.toFixed(2);
-    const afterHoursChangePercent = priceData.afterHoursChangePercent.toFixed(2);
-    const afterHoursDisplayChangePercent = afterHoursChangePercent.startsWith('-') ? afterHoursChangePercent.substring(1) : afterHoursChangePercent;
-    
-    const afterHoursDirection = afterHoursChangePercent.startsWith('-') ? 'fell' : 'rose';
-    const regularDirection = regularChangePercent.startsWith('-') ? 'fell' : 'rose';
-    return `${ticker} Price Action: ${ticker} shares ${regularDirection} ${regularDisplayChangePercent}% to $${regularLast} during regular trading hours on ${dayName}. The stock ${afterHoursDirection} ${afterHoursDisplayChangePercent}% to $${priceData.afterHours.toFixed(2)} in after-hours trading, according to <a href="https://pro.benzinga.com">Benzinga Pro</a>.`;
-  } else {
-    // Market is closed, use last regular session data
-    return `${ticker} Price Action: ${ticker} shares ${regularChangePercent.startsWith('-') ? 'fell' : 'rose'} ${regularDisplayChangePercent}% to $${regularLast} during regular trading hours on ${dayName}, according to <a href="https://pro.benzinga.com">Benzinga Pro</a>.`;
-  }
-}
-
-// Helper function to get the last trading day name
-function getLastTradingDayName() {
-  const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-  const today = new Date();
-  const currentDay = today.getDay(); // 0 = Sunday, 6 = Saturday
-  
-  // If it's Saturday (6), go back to Friday (5)
-  // If it's Sunday (0), go back to Friday (5)
-  let lastTradingDay;
-  if (currentDay === 0) { // Sunday
-    lastTradingDay = 5; // Friday
-  } else if (currentDay === 6) { // Saturday
-    lastTradingDay = 5; // Friday
-  } else {
-    lastTradingDay = currentDay; // Weekday, use current day
-  }
-  
-  return days[lastTradingDay];
-}
->>>>>>> 8e3f4bf
-
 // Helper function to remove existing Price Action lines
 function removeExistingPriceAction(story: string): string {
   // Remove Price Action lines (usually at the end, format: "TICKER Price Action: ...")
@@ -257,10 +187,10 @@ function removeExistingPriceAction(story: string): string {
 
 export async function POST(request: Request) {
   try {
-    const { ticker, story } = await request.json();
+    const { ticker, existingStory } = await request.json();
     
-    if (!ticker || !story) {
-      return NextResponse.json({ error: 'Ticker and story are required.' }, { status: 400 });
+    if (!ticker || !existingStory) {
+      return NextResponse.json({ error: 'Ticker and existing story are required.' }, { status: 400 });
     }
 
     // Get current price data for the price action line
@@ -270,7 +200,7 @@ export async function POST(request: Request) {
     const priceActionLine = generatePriceActionLine(ticker, priceData);
     
     // Combine story with price action line
-    let completeStory = story;
+    let completeStory = existingStory;
     
     // Remove existing Price Action lines if they exist
     completeStory = removeExistingPriceAction(completeStory);
@@ -279,7 +209,7 @@ export async function POST(request: Request) {
     completeStory = ensureProperPriceActionPlacement(completeStory, priceActionLine, '');
     
     // Preserve existing hyperlinks
-    const finalStory = preserveHyperlinks(story, completeStory);
+    const finalStory = preserveHyperlinks(existingStory, completeStory);
     
     return NextResponse.json({ 
       story: finalStory,
