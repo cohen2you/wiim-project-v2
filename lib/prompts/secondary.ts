@@ -1,7 +1,7 @@
 // lib/prompts/secondary.ts
 
 import { z } from 'zod';
-import { PromptTemplate } from '../../types';
+import { PromptTemplate } from '../../types/index';
 
 export const secondaryInputSchema = z.object({
   secondaryUrl: z.string(),
