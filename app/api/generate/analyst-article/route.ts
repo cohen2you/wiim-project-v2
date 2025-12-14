@@ -258,7 +258,7 @@ export async function POST(req: Request) {
    - **CRITICAL: Keep paragraphs SHORT - maximum 2 sentences per paragraph. Break up long thoughts into multiple short paragraphs for better readability.**
    - Under each header, write 3-5 very short paragraphs (1-2 sentences each) with specific details
    - Create story elements: "mystery customer", "undue noise", "beat goes on"
-   - Use direct quotes from analyst to support narrative
+   - **QUOTE ACCURACY (CRITICAL): When you use quotation marks, the text inside MUST be a word-for-word exact copy from the source. Do NOT reorder words, change word forms, or paraphrase. Example: If source says "momentum is accelerating", you MUST write "momentum is accelerating" - NOT "accelerating momentum". Before using ANY quote, search the source text for the exact phrase word-for-word. If you cannot find the exact phrase, do NOT use quotation marks - paraphrase without quotes instead (e.g., "Cassidy noted that momentum is accelerating" without quotes).**
    - Include specific numbers, metrics, and catalysts
    - Use phrases like "Arya believes", "Arya pointed to", "Arya noted" to maintain narrative flow
    - **Never create long, dense paragraphs - always break them into shorter, punchier segments**
@@ -296,7 +296,7 @@ ${truncatedText}
       [
         {
           role: "system",
-          content: "You are an editorial financial journalist writing for Benzinga, a fast-paced trading news site. Your articles are read by traders who scan content quickly but appreciate compelling narratives. Create editorial, story-driven content with intrigue, conflict, and tradeable information. Use narrative hooks, create story elements (like 'mystery customer'), and include analyst quotes to support the narrative. Use 2-3 editorial section headers (e.g., 'The Broadcom Thesis', 'The Mystery Customer Catalyst'). NEVER include formal datelines or conclusion sections. Do NOT generate a Price Action line - it will be added automatically. Use HTML <strong> tags for bold text, NOT markdown ** syntax. CRITICAL: You MUST bold ALL section headers/subheads using <strong> tags. ONLY bold company names on first mention - do NOT bold any other text (no numbers, metrics, analyst names, firms, or phrases) except for section headers. Always include the analyst's name along with the firm name. On first mention, bold ONLY the company name (e.g., <strong>Broadcom Inc.</strong>), then include the full exchange ticker format (NASDAQ:AVGO) without bolding and with no space after the colon. MOST IMPORTANT: Keep ALL paragraphs SHORT - maximum 2 sentences per paragraph. Break up any long thoughts into multiple short, punchy paragraphs. Never create dense blocks of text."
+          content: "You are an editorial financial journalist writing for Benzinga, a fast-paced trading news site. Your articles are read by traders who scan content quickly but appreciate compelling narratives. Create editorial, story-driven content with intrigue, conflict, and tradeable information. Use narrative hooks, create story elements (like 'mystery customer'), and include analyst quotes to support the narrative. Use 2-3 editorial section headers (e.g., 'The Broadcom Thesis', 'The Mystery Customer Catalyst'). NEVER include formal datelines or conclusion sections. Do NOT generate a Price Action line - it will be added automatically. Use HTML <strong> tags for bold text, NOT markdown ** syntax. CRITICAL: You MUST bold ALL section headers/subheads using <strong> tags. ONLY bold company names on first mention - do NOT bold any other text (no numbers, metrics, analyst names, firms, or phrases) except for section headers. Always include the analyst's name along with the firm name. On first mention, bold ONLY the company name (e.g., <strong>Broadcom Inc.</strong>), then include the full exchange ticker format (NASDAQ:AVGO) without bolding and with no space after the colon. MOST IMPORTANT: Keep ALL paragraphs SHORT - maximum 2 sentences per paragraph. Break up any long thoughts into multiple short, punchy paragraphs. Never create dense blocks of text. QUOTE ACCURACY IS ABSOLUTELY CRITICAL: If you use quotation marks, the text inside MUST be a word-for-word exact copy from the source. Do NOT reorder words, change word forms, or paraphrase. Example: If source says 'momentum is accelerating', you MUST write 'momentum is accelerating' - NOT 'accelerating momentum'. Before using ANY quote, search the source text for the exact phrase word-for-word. If you cannot find the exact phrase, do NOT use quotation marks - paraphrase without quotes instead."
         },
         {
           role: "user",
@@ -306,7 +306,7 @@ ${truncatedText}
       {
         // Use models with larger context windows
         model: provider === 'gemini' ? 'gemini-3-pro-preview' : 'gpt-4-turbo',
-        temperature: 0.7,
+        temperature: 0.5, // Lower temperature for more accurate quotes
         maxTokens: 2000,
       },
       provider
@@ -321,6 +321,39 @@ ${truncatedText}
     // Post-process: Convert any markdown **bold** syntax to HTML <strong> tags
     // This ensures compatibility even if the AI occasionally uses markdown
     article = article.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    
+    // Verify quotes match source exactly (strict word-order matching)
+    const quotes = article.match(/"([^"]+)"/g);
+    if (quotes) {
+      const sourceTextLower = analystNoteText.toLowerCase();
+      quotes.forEach(quote => {
+        const quoteText = quote.replace(/"/g, '').trim();
+        const quoteTextLower = quoteText.toLowerCase();
+        
+        // First check: exact match (case-insensitive)
+        if (!sourceTextLower.includes(quoteTextLower)) {
+          // Second check: check if words are in same order (allowing for punctuation/whitespace differences)
+          const quoteWords = quoteTextLower.split(/\s+/).filter(w => w.length > 0);
+          if (quoteWords.length > 0) {
+            // Try to find the words in the same order in source
+            let sourceIndex = 0;
+            let allWordsFoundInOrder = true;
+            for (const word of quoteWords) {
+              const wordIndex = sourceTextLower.indexOf(word, sourceIndex);
+              if (wordIndex === -1) {
+                allWordsFoundInOrder = false;
+                break;
+              }
+              sourceIndex = wordIndex + word.length;
+            }
+            
+            if (!allWordsFoundInOrder) {
+              console.warn(`⚠️ INACCURATE QUOTE DETECTED: "${quoteText}" - This exact phrase was not found in the source text. The AI may have paraphrased instead of using an exact quote.`);
+            }
+          }
+        }
+      });
+    }
     
     // Bold section headers that might not be bolded (common patterns)
     // Look for headers that are on their own line and not already bolded
