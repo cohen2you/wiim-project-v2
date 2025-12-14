@@ -328,13 +328,19 @@ ${truncatedText}
     const headlineMatch = article.match(/^([^\n]+)/);
     let headline = headlineMatch ? headlineMatch[1] : '';
     
-    // Convert double quotes to single quotes in headline
+    // Remove quotes that wrap the entire headline (common AI mistake)
+    // Check if headline starts and ends with matching quotes
+    headline = headline.trim();
+    if ((headline.startsWith("'") && headline.endsWith("'")) || 
+        (headline.startsWith('"') && headline.endsWith('"'))) {
+      headline = headline.slice(1, -1).trim();
+    }
+    
+    // Convert double quotes to single quotes in headline (for quoted phrases within headline)
     headline = headline.replace(/"([^"]+)"/g, "'$1'");
     
-    // Update article with corrected headline
-    if (headlineMatch) {
-      article = headline + article.substring(headline.length);
-    }
+    // Remove headline from article body (everything after first line)
+    let articleBody = headlineMatch ? article.substring(headlineMatch[0].length).trim() : article;
     
     // Verify quotes in headline match source exactly
     if (headline) {
@@ -365,9 +371,7 @@ ${truncatedText}
     }
     
     // Verify quotes in body match source exactly (skip headline, already checked)
-    // Remove headline from article for body quote checking
-    const bodyText = headline ? article.substring(headline.length) : article;
-    const quotes = bodyText.match(/"([^"]{4,})"/g) || bodyText.match(/'([^']{4,})'/g);
+    const quotes = articleBody.match(/"([^"]{4,})"/g) || articleBody.match(/'([^']{4,})'/g);
     if (quotes) {
       const sourceTextLower = analystNoteText.toLowerCase();
       quotes.forEach(quote => {
@@ -417,7 +421,7 @@ ${truncatedText}
     
     // Bold section headers that might not be bolded (common patterns)
     // Look for headers that are on their own line and not already bolded
-    article = article.replace(/^(The [A-Z][^<\n]+?)(\n|$)/gm, (match, header, newline) => {
+    articleBody = articleBody.replace(/^(The [A-Z][^<\n]+?)(\n|$)/gm, (match, header, newline) => {
       if (!header.includes('<strong>')) {
         return `<strong>${header}</strong>${newline}`;
       }
@@ -425,7 +429,7 @@ ${truncatedText}
     });
     
     // Bold other common header patterns
-    article = article.replace(/^([A-Z][^<\n]{5,50}:?)(\n|$)/gm, (match, header, newline) => {
+    articleBody = articleBody.replace(/^([A-Z][^<\n]{5,50}:?)(\n|$)/gm, (match, header, newline) => {
       // Only bold if it looks like a header (starts with capital, reasonable length, not already bolded)
       if (!header.includes('<strong>') && header.length > 5 && header.length < 50 && !header.includes('.')) {
         return `<strong>${header}</strong>${newline}`;
@@ -433,18 +437,52 @@ ${truncatedText}
       return match;
     });
     
+    // Remove bold tags from company name after first mention
+    // Extract company name from first mention (e.g., <strong>Broadcom Inc.</strong>)
+    const firstMentionMatch = articleBody.match(/<strong>([^<]+(?:Inc\.?|Corp\.?|LLC|Ltd\.?)?)<\/strong>\s*\([A-Z]+:[A-Z]+\)/i);
+    if (firstMentionMatch) {
+      const companyName = firstMentionMatch[1];
+      // Remove "Inc.", "Corp.", etc. for matching (just use base name)
+      const baseCompanyName = companyName.replace(/\s+(Inc\.?|Corp\.?|LLC|Ltd\.?)$/i, '').trim();
+      
+      // After the first mention, remove bold tags from subsequent mentions
+      // Split article into parts: before first mention, first mention, and after
+      const firstMentionIndex = articleBody.indexOf(firstMentionMatch[0]);
+      const afterFirstMention = articleBody.substring(firstMentionIndex + firstMentionMatch[0].length);
+      
+      // Remove <strong> tags from company name in the rest of the article
+      // Match patterns like <strong>Broadcom</strong> or <strong>Broadcom Inc.</strong>
+      const companyNamePatterns = [
+        new RegExp(`<strong>${baseCompanyName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:\\s+(?:Inc\\.?|Corp\\.?|LLC|Ltd\\.?))?<\\/strong>`, 'gi'),
+        new RegExp(`<strong>${companyName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}<\\/strong>`, 'gi')
+      ];
+      
+      let cleanedAfter = afterFirstMention;
+      for (const pattern of companyNamePatterns) {
+        cleanedAfter = cleanedAfter.replace(pattern, (match) => {
+          // Remove the <strong> tags, keep the company name
+          return match.replace(/<\/?strong>/g, '');
+        });
+      }
+      
+      articleBody = articleBody.substring(0, firstMentionIndex + firstMentionMatch[0].length) + cleanedAfter;
+    }
+    
     // Remove any Price Action line that the AI might have generated
     // We'll add the real one from Benzinga API
-    article = article.replace(/\n\nPrice Action:.*$/i, '');
-    article = article.replace(/Price Action:.*$/i, '');
+    articleBody = articleBody.replace(/\n\nPrice Action:.*$/i, '');
+    articleBody = articleBody.replace(/Price Action:.*$/i, '');
     
     // Bold "Price Action:" in the price action line
     const boldedPriceActionLine = priceActionLine.replace(/^(Price Action:)/i, '<strong>$1</strong>');
     
     // Add the real price action line from Benzinga API
-    article = article.trim() + '\n\n' + boldedPriceActionLine;
+    articleBody = articleBody.trim() + '\n\n' + boldedPriceActionLine;
 
-    return NextResponse.json({ article });
+    return NextResponse.json({ 
+      headline: headline || '',
+      article: articleBody || ''
+    });
 
   } catch (error: any) {
     console.error('Error generating analyst article:', error);
