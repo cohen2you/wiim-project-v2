@@ -60,16 +60,16 @@ function formatEdgeRatings(edgeData: EdgeRatings): string {
   const ratings = [];
   
   if (edgeData.value_rank !== undefined) {
-    ratings.push(`Value: ${edgeData.value_rank}/100`);
+    ratings.push(`Value: ${edgeData.value_rank}`);
   }
   if (edgeData.growth_rank !== undefined) {
-    ratings.push(`Growth: ${edgeData.growth_rank}/100`);
+    ratings.push(`Growth: ${edgeData.growth_rank}`);
   }
   if (edgeData.quality_rank !== undefined) {
-    ratings.push(`Quality: ${edgeData.quality_rank}/100`);
+    ratings.push(`Quality: ${edgeData.quality_rank}`);
   }
   if (edgeData.momentum_rank !== undefined) {
-    ratings.push(`Momentum: ${edgeData.momentum_rank}/100`);
+    ratings.push(`Momentum: ${edgeData.momentum_rank}`);
   }
   
   return ratings.length > 0 ? ratings.join(', ') : 'No Edge ratings available';

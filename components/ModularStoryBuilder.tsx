@@ -15,9 +15,10 @@ interface ModularStoryBuilderProps {
   ticker: string;
   currentArticle: string;
   onStoryUpdate: (story: string) => void;
+  aiProvider?: 'openai' | 'gemini';
 }
 
-export default function ModularStoryBuilder({ ticker, currentArticle, onStoryUpdate }: ModularStoryBuilderProps) {
+export default function ModularStoryBuilder({ ticker, currentArticle, onStoryUpdate, aiProvider = 'openai' }: ModularStoryBuilderProps) {
   const [components, setComponents] = useState<StoryComponent[]>([]);
   const [loading, setLoading] = useState<string | null>(null);
   const [error, setError] = useState<string>('');
@@ -90,10 +91,12 @@ export default function ModularStoryBuilder({ ticker, currentArticle, onStoryUpd
         case 'analystRatings':
           endpoint = '/api/generate/add-analyst-ratings';
           requestBody.existingStory = currentArticle;
+          requestBody.aiProvider = aiProvider;
           break;
         case 'edgeRatings':
           endpoint = '/api/generate/add-edge-ratings';
           requestBody.existingStory = currentArticle;
+          requestBody.aiProvider = aiProvider;
           break;
         case 'newsContext':
           endpoint = '/api/generate/add-context';
@@ -124,37 +127,82 @@ export default function ModularStoryBuilder({ ticker, currentArticle, onStoryUpd
         // The API returns the complete enhanced story with the new content integrated
         onStoryUpdate(data.story);
         
-        // If we have a base story, don't create separate components for these types
-        // since they modify the existing story rather than adding separate sections
-        if (hasBaseStory && (type === 'analystRatings' || type === 'edgeRatings' || type === 'newsContext')) {
-          return; // Exit early since we've updated the story directly
-        }
-        
-        // Extract content for display purposes only
+        // Extract content for display purposes
         if (type === 'analystRatings') {
-          const analystRatingsMatch = data.story.match(/Analyst sentiment[\s\S]*?(?=\n\n|$)/);
-          content = analystRatingsMatch ? analystRatingsMatch[0] : '';
+          // Extract analyst ratings section from the story or use the analystRatingsContent from response
+          // Should include all three paragraphs (consensus/ratings and two analysis paragraphs)
+          if (data.analystRatingsContent) {
+            content = data.analystRatingsContent;
+          } else {
+            // Try to extract from the story (should capture all three paragraphs)
+            const analystRatingsMatch = data.story.match(/(?:Analysts|The analyst)[\s\S]*?(?=\n\n(?:[A-Z][a-z]+:|Price Action:|Also Read:|Read Next:|Benzinga Edge)|$)/i);
+            content = analystRatingsMatch ? analystRatingsMatch[0].trim() : '';
+          }
+          // Continue to create component for analystRatings
         } else if (type === 'edgeRatings') {
-          // For edge ratings, use the complete story to preserve existing content
-          // Don't create a separate component for edge ratings since it's integrated
-          return; // Exit early since we've updated the story directly
+          // Extract the edge ratings section from the story or use the edgeRatings from response
+          // Should include both paragraphs (rankings and analysis)
+          if (data.edgeRatings) {
+            content = data.edgeRatings;
+          } else {
+            // Try to extract from the story (should capture both paragraphs)
+            const edgeRatingsMatch = data.story.match(/Benzinga Edge rankings[\s\S]*?(?=\n\n(?:[A-Z][a-z]+:|Price Action:|Also Read:|Read Next:)|$)/i);
+            content = edgeRatingsMatch ? edgeRatingsMatch[0].trim() : '';
+          }
+          // Continue to create component for edgeRatings
         } else if (type === 'newsContext') {
           // For news context, use the complete story to preserve integrated hyperlinks
           // Don't create a separate component for news context since it's integrated
           return; // Exit early since we've updated the story directly
-        } else {
-          // For priceAction and alsoReadLink, we don't need to extract content since we're not creating components
-          return; // Exit early since we've updated the story directly
+        } else if (type === 'priceAction') {
+          // Extract the price action line from the story or use the priceActionLine from response
+          if (data.priceActionLine) {
+            content = data.priceActionLine;
+          } else {
+            // Try to extract from the story
+            const priceActionMatch = data.story.match(/<strong>[A-Z]+ Price Action:<\/strong>.*?(?=\n\n|Read Next:|Also Read:|$)/s);
+            if (priceActionMatch) {
+              content = priceActionMatch[0].trim();
+            } else {
+              // Fallback: try to find it without strong tags
+              const priceActionMatch2 = data.story.match(/[A-Z]+ Price Action:.*?(?=\n\n|Read Next:|Also Read:|$)/s);
+              content = priceActionMatch2 ? priceActionMatch2[0].trim() : '';
+            }
+          }
+          // Continue to create component for priceAction
+        } else if (type === 'alsoReadLink') {
+          // Extract the Also Read link from the story or use the alsoReadLink from response
+          if (data.alsoReadLink) {
+            content = data.alsoReadLink;
+          } else {
+            // Try to extract from the story
+            const alsoReadMatch = data.story.match(/Also Read:.*?(?=\n\n|Read Next:|Price Action:|$)/s);
+            content = alsoReadMatch ? alsoReadMatch[0].trim() : '';
+          }
+          // Continue to create component for alsoReadLink
         }
       } else {
         // Standard content extraction
         content = data[type] || data.headline || data.lead || data.technicalAnalysis || '';
       }
-      
-             // For components that should enhance the existing story, don't create separate components
-       if (hasBaseStory && ['analystRatings', 'edgeRatings', 'newsContext', 'priceAction', 'alsoReadLink'].includes(type)) {
-         // These components enhance the existing story, so we don't need to do anything else
-         // The story has already been updated via onStoryUpdate(data.story)
+       
+       // Create component for priceAction, alsoReadLink, edgeRatings, and analystRatings
+       if (type === 'priceAction' || type === 'alsoReadLink' || type === 'edgeRatings' || type === 'analystRatings') {
+         // For these types, the story has already been updated by the API
+         // We just need to create a component for display/management purposes
+         const newComponent: StoryComponent = {
+           id: `${type}-${Date.now()}`,
+           type,
+           content,
+           order: components.length,
+           isActive: true
+         };
+         
+         const updatedComponents = [...components, newComponent];
+         setComponents(updatedComponents);
+         
+         // The story has already been updated via onStoryUpdate(data.story) above
+         // No need to update it again
          return;
        }
        
@@ -198,7 +246,7 @@ export default function ModularStoryBuilder({ ticker, currentArticle, onStoryUpd
       const headlineRes = await fetch('/api/generate/headline', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ticker }),
+        body: JSON.stringify({ ticker, aiProvider }),
       });
       
       const headlineData = await headlineRes.json();
@@ -208,7 +256,7 @@ export default function ModularStoryBuilder({ ticker, currentArticle, onStoryUpd
       const leadRes = await fetch('/api/generate/lead-paragraph', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ticker }),
+        body: JSON.stringify({ ticker, aiProvider }),
       });
       
       const leadData = await leadRes.json();
@@ -265,7 +313,8 @@ export default function ModularStoryBuilder({ ticker, currentArticle, onStoryUpd
         body: JSON.stringify({
           ticker,
           existingStory: currentArticle,
-          selectedArticles
+          selectedArticles,
+          aiProvider
         }),
       });
       

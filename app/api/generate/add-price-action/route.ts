@@ -29,7 +29,7 @@ async function fetchPriceData(ticker: string) {
           low: quote.low || 0,
           open: quote.open || 0,
           close: quote.close || quote.lastTradePrice || 0,
-          previousClose: quote.previousClose || 0,
+          previousClose: quote.previousClosePrice || quote.previousClose || 0,
           // Company name
           companyName: quote.companyStandardName || quote.name || ticker.toUpperCase(),
           // Extended hours data with multiple field name support
@@ -88,9 +88,20 @@ function getMarketSession(): 'premarket' | 'regular' | 'afterhours' | 'closed' {
 }
 
 // Helper function to get current day name
+// Markets are closed on weekends, so return Friday for Saturday/Sunday
 function getCurrentDayName() {
   const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-  return days[new Date().getDay()];
+  const today = new Date();
+  const currentDay = today.getDay();
+  
+  // If it's a weekend, return Friday as the last trading day
+  if (currentDay === 0) { // Sunday
+    return 'Friday';
+  } else if (currentDay === 6) { // Saturday
+    return 'Friday';
+  } else {
+    return days[currentDay];
+  }
 }
 
 // Helper function to generate price action line
@@ -108,8 +119,28 @@ function generatePriceActionLine(ticker: string, priceData: any): string {
   console.log('Price Action Debug - Raw Price Data:', JSON.stringify(priceData, null, 2));
   
   // Regular session data
+  // Use 'close' for regular trading hours close price (not lastTradePrice which may be extended hours)
   const regularLast = parseFloat(priceData.close || priceData.last || 0).toFixed(2);
-  const regularChangePercent = parseFloat(priceData.change_percent || 0).toFixed(2);
+  
+  // Calculate regular trading hours change percent from close and previousClose
+  // The API's changePercent may reflect extended hours, so we calculate regular hours separately
+  let regularChangePercent: string;
+  if (priceData.previousClose && priceData.previousClose > 0 && priceData.close) {
+    // Calculate from regular hours close vs previous close
+    // This gives us the regular trading hours performance
+    const regularChange = parseFloat(priceData.close) - parseFloat(priceData.previousClose);
+    const calculatedChangePercent = (regularChange / parseFloat(priceData.previousClose) * 100).toFixed(2);
+    regularChangePercent = calculatedChangePercent;
+  } else if (priceData.change && priceData.previousClose && priceData.previousClose > 0) {
+    // Fallback: calculate from change amount if close is not available
+    const calculatedChangePercent = (parseFloat(priceData.change.toString()) / parseFloat(priceData.previousClose.toString()) * 100).toFixed(2);
+    regularChangePercent = calculatedChangePercent;
+  } else {
+    // Last resort: use API field directly (but this may be extended hours)
+    const apiChangePercent = parseFloat(priceData.change_percent || 0);
+    regularChangePercent = apiChangePercent.toFixed(2);
+  }
+  
   const regularDisplayChangePercent = regularChangePercent.startsWith('-') ? regularChangePercent.substring(1) : regularChangePercent;
   
   // Extended hours data

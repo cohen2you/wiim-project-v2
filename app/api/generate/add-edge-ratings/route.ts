@@ -1,8 +1,7 @@
 import { NextResponse } from 'next/server';
-import OpenAI from 'openai';
 import { preserveHyperlinks, removeExistingSection } from '../../../../lib/hyperlink-preservation';
+import { aiProvider, type AIProvider } from '../../../../lib/aiProvider';
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const BENZINGA_EDGE_API_KEY = process.env.BENZINGA_EDGE_API_KEY!;
 
 async function fetchEdgeRatings(ticker: string) {
@@ -122,11 +121,13 @@ function analyzeEdgeSentiment(edgeData: any): string {
 
 export async function POST(request: Request) {
   try {
-    const { ticker, existingStory } = await request.json();
+    const { ticker, existingStory, aiProvider: providerOverride } = await request.json();
     
     if (!ticker || !existingStory) {
       return NextResponse.json({ error: 'Ticker and existing story are required.' }, { status: 400 });
     }
+    
+    const provider: AIProvider = providerOverride || aiProvider.getCurrentProvider();
 
     // Fetch Edge ratings
     const edgeData = await fetchEdgeRatings(ticker);
@@ -136,12 +137,12 @@ export async function POST(request: Request) {
     // Create Edge ratings section
     const edgeSection = edgeData 
       ? `BENZINGA EDGE RATINGS DATA TO ADD:
-Value Rank: ${edgeData.value_rank || 'N/A'}/100
-Growth Rank: ${edgeData.growth_rank || 'N/A'}/100  
-Quality Rank: ${edgeData.quality_rank || 'N/A'}/100
-Momentum Rank: ${edgeData.momentum_rank || 'N/A'}/100
+Value Rank: ${edgeData.value_rank || 'N/A'}
+Growth Rank: ${edgeData.growth_rank || 'N/A'}  
+Quality Rank: ${edgeData.quality_rank || 'N/A'}
+Momentum Rank: ${edgeData.momentum_rank || 'N/A'}
 
-CRITICAL: The above data contains the EXACT Edge ratings. You MUST use these exact numbers in your response.`
+CRITICAL: The above data contains the EXACT Edge ratings. You MUST use these exact numbers in your response. DO NOT include "/100" after the numbers.`
       : 'BENZINGA EDGE RATINGS: No Edge ratings data available.';
 
     const sentiment = analyzeEdgeSentiment(edgeData);
@@ -164,23 +165,34 @@ INSTRUCTIONS:
    - If average ranking is 50-69 (moderate): "moderate"  
    - If average ranking is 30-49 (weak): "weak"
    - If average ranking is below 30 (poor): "poor"
-4. Format as a short paragraph: "Benzinga Edge rankings show [SENTIMENT] fundamentals, with Value ranking [X]/100, Growth ranking [X]/100, Quality ranking [X]/100, and Momentum ranking [X]/100."
+4. Format as THREE paragraphs total:
+   - First paragraph: "Benzinga Edge rankings show [SENTIMENT] fundamentals, with Value ranking [X], Growth ranking [X], Quality ranking [X], and Momentum ranking [X]." DO NOT include "/100" after any ranking numbers.
+   - Second paragraph: Analyze the positive aspects. Discuss which rankings are particularly strong, what they indicate about the stock's fundamentals, and what this means for investors (e.g., "The impressive Growth and Quality rankings indicate...", "The strong Momentum ranking further suggests..."). Keep this paragraph focused on strengths and positive implications.
+   - Third paragraph: Analyze any concerns or considerations. Discuss weaker rankings, potential risks, or what value-focused investors should consider (e.g., "However, the lower Value ranking may indicate...", "This could be a consideration for..."). Then provide an overall conclusion that ties everything together.
 5. Keep the rest of the story exactly as it is
 6. Maintain the same writing style and tone
 7. If no Edge ratings are available, skip adding this section
 
-EXAMPLE: If the data shows Value: 75/100, Growth: 60/100, Quality: 80/100, Momentum: 70/100, your output should be "Benzinga Edge rankings show strong fundamentals, with Value ranking 75/100, Growth ranking 60/100, Quality ranking 80/100, and Momentum ranking 70/100."
+EXAMPLE: If the data shows Value: 4.54, Growth: 97.34, Quality: 85.43, Momentum: 77.8, your output should be:
+"Benzinga Edge rankings show strong fundamentals, with Value ranking 4.54, Growth ranking 97.34, Quality ranking 85.43, and Momentum ranking 77.8.
+
+The impressive Growth and Quality rankings indicate that the company is not only expanding effectively but also maintaining high standards in its operations, which is a positive sign for investors. The strong Momentum ranking further suggests that the stock is experiencing positive price movements, likely driven by favorable market conditions and investor sentiment.
+
+However, the lower Value ranking may indicate that the stock is currently priced at a premium, which could be a consideration for value-focused investors. Overall, these ratings reflect a robust outlook for the company, particularly in terms of growth potential and operational quality."
 
 Add the Benzinga Edge ratings section after the analyst ratings section now.`;
 
-    const completion = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages: [{ role: 'user', content: prompt }],
-      max_tokens: 1000,
-      temperature: 0.3,
-    });
+    const result = await aiProvider.generateCompletion(
+      [{ role: 'user', content: prompt }],
+      {
+        model: provider === 'gemini' ? 'gemini-3-pro-preview' : 'gpt-4o-mini',
+        temperature: 0.3,
+        maxTokens: 1000,
+      },
+      provider
+    );
 
-    const updatedStory = completion.choices[0].message?.content?.trim() || '';
+    const updatedStory = result.content.trim();
 
     if (!updatedStory) {
       return NextResponse.json({ error: 'Failed to add Edge ratings.' }, { status: 500 });
@@ -189,11 +201,18 @@ Add the Benzinga Edge ratings section after the analyst ratings section now.`;
     // Preserve existing hyperlinks
     const finalStory = preserveHyperlinks(existingStory, updatedStory);
 
+    // Extract the Edge ratings section for component display (should include both paragraphs)
+    // Match from "Benzinga Edge rankings" until the next major section starts or end of story
+    // This should capture both the first paragraph (with rankings) and second paragraph (with analysis)
+    const edgeRatingsMatch = finalStory.match(/Benzinga Edge rankings[\s\S]*?(?=\n\n(?:[A-Z][a-z]+:|Price Action:|Also Read:|Read Next:)|$)/i);
+    const edgeRatingsContent = edgeRatingsMatch ? edgeRatingsMatch[0].trim() : '';
+
     console.log('Add Edge Ratings: Successfully added Edge ratings to story');
 
     return NextResponse.json({ 
       story: finalStory,
-      edgeData
+      edgeData,
+      edgeRatings: edgeRatingsContent
     });
   } catch (error: any) {
     console.error('Error adding Edge ratings:', error);

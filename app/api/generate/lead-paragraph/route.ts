@@ -113,7 +113,19 @@ export async function POST(request: Request) {
     const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
     const today = new Date();
     const currentDay = today.getDay();
-    const tradingDay = days[currentDay];
+    
+    // If it's a weekend, use Friday as the last trading day
+    let tradingDay: string;
+    let isWeekend = false;
+    if (currentDay === 0) { // Sunday
+      tradingDay = 'Friday';
+      isWeekend = true;
+    } else if (currentDay === 6) { // Saturday
+      tradingDay = 'Friday';
+      isWeekend = true;
+    } else {
+      tradingDay = days[currentDay];
+    }
     
     // Determine the appropriate time context based on market session
     let timeContext = '';
@@ -128,7 +140,8 @@ export async function POST(request: Request) {
         timeContext = 'during after-hours trading';
         break;
       case 'closed':
-        timeContext = 'during regular trading hours';
+        // If it's a weekend, use past tense
+        timeContext = isWeekend ? 'during regular trading hours on Friday' : 'during regular trading hours';
         break;
     }
     
@@ -142,6 +155,7 @@ Rules:
 - Use the exact company name format provided: "${companyNameFormatted}"
 - INCLUDE the trading day (${tradingDay}) in the first sentence
 - Use the correct time context: "${timeContext}"
+${isWeekend ? '- CRITICAL: Today is a weekend. Markets are CLOSED on Saturday and Sunday. Use past tense and reference Friday as the last trading day. NEVER say the stock "traded" or "is trading" on Saturday or Sunday.' : ''}
 - NO specific percentages
 - NO exact prices
 - Exactly 2 sentences

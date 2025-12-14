@@ -61,6 +61,9 @@ export default function PRStoryGeneratorPage() {
 
   // Mode state
   const [useModularApproach, setUseModularApproach] = useState(true);
+  
+  // AI Provider state
+  const [aiProvider, setAiProvider] = useState<'openai' | 'gemini'>('openai');
 
   // Debug useEffect to monitor state changes
   useEffect(() => {
@@ -247,8 +250,14 @@ export default function PRStoryGeneratorPage() {
     }
   };
 
-  const handleAnalystNoteTextExtracted = (text: string) => {
+  const handleAnalystNoteTextExtracted = (text: string, tickerParam?: string) => {
     setPrimaryText(text);
+    // If ticker is provided and different, update it
+    if (tickerParam && tickerParam !== ticker) {
+      setTicker(tickerParam);
+    }
+    // Show the manual input section so user can see the extracted text
+    setShowManualInput(true);
   };
 
   const handleModularStoryUpdate = (story: string) => {
@@ -269,7 +278,8 @@ export default function PRStoryGeneratorPage() {
         body: JSON.stringify({ 
           ticker,
           scrapedContent: primaryText,
-          scrapedUrl: sourceUrl
+          scrapedUrl: sourceUrl,
+          aiProvider
         }),
       });
 
@@ -303,7 +313,8 @@ export default function PRStoryGeneratorPage() {
           scrapedContent: scrapedPrimaryContent,
           scrapedUrl: primarySourceUrl,
           contextContent: scrapedContextContent,
-          contextUrl: contextSourceUrl
+          contextUrl: contextSourceUrl,
+          aiProvider
         }),
       });
 
@@ -336,7 +347,8 @@ export default function PRStoryGeneratorPage() {
         body: JSON.stringify({ 
           ticker, 
           existingStory: article,
-          selectedArticles 
+          selectedArticles,
+          aiProvider
         }),
       });
       
@@ -386,7 +398,7 @@ export default function PRStoryGeneratorPage() {
 
     try {
       let endpoint = '';
-      let requestBody: any = { ticker };
+      let requestBody: any = { ticker, aiProvider };
 
       switch (type) {
         case 'wiiim':
@@ -441,6 +453,50 @@ export default function PRStoryGeneratorPage() {
           >
             Clear All Data
           </button>
+        </div>
+      </div>
+
+      {/* AI Provider Selector */}
+      <div style={{ marginBottom: 20, padding: '12px', backgroundColor: '#f0f9ff', borderRadius: '8px', border: '1px solid #0ea5e9' }}>
+        <label style={{ display: 'block', marginBottom: '8px', fontWeight: '500', color: '#0c4a6e', fontSize: '14px' }}>
+          AI Provider:
+        </label>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <button
+            onClick={() => setAiProvider('openai')}
+            style={{
+              padding: '8px 16px',
+              background: aiProvider === 'openai' ? '#10b981' : '#e5e7eb',
+              color: aiProvider === 'openai' ? 'white' : '#374151',
+              border: 'none',
+              borderRadius: '6px',
+              fontSize: '14px',
+              fontWeight: '500',
+              cursor: 'pointer',
+              transition: 'all 0.2s'
+            }}
+          >
+            OpenAI
+          </button>
+          <button
+            onClick={() => setAiProvider('gemini')}
+            style={{
+              padding: '8px 16px',
+              background: aiProvider === 'gemini' ? '#10b981' : '#e5e7eb',
+              color: aiProvider === 'gemini' ? 'white' : '#374151',
+              border: 'none',
+              borderRadius: '6px',
+              fontSize: '14px',
+              fontWeight: '500',
+              cursor: 'pointer',
+              transition: 'all 0.2s'
+            }}
+          >
+            Gemini
+          </button>
+        </div>
+        <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '8px' }}>
+          Currently using: <strong>{aiProvider === 'openai' ? 'OpenAI (GPT-4)' : 'Google Gemini'}</strong>
         </div>
       </div>
 
@@ -740,10 +796,13 @@ export default function PRStoryGeneratorPage() {
           {loadingTenArticles ? 'Fetching Posts...' : 'Fetch 10 Newest Posts'}
         </button>
         <button
-          onClick={() => setShowUploadSection(!showUploadSection)}
+          onClick={() => {
+            console.log('Analyst Note Upload button clicked, current state:', showUploadSection);
+            setShowUploadSection(!showUploadSection);
+          }}
           style={{ padding: '6px 12px' }}
         >
-          Analyst Note Upload
+          {showUploadSection ? 'Hide Analyst Note Upload' : 'Analyst Note Upload'}
         </button>
         <button
           onClick={() => setShowManualInput(!showManualInput)}
@@ -936,7 +995,8 @@ export default function PRStoryGeneratorPage() {
           <ModularStoryBuilder 
             ticker={ticker} 
             currentArticle={article || primaryText}
-            onStoryUpdate={handleModularStoryUpdate} 
+            onStoryUpdate={handleModularStoryUpdate}
+            aiProvider={aiProvider}
           />
         </div>
       )}
@@ -989,7 +1049,11 @@ export default function PRStoryGeneratorPage() {
       )}
       
       {showUploadSection && (
-        <AnalystNoteUpload onTextExtracted={handleAnalystNoteTextExtracted} ticker={ticker} />
+        <AnalystNoteUpload 
+          onTextExtracted={handleAnalystNoteTextExtracted} 
+          ticker={ticker}
+          aiProvider={aiProvider}
+        />
       )}
       
       {/* Customize Context Modal */}

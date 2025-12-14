@@ -46,7 +46,20 @@ export async function POST(req: Request) {
     const companyName = quote.companyStandardName || quote.name || symbol;
     const date = quote.closeDate ? new Date(quote.closeDate) : new Date();
     const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-    const dayOfWeek = dayNames[date.getDay()];
+    
+    // Get the day of week, but if today is a weekend, use Friday as the last trading day
+    const today = new Date();
+    const currentDay = today.getDay();
+    let dayOfWeek: string;
+    if (currentDay === 0) { // Sunday
+      dayOfWeek = 'Friday';
+    } else if (currentDay === 6) { // Saturday
+      dayOfWeek = 'Friday';
+    } else {
+      // Use the date from the quote if available, otherwise use today
+      dayOfWeek = dayNames[date.getDay()];
+    }
+    
     const marketStatus = getMarketStatus();
     
     // Regular session data
@@ -65,12 +78,12 @@ export async function POST(req: Request) {
     let priceActionText = '';
     
     if (marketStatus === 'open') {
-      priceActionText = `${symbol} Price Action: ${companyName} shares were ${regularUpDown} ${regularAbsChange}% at $${regularLastPrice} during regular trading hours on ${dayOfWeek}, according to Benzinga Pro.`;
+      priceActionText = `<strong>${symbol} Price Action:</strong> ${companyName} shares were ${regularUpDown} ${regularAbsChange}% at $${regularLastPrice} during regular trading hours on ${dayOfWeek}, according to Benzinga Pro.`;
     } else if (marketStatus === 'premarket') {
       if (hasExtendedHours) {
-        priceActionText = `${symbol} Price Action: ${companyName} shares were ${extUpDown} ${extAbsChange}% at $${extLastPrice} during premarket trading on ${dayOfWeek}, according to Benzinga Pro.`;
+        priceActionText = `<strong>${symbol} Price Action:</strong> ${companyName} shares were ${extUpDown} ${extAbsChange}% at $${extLastPrice} during premarket trading on ${dayOfWeek}, according to Benzinga Pro.`;
       } else {
-        priceActionText = `${symbol} Price Action: ${companyName} shares were trading during premarket hours on ${dayOfWeek}, according to Benzinga Pro.`;
+        priceActionText = `<strong>${symbol} Price Action:</strong> ${companyName} shares were trading during premarket hours on ${dayOfWeek}, according to Benzinga Pro.`;
       }
     } else if (marketStatus === 'afterhours') {
       if (hasExtendedHours) {
@@ -78,16 +91,16 @@ export async function POST(req: Request) {
         const regularVerb = regularChangePercent > 0 ? 'rose' : regularChangePercent < 0 ? 'fell' : 'were unchanged';
         const extVerb = extChangePercent > 0 ? 'up' : extChangePercent < 0 ? 'down' : 'unchanged';
         
-        priceActionText = `${symbol} Price Action: ${companyName} shares ${regularVerb} ${regularAbsChange}% to $${regularLastPrice} during regular trading hours, and were ${extVerb} ${extAbsChange}% at $${extLastPrice} during after-hours trading on ${dayOfWeek}, according to Benzinga Pro.`;
+        priceActionText = `<strong>${symbol} Price Action:</strong> ${companyName} shares ${regularVerb} ${regularAbsChange}% to $${regularLastPrice} during regular trading hours, and were ${extVerb} ${extAbsChange}% at $${extLastPrice} during after-hours trading on ${dayOfWeek}, according to Benzinga Pro.`;
       } else {
         // Fallback to regular session data
         const regularVerb = regularChangePercent > 0 ? 'rose' : regularChangePercent < 0 ? 'fell' : 'were unchanged';
-        priceActionText = `${symbol} Price Action: ${companyName} shares ${regularVerb} ${regularAbsChange}% to $${regularLastPrice} during regular trading hours on ${dayOfWeek}, according to Benzinga Pro.`;
+        priceActionText = `<strong>${symbol} Price Action:</strong> ${companyName} shares ${regularVerb} ${regularAbsChange}% to $${regularLastPrice} during regular trading hours on ${dayOfWeek}, according to Benzinga Pro.`;
       }
     } else {
       // Market is closed
       const regularVerb = regularChangePercent > 0 ? 'rose' : regularChangePercent < 0 ? 'fell' : 'were unchanged';
-      priceActionText = `${symbol} Price Action: ${companyName} shares ${regularVerb} ${regularAbsChange}% to $${regularLastPrice} during regular trading hours on ${dayOfWeek}, according to Benzinga Pro.`;
+      priceActionText = `<strong>${symbol} Price Action:</strong> ${companyName} shares ${regularVerb} ${regularAbsChange}% to $${regularLastPrice} during regular trading hours on ${dayOfWeek}, according to Benzinga Pro.`;
     }
     
     return NextResponse.json({ priceAction: priceActionText });

@@ -1,9 +1,5 @@
 import { NextResponse } from 'next/server';
-import OpenAI from 'openai';
-
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+import { aiProvider, type AIProvider } from '../../../../lib/aiProvider';
 
 // Helper function to fetch company name from Benzinga API
 async function fetchCompanyName(ticker: string): Promise<string> {
@@ -33,7 +29,8 @@ async function fetchCompanyName(ticker: string): Promise<string> {
 
 export async function POST(req: Request) {
   try {
-    const { ticker, scrapedContent, scrapedUrl, contextContent, contextUrl } = await req.json();
+    const { ticker, scrapedContent, scrapedUrl, contextContent, contextUrl, aiProvider: providerOverride } = await req.json();
+    const provider: AIProvider = providerOverride || 'openai';
 
     // Extract publication date from article content
     let prDate = '';
@@ -147,11 +144,24 @@ export async function POST(req: Request) {
     const companyName = await fetchCompanyName(ticker);
     const companyNameFormatted = `<strong>${companyName}</strong> (NASDAQ: ${ticker.toUpperCase()})`;
     
-    // Get current day
+    // Get current day and determine trading day
+    // Markets are closed on weekends (Saturday and Sunday)
     const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
     const today = new Date();
     const currentDay = today.getDay();
-    const tradingDay = days[currentDay];
+    
+    // If it's a weekend, use Friday as the last trading day
+    let tradingDay: string;
+    let isWeekend = false;
+    if (currentDay === 0) { // Sunday
+      tradingDay = 'Friday';
+      isWeekend = true;
+    } else if (currentDay === 6) { // Saturday
+      tradingDay = 'Friday';
+      isWeekend = true;
+    } else {
+      tradingDay = days[currentDay];
+    }
 
     // Extract event dates from article content and determine time context
     let timeContext = '';
@@ -474,6 +484,14 @@ TIME CONTEXT:${timeContext} Use this information to determine if events mentione
 
 CURRENT DATE: Today is ${today.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}. Use this as your reference point for determining if events are past, present, or future.
 
+CRITICAL MARKET HOURS INFORMATION:
+${isWeekend ? '- Today is a weekend (Saturday or Sunday). Stock markets are CLOSED on weekends and do NOT trade on Saturday or Sunday.' : ''}
+- Stock markets are ONLY open Monday through Friday (excluding holidays)
+- Markets are CLOSED on Saturday and Sunday
+- NEVER write that a stock "traded" or "is trading" on Saturday or Sunday
+- If today is a weekend, reference the last trading day (Friday) instead
+- Use phrases like "closed higher on Friday" or "ended the week" when writing about weekend stories
+
 Based on the following cleaned article content${contextContent ? ' and context information' : ''}, create a complete news story with the EXACT structure:
 
 1. HEADLINE: Format as "[Company] Stock Is Trending ${tradingDay}: What's Going On?" (no quotes, no bold formatting)
@@ -508,23 +526,28 @@ HYPERLINK REQUIREMENTS:
 
 Generate the complete story with this exact structure:`;
 
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4",
-             messages: [
-         {
-           role: "system",
-           content: "You are a professional financial journalist writing for a financial news website. You must create properly structured news stories with headlines, lead paragraphs, and main content. Never return raw scraped content - always create a new, well-formatted story based on the information provided."
-         },
+    const result = await aiProvider.generateCompletion(
+      [
+        {
+          role: "system",
+          content: `You are a professional financial journalist writing for a financial news website. You must create properly structured news stories with headlines, lead paragraphs, and main content. Never return raw scraped content - always create a new, well-formatted story based on the information provided.
+
+CRITICAL: Stock markets are CLOSED on weekends (Saturday and Sunday). NEVER write that a stock "traded" or "is trading" on Saturday or Sunday. If the current day is a weekend, reference the last trading day (Friday) instead. Use past tense and phrases like "closed higher on Friday" or "ended the week" when writing about weekend stories.`
+        },
         {
           role: "user",
           content: prompt
         }
       ],
-      temperature: 0.7,
-      max_tokens: 1500,
-    });
+      {
+        model: provider === 'gemini' ? 'gemini-3-pro-preview' : 'gpt-4',
+        temperature: 0.7,
+        maxTokens: 1500,
+      },
+      provider
+    );
 
-    const story = completion.choices[0]?.message?.content?.trim();
+    const story = result.content.trim();
 
     if (!story) {
       return NextResponse.json({ error: 'Failed to generate story' }, { status: 500 });
