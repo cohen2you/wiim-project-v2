@@ -242,6 +242,8 @@ export async function POST(req: Request) {
    - Create intrigue: "Mystery Customer", "Ignore The Noise", "Beat Goes On"
    - Include specific numbers when impactful: "$73 billion", "$500 target"
    - Keep under 100 characters when possible
+   - **CRITICAL: If you use quotation marks in the headline, use SINGLE QUOTES (') not double quotes ("). Example: 'Accelerating Momentum' not "Accelerating Momentum".**
+   - **CRITICAL: If you use quotation marks in the headline, the quoted text MUST be an exact word-for-word copy from the source analyst note. Do NOT invent quotes or paraphrase. If you cannot find an exact quote in the source, do not use quotation marks in the headline.**
 
 2. **NO DATELINE:** Do NOT include formal wire service datelines. Jump straight into the lede paragraph.
 
@@ -296,7 +298,7 @@ ${truncatedText}
       [
         {
           role: "system",
-          content: "You are an editorial financial journalist writing for Benzinga, a fast-paced trading news site. Your articles are read by traders who scan content quickly but appreciate compelling narratives. Create editorial, story-driven content with intrigue, conflict, and tradeable information. Use narrative hooks, create story elements (like 'mystery customer'), and include analyst quotes to support the narrative. Use 2-3 editorial section headers (e.g., 'The Broadcom Thesis', 'The Mystery Customer Catalyst'). NEVER include formal datelines or conclusion sections. Do NOT generate a Price Action line - it will be added automatically. Use HTML <strong> tags for bold text, NOT markdown ** syntax. CRITICAL: You MUST bold ALL section headers/subheads using <strong> tags. ONLY bold company names on first mention - do NOT bold any other text (no numbers, metrics, analyst names, firms, or phrases) except for section headers. Always include the analyst's name along with the firm name. On first mention, bold ONLY the company name (e.g., <strong>Broadcom Inc.</strong>), then include the full exchange ticker format (NASDAQ:AVGO) without bolding and with no space after the colon. MOST IMPORTANT: Keep ALL paragraphs SHORT - maximum 2 sentences per paragraph. Break up any long thoughts into multiple short, punchy paragraphs. Never create dense blocks of text. QUOTE ACCURACY IS ABSOLUTELY CRITICAL: If you use quotation marks, the text inside MUST be a word-for-word exact copy from the source. Do NOT reorder words, change word forms, or paraphrase. Example: If source says 'momentum is accelerating', you MUST write 'momentum is accelerating' - NOT 'accelerating momentum'. Before using ANY quote, search the source text for the exact phrase word-for-word. If you cannot find the exact phrase, do NOT use quotation marks - paraphrase without quotes instead."
+          content: "You are an editorial financial journalist writing for Benzinga, a fast-paced trading news site. Your articles are read by traders who scan content quickly but appreciate compelling narratives. Create editorial, story-driven content with intrigue, conflict, and tradeable information. Use narrative hooks, create story elements (like 'mystery customer'), and include analyst quotes to support the narrative. Use 2-3 editorial section headers (e.g., 'The Broadcom Thesis', 'The Mystery Customer Catalyst'). NEVER include formal datelines or conclusion sections. Do NOT generate a Price Action line - it will be added automatically. Use HTML <strong> tags for bold text, NOT markdown ** syntax. CRITICAL: You MUST bold ALL section headers/subheads using <strong> tags. ONLY bold company names on first mention - do NOT bold any other text (no numbers, metrics, analyst names, firms, or phrases) except for section headers. Always include the analyst's name along with the firm name. On first mention, bold ONLY the company name (e.g., <strong>Broadcom Inc.</strong>), then include the full exchange ticker format (NASDAQ:AVGO) without bolding and with no space after the colon. MOST IMPORTANT: Keep ALL paragraphs SHORT - maximum 2 sentences per paragraph. Break up any long thoughts into multiple short, punchy paragraphs. Never create dense blocks of text. QUOTE ACCURACY IS ABSOLUTELY CRITICAL IN HEADLINES AND BODY: If you use quotation marks anywhere (headline or body), the text inside MUST be a word-for-word exact copy from the source. Do NOT reorder words, change word forms, or paraphrase. Example: If source says 'momentum is accelerating', you MUST write 'momentum is accelerating' - NOT 'accelerating momentum'. Before using ANY quote in the headline or body, search the source text for the exact phrase word-for-word. If you cannot find the exact phrase, do NOT use quotation marks - paraphrase without quotes instead."
         },
         {
           role: "user",
@@ -322,34 +324,92 @@ ${truncatedText}
     // This ensures compatibility even if the AI occasionally uses markdown
     article = article.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
     
-    // Verify quotes match source exactly (strict word-order matching)
-    const quotes = article.match(/"([^"]+)"/g);
+    // Extract headline (first line before any blank line or paragraph break)
+    const headlineMatch = article.match(/^([^\n]+)/);
+    let headline = headlineMatch ? headlineMatch[1] : '';
+    
+    // Convert double quotes to single quotes in headline
+    headline = headline.replace(/"([^"]+)"/g, "'$1'");
+    
+    // Update article with corrected headline
+    if (headlineMatch) {
+      article = headline + article.substring(headline.length);
+    }
+    
+    // Verify quotes in headline match source exactly
+    if (headline) {
+      // Match single quotes (but not apostrophes in contractions) - look for quotes with at least 2 characters
+      // Pattern: ' followed by at least 2 non-quote chars, then '
+      const singleQuotes = headline.match(/'([^']{2,})'/g) || [];
+      // Match double quotes
+      const doubleQuotes = headline.match(/"([^"]{2,})"/g) || [];
+      const allHeadlineQuotes = [...singleQuotes, ...doubleQuotes];
+      const sourceTextLower = analystNoteText.toLowerCase();
+      
+      allHeadlineQuotes.forEach(quote => {
+        // Extract just the quoted text, removing the quote marks
+        const quoteText = quote.replace(/^['"]|['"]$/g, '').trim();
+        // Skip very short quotes (likely apostrophes) - need at least 3 chars
+        if (quoteText.length < 3) {
+          return;
+        }
+        
+        const quoteTextLower = quoteText.toLowerCase();
+        
+        // Check if quote appears in source (exact match first)
+        if (!sourceTextLower.includes(quoteTextLower)) {
+          // For headline, be strict - if exact match not found, warn
+          console.warn(`⚠️ INACCURATE QUOTE IN HEADLINE: "${quoteText}" - This exact phrase was not found in the source text.`);
+        }
+      });
+    }
+    
+    // Verify quotes in body match source exactly (skip headline, already checked)
+    // Remove headline from article for body quote checking
+    const bodyText = headline ? article.substring(headline.length) : article;
+    const quotes = bodyText.match(/"([^"]{4,})"/g) || bodyText.match(/'([^']{4,})'/g);
     if (quotes) {
       const sourceTextLower = analystNoteText.toLowerCase();
       quotes.forEach(quote => {
-        const quoteText = quote.replace(/"/g, '').trim();
+        // Extract just the quoted text
+        const quoteText = quote.replace(/^['"]|['"]$/g, '').trim();
+        // Skip very short quotes (likely apostrophes or single words that might be accurate)
+        if (quoteText.length < 4) {
+          return;
+        }
+        
         const quoteTextLower = quoteText.toLowerCase();
         
         // First check: exact match (case-insensitive)
-        if (!sourceTextLower.includes(quoteTextLower)) {
-          // Second check: check if words are in same order (allowing for punctuation/whitespace differences)
-          const quoteWords = quoteTextLower.split(/\s+/).filter(w => w.length > 0);
-          if (quoteWords.length > 0) {
-            // Try to find the words in the same order in source
-            let sourceIndex = 0;
-            let allWordsFoundInOrder = true;
-            for (const word of quoteWords) {
-              const wordIndex = sourceTextLower.indexOf(word, sourceIndex);
-              if (wordIndex === -1) {
-                allWordsFoundInOrder = false;
-                break;
-              }
+        if (sourceTextLower.includes(quoteTextLower)) {
+          // Quote found exactly, skip warning
+          return;
+        }
+        
+        // Second check: check if words are in same order (more lenient for body text)
+        const quoteWords = quoteTextLower.split(/\s+/).filter(w => w.length > 2); // Only check words longer than 2 chars
+        if (quoteWords.length > 0) {
+          // Check if all words appear in source in roughly the same order
+          let sourceIndex = 0;
+          let wordsFoundInOrder = 0;
+          for (const word of quoteWords) {
+            const wordIndex = sourceTextLower.indexOf(word, sourceIndex);
+            if (wordIndex !== -1) {
+              wordsFoundInOrder++;
               sourceIndex = wordIndex + word.length;
+            } else {
+              // Word not found, try from beginning
+              const wordIndexFromStart = sourceTextLower.indexOf(word);
+              if (wordIndexFromStart !== -1) {
+                wordsFoundInOrder++;
+                sourceIndex = wordIndexFromStart + word.length;
+              }
             }
-            
-            if (!allWordsFoundInOrder) {
-              console.warn(`⚠️ INACCURATE QUOTE DETECTED: "${quoteText}" - This exact phrase was not found in the source text. The AI may have paraphrased instead of using an exact quote.`);
-            }
+          }
+          
+          // If less than 70% of words found in order, it's likely inaccurate (more lenient for body)
+          if (wordsFoundInOrder / quoteWords.length < 0.7) {
+            console.warn(`⚠️ INACCURATE QUOTE DETECTED: "${quoteText}" - This exact phrase was not found in the source text. The AI may have paraphrased instead of using an exact quote.`);
           }
         }
       });
