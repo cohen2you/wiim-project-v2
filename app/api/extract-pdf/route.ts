@@ -37,7 +37,8 @@ async function parsePdfBuffer(buffer: Buffer): Promise<string> {
       originalError.apply(console, args);
     };
 
-    const pdfParser = new PDFParser(null); // Text content only
+    // @ts-ignore - pdf2json constructor accepts number for text-only mode, but types say boolean
+    const pdfParser = new PDFParser(null, 1); // 1 = Text content only
 
     pdfParser.on("pdfParser_dataError", (errData: any) => {
       // Restore console methods before rejecting
