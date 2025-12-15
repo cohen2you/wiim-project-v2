@@ -2032,8 +2032,8 @@ async function fetchMarketContext(): Promise<MarketContext | null> {
       }));
 
     // Calculate market breadth
-    const advancers = sectors.filter(s => s.change > 0).length;
-    const decliners = sectors.filter(s => s.change < 0).length;
+    const advancers = sectors.filter((s: { name: string; ticker: string; change: number }) => s.change > 0).length;
+    const decliners = sectors.filter((s: { name: string; ticker: string; change: number }) => s.change < 0).length;
     const ratio = decliners > 0 ? (advancers / decliners).toFixed(1) : 'N/A';
 
     return {
