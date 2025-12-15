@@ -49,7 +49,7 @@ export default function AnalystNoteUpload({ onTextExtracted, ticker, aiProvider 
         // This is an external update (e.g., new article generated)
         // Save cursor position if user is editing
         const selection = window.getSelection();
-        const range = selection?.rangeCount > 0 ? selection.getRangeAt(0).cloneRange() : null;
+        const range = selection && selection.rangeCount && selection.rangeCount > 0 ? selection.getRangeAt(0).cloneRange() : null;
         const hadFocus = document.activeElement === articleEditorRef.current;
         
         // Update content
