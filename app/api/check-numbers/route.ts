@@ -335,8 +335,8 @@ function extractBodyQuotes(article: string): Array<{ quote: string; context: str
   let cleanBody = body.replace(/<[^>]+>/g, ' ');
   cleanBody = cleanBody.replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&#39;/g, "'");
   
-  // Match double quotes in body - must be at least 3 characters, max 500 to avoid errors
-  const doubleQuotePattern = /"([^"]{3,500})"/g;
+  // Match double quotes in body - must be at least 10 characters and 2 words, max 500 to avoid errors
+  const doubleQuotePattern = /"([^"]{10,500})"/g;
   let match;
   while ((match = doubleQuotePattern.exec(cleanBody)) !== null) {
     const quoteText = match[1].trim();
@@ -346,8 +346,29 @@ function extractBodyQuotes(article: string): Array<{ quote: string; context: str
       continue;
     }
     
-    // Skip if it's just a single character or very short (likely not a quote)
-    if (quoteText.length < 3) {
+    // Skip if quote is too short (less than 10 characters)
+    if (quoteText.length < 10) {
+      continue;
+    }
+    
+    // Skip if quote doesn't contain at least 2 words (to filter out things like " and " or "s latest")
+    const wordCount = quoteText.split(/\s+/).filter(w => w.length > 0).length;
+    if (wordCount < 2) {
+      continue;
+    }
+    
+    // Skip if quote starts with a lowercase letter followed by a space (likely mid-sentence fragment)
+    // But allow if it's a proper quote that happens to start with lowercase
+    // We'll be more lenient here and let the matching logic handle it
+    
+    // Skip quotes that are clearly not direct quotes (like possessives or fragments)
+    // Check if quote starts with just a letter and space (e.g., "s latest", " and ")
+    if (/^[a-z]\s/.test(quoteText) && quoteText.length < 20) {
+      continue;
+    }
+    
+    // Skip quotes that are just punctuation or very short phrases
+    if (/^[^\w]+\s*$/.test(quoteText) || quoteText.split(/\s+/).filter(w => w.length > 2).length < 2) {
       continue;
     }
     
@@ -415,16 +436,40 @@ function findQuoteInSource(articleQuote: string, sourceText: string): { found: b
     return { found: true, context: normalizedSourceText.substring(start, end).trim() };
   }
   
-  // Third try: check with optional leading article (a, an, the)
+  // Third try: check with optional leading article (a, an, the) or other common leading words
   const escapedQuote = quoteWithoutTrailingPunct.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const quoteWithArticle = `(?:a |an |the )?${escapedQuote}`;
-  const articlePattern = new RegExp(quoteWithArticle, 'i');
-  const articleMatch = sourceTextLower.match(articlePattern);
-  if (articleMatch && articleMatch.index !== undefined) {
-    const index = articleMatch.index;
+  // Allow for common leading phrases that might be omitted in the quote
+  const leadingPhrases = [
+    '(?:which |that |who |what |where |when |why |how )?',
+    '(?:a |an |the )?',
+    '(?:to |for |from |with |by |in |on |at |of )?',
+  ];
+  const quoteWithLeading = leadingPhrases.join('') + escapedQuote;
+  const leadingPattern = new RegExp(quoteWithLeading, 'i');
+  const leadingMatch = sourceTextLower.match(leadingPattern);
+  if (leadingMatch && leadingMatch.index !== undefined) {
+    const index = leadingMatch.index;
     const start = Math.max(0, index - 50);
-    const end = Math.min(normalizedSourceText.length, index + articleMatch[0].length + 50);
+    const end = Math.min(normalizedSourceText.length, index + leadingMatch[0].length + 50);
     return { found: true, context: normalizedSourceText.substring(start, end).trim() };
+  }
+  
+  // Third-b: Try matching the quote as a substring within a larger phrase
+  // This handles cases where the quote starts mid-sentence (e.g., "set up..." matching "which should set up...")
+  // For quotes longer than 20 characters, check if the quote text appears anywhere in the source
+  // This allows for quotes that are extracted mid-sentence
+  if (quoteWithoutTrailingPunct.length > 20) {
+    // Escape the quote for regex, but allow for word boundaries
+    const escapedQuoteForSubstring = quoteWithoutTrailingPunct.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    // Look for the quote text as a substring (not requiring word boundaries at the start)
+    const substringPattern = new RegExp(escapedQuoteForSubstring, 'i');
+    const substringMatch = sourceTextLower.match(substringPattern);
+    if (substringMatch && substringMatch.index !== undefined) {
+      const index = substringMatch.index;
+      const start = Math.max(0, index - 50);
+      const end = Math.min(normalizedSourceText.length, index + substringMatch[0].length + 50);
+      return { found: true, context: normalizedSourceText.substring(start, end).trim() };
+    }
   }
   
   // Fourth try: check with trailing punctuation variations
