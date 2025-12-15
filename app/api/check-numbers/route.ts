@@ -91,6 +91,7 @@ function extractNumbers(text: string): Array<{ value: string; context: string; i
   
   // Remove duplicates (same value and similar context)
   // Also normalize values by removing trailing commas and letters
+  // IMPORTANT: If we have both "$37 billion" and "37 billion", prefer the one with currency symbol
   const uniqueNumbers: Array<{ value: string; context: string; index: number }> = [];
   for (const num of numbers) {
     // Normalize: lowercase, remove commas, remove trailing comma+letter patterns (e.g., "$450, t" -> "$450")
@@ -99,11 +100,41 @@ function extractNumbers(text: string): Array<{ value: string; context: string; i
       .replace(/,/g, '')
       .trim();
     
-    const isDuplicate = uniqueNumbers.some(existing => {
+    // Extract numeric part and unit for comparison (to catch "$37 billion" vs "37 billion")
+    const numericPart = normalizedValue.replace(/[^\d.,]/g, '');
+    const hasCurrency = normalizedValue.includes('$');
+    const hasUnit = /\b(billion|million|trillion|B|M|T|%|x)\b/i.test(normalizedValue);
+    
+    const isDuplicate = uniqueNumbers.some((existing, idx) => {
       let existingNormalized = existing.value.toLowerCase()
         .replace(/,\s*[a-zA-Z]$/, '') // Remove trailing ", t" or similar
         .replace(/,/g, '')
         .trim();
+      
+      const existingNumericPart = existingNormalized.replace(/[^\d.,]/g, '');
+      const existingHasCurrency = existingNormalized.includes('$');
+      const existingHasUnit = /\b(billion|million|trillion|B|M|T|%|x)\b/i.test(existingNormalized);
+      
+      // Check if same numeric value and unit
+      if (numericPart === existingNumericPart && hasUnit === existingHasUnit) {
+        // If same number with same unit, prefer the one with currency symbol
+        if (hasCurrency && !existingHasCurrency) {
+          // Replace the existing one with the currency version
+          uniqueNumbers[idx] = num;
+          return true; // Mark as duplicate to skip adding
+        } else if (!hasCurrency && existingHasCurrency) {
+          // Keep the existing currency version, skip this one
+          return true;
+        }
+        // Both have or both don't have currency - if they're the same number with same unit,
+        // they're duplicates regardless of distance (e.g., "$37 billion" mentioned twice)
+        // Only keep if they're in very different contexts (more than 500 chars apart)
+        if (Math.abs(existing.index - num.index) < 500) {
+          return true; // Too close, likely duplicate
+        }
+      }
+      
+      // Exact match check
       return existingNormalized === normalizedValue && 
              Math.abs(existing.index - num.index) < 100;
     });
@@ -170,18 +201,24 @@ function findNumberInSource(articleNumber: string, articleContext: string, sourc
   }
   
   if (hasBillion) {
-    // Must match with billion: "35 billion" or "35B"
+    // Must match with billion: "35 billion", "35B", "$35 billion", "~$35 billion"
     patterns.push(new RegExp(`${escapedNumber}\\s+(billion|B)\\b`, 'gi'));
+    // Also match with currency symbol (in case article has "37 billion" but source has "$37 billion")
+    patterns.push(new RegExp(`(?:~|\\$)?\\s*${escapedNumber}\\s+(billion|B)\\b`, 'gi'));
   }
   
   if (hasMillion) {
-    // Must match with million: "35 million" or "35M"
+    // Must match with million: "35 million", "35M", "$35 million", "~$35 million"
     patterns.push(new RegExp(`${escapedNumber}\\s+(million|M)\\b`, 'gi'));
+    // Also match with currency symbol
+    patterns.push(new RegExp(`(?:~|\\$)?\\s*${escapedNumber}\\s+(million|M)\\b`, 'gi'));
   }
   
   if (hasTrillion) {
-    // Must match with trillion: "35 trillion" or "35T"
+    // Must match with trillion: "35 trillion", "35T", "$35 trillion", "~$35 trillion"
     patterns.push(new RegExp(`${escapedNumber}\\s+(trillion|T)\\b`, 'gi'));
+    // Also match with currency symbol
+    patterns.push(new RegExp(`(?:~|\\$)?\\s*${escapedNumber}\\s+(trillion|T)\\b`, 'gi'));
   }
   
   if (hasMultiplier) {
@@ -397,6 +434,34 @@ function extractBodyQuotes(article: string): Array<{ quote: string; context: str
     // Skip quotes that are just punctuation or very short phrases
     if (/^[^\w]+\s*$/.test(quoteText) || quoteText.split(/\s+/).filter(w => w.length > 2).length < 2) {
       continue;
+    }
+    
+    // Skip quotes that end with incomplete sentences (e.g., " will create a ", " marks the start of a ")
+    // These are typically fragments that shouldn't be quotes
+    if (/\s+(a|an|the|this|that|these|those)\s*$/i.test(quoteText)) {
+      continue;
+    }
+    
+    // Skip quotes that start with section headers (like " Navigating the Patent Cliff")
+    // Section headers are usually bolded and shouldn't be in quotes
+    if (/^[A-Z][a-z]+\s+the\s+[A-Z]/.test(quoteText) && quoteText.length < 100) {
+      // Check if it looks like a section header (title case, starts with verb/noun)
+      const firstWords = quoteText.split(/\s+/).slice(0, 3).join(' ');
+      if (/^[A-Z][a-z]+(\s+[A-Z][a-z]+)*\s+the\s+[A-Z]/.test(firstWords)) {
+        continue;
+      }
+    }
+    
+    // Skip quotes that span across what looks like section boundaries
+    // If a quote contains multiple capitalized words at the start (likely section headers), skip it
+    const words = quoteText.split(/\s+/);
+    if (words.length > 5) {
+      const firstFewWords = words.slice(0, 5);
+      const capitalizedCount = firstFewWords.filter(w => /^[A-Z]/.test(w)).length;
+      // If 3+ of first 5 words are capitalized, it might be spanning a section header
+      if (capitalizedCount >= 3 && quoteText.length > 150) {
+        continue;
+      }
     }
     
     const quote = match[0]; // Full quote with marks
