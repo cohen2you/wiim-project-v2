@@ -2051,7 +2051,7 @@ async function fetchMarketContext(): Promise<MarketContext | null> {
 
 // Generate comprehensive technical analysis using AI provider
 
-async function generateTechnicalAnalysis(data: TechnicalAnalysisData, provider?: AIProvider, newsContext?: { scrapedContent?: string; selectedArticles?: any[] }, marketContext?: MarketContext | null): Promise<string> {
+async function generateTechnicalAnalysis(data: TechnicalAnalysisData, provider?: AIProvider, newsContext?: { scrapedContent?: string; selectedArticles?: any[]; newsUrl?: string; primaryArticle?: any }, marketContext?: MarketContext | null): Promise<string> {
 
   try {
 
