@@ -34,19 +34,31 @@ function extractNumbers(text: string): Array<{ value: string; context: string; i
   // Remove HTML tags for cleaner extraction
   const cleanText = text.replace(/<[^>]+>/g, ' ');
   
-  // Pattern 1: Currency amounts like $73 billion, $500, $460, $50 billion, $100 billion
+  // Pattern 1: Currency amounts like $73 billion, $500, $460, $50 billion, $100 billion, $1.5bn
+  // Also handle ranges like "$1-1.5 billion" - extract both numbers
   // Use word boundary to avoid capturing trailing commas/letters (e.g., "$450, t" should be just "$450")
-  const currencyPattern = /\$([\d,]+(?:\.[\d]+)?)\s*(billion|million|trillion|B|M|T)?\b/gi;
+  const currencyPattern = /\$([\d,]+(?:\.[\d]+)?)(?:-([\d,]+(?:\.[\d]+)?))?\s*(billion|million|trillion|B|M|T|bn|mn)?\b/gi;
   let match;
   while ((match = currencyPattern.exec(cleanText)) !== null) {
-    // Clean up the value - remove any trailing non-numeric characters that might have been captured
-    let value = match[0].trim();
-    // Remove trailing comma and any single letter that might have been captured
+    // Extract the first number
+    let value = '$' + match[1] + (match[3] ? ' ' + match[3] : '');
     value = value.replace(/,\s*[a-zA-Z]$/, '').trim();
     const start = Math.max(0, match.index - 50);
     const end = Math.min(cleanText.length, match.index + match[0].length + 50);
     const context = cleanText.substring(start, end).trim();
     numbers.push({ value, context, index: match.index });
+    
+    // If there's a range (second number), extract it too
+    if (match[2]) {
+      const rangeValue = match[2] + (match[3] ? ' ' + match[3] : '');
+      const rangeValueClean = rangeValue.replace(/,\s*[a-zA-Z]$/, '').trim();
+      // Find the index of the second number in the match
+      const rangeIndex = match.index + match[0].indexOf(match[2]);
+      const rangeStart = Math.max(0, rangeIndex - 50);
+      const rangeEnd = Math.min(cleanText.length, rangeIndex + match[2].length + 50);
+      const rangeContext = cleanText.substring(rangeStart, rangeEnd).trim();
+      numbers.push({ value: rangeValueClean, context: rangeContext, index: rangeIndex });
+    }
   }
   
   // Pattern 2: Percentages like 11.43%, 73%, 71%
@@ -59,8 +71,9 @@ function extractNumbers(text: string): Array<{ value: string; context: string; i
     numbers.push({ value, context, index: match.index });
   }
   
-  // Pattern 3: Large numbers that might be mentioned without $ (like 73 billion, 10 gigawatts)
-  const largeNumberPattern = /\b([\d,]+(?:\.[\d]+)?)\s+(billion|million|trillion|gigawatts?|GW|B|M|T)\b/gi;
+  // Pattern 3: Large numbers that might be mentioned without $ (like 73 billion, 10 gigawatts, 1.5bn)
+  // Also handle ranges like "$1-1.5 billion" by extracting the second number
+  const largeNumberPattern = /\b([\d,]+(?:\.[\d]+)?)\s+(billion|million|trillion|gigawatts?|GW|B|M|T|bn|mn)\b/gi;
   while ((match = largeNumberPattern.exec(cleanText)) !== null) {
     const value = match[0].trim();
     const start = Math.max(0, match.index - 50);
@@ -201,10 +214,12 @@ function findNumberInSource(articleNumber: string, articleContext: string, sourc
   }
   
   if (hasBillion) {
-    // Must match with billion: "35 billion", "35B", "$35 billion", "~$35 billion"
-    patterns.push(new RegExp(`${escapedNumber}\\s+(billion|B)\\b`, 'gi'));
-    // Also match with currency symbol (in case article has "37 billion" but source has "$37 billion")
-    patterns.push(new RegExp(`(?:~|\\$)?\\s*${escapedNumber}\\s+(billion|B)\\b`, 'gi'));
+    // Must match with billion: "35 billion", "35B", "35bn", "$35 billion", "~$35 billion", "$35bn"
+    patterns.push(new RegExp(`${escapedNumber}\\s+(billion|B|bn)\\b`, 'gi'));
+    // Also match with currency symbol (in case article has "37 billion" but source has "$37 billion" or "$37bn")
+    patterns.push(new RegExp(`(?:~|\\$)?\\s*${escapedNumber}\\s*(billion|B|bn)\\b`, 'gi'));
+    // Also match without space (e.g., "1.5bn" or "$1.5bn")
+    patterns.push(new RegExp(`(?:~|\\$)?\\s*${escapedNumber}(billion|B|bn)\\b`, 'gi'));
   }
   
   if (hasMillion) {
