@@ -22,8 +22,9 @@ interface QuoteCheckResult {
   found: boolean;
   articleContext: string;
   sourceContext?: string;
-  status: 'exact' | 'not_found';
+  status: 'exact' | 'paraphrased' | 'not_found';
   source?: 'headline' | 'body'; // Track where quote came from
+  similarityScore?: number; // For paraphrased quotes, how similar (0-1)
 }
 
 // Extract all numbers from text (including currency, percentages, etc.)
@@ -124,40 +125,157 @@ function normalizeNumber(value: string): string {
     .trim();
 }
 
-// Check if a number from article exists in source text
-function findNumberInSource(articleNumber: string, sourceText: string): { found: boolean; context?: string } {
-  const normalizedArticle = normalizeNumber(articleNumber);
+// Check if a number from article exists in source text with matching context
+function findNumberInSource(articleNumber: string, articleContext: string, sourceText: string): { found: boolean; context?: string } {
+  // Extract the unit/type from the article number (%, $, billion, etc.)
+  const hasPercent = articleNumber.includes('%');
+  const hasCurrency = articleNumber.includes('$');
+  const hasBillion = /\b(billion|B)\b/i.test(articleNumber);
+  const hasMillion = /\b(million|M)\b/i.test(articleNumber);
+  const hasTrillion = /\b(trillion|T)\b/i.test(articleNumber);
+  const hasMultiplier = articleNumber.includes('x');
+  const hasYear = /\b(20\d{2}|CY\d{2}|FY\d{2}|2H\d{2}|1H\d{2})\b/i.test(articleNumber);
   
-  // Try exact match first
-  const exactMatch = sourceText.toLowerCase().includes(normalizedArticle);
-  if (exactMatch) {
-    const index = sourceText.toLowerCase().indexOf(normalizedArticle);
-    const start = Math.max(0, index - 50);
-    const end = Math.min(sourceText.length, index + normalizedArticle.length + 50);
-    return { found: true, context: sourceText.substring(start, end).trim() };
+  // Extract numeric value
+  const numericPart = articleNumber.replace(/[^\d.,]/g, '');
+  if (!numericPart) {
+    return { found: false };
   }
   
-  // Try matching just the numeric part (e.g., "73" from "$73 billion")
-  const numericPart = articleNumber.replace(/[^\d.,]/g, '');
-  if (numericPart) {
-    // Look for the number with various formats
-    const patterns = [
-      new RegExp(`\\b${numericPart.replace(/\./g, '\\.')}\\b`, 'i'),
-      new RegExp(`\\$${numericPart.replace(/\./g, '\\.')}`, 'i'),
-      new RegExp(`${numericPart.replace(/\./g, '\\.')}\\s*(billion|million|trillion|%)`, 'i'),
-    ];
-    
-    for (const pattern of patterns) {
-      const match = sourceText.match(pattern);
-      if (match) {
-        const index = match.index!;
-        const start = Math.max(0, index - 50);
-        const end = Math.min(sourceText.length, index + match[0].length + 50);
-        return { found: true, context: sourceText.substring(start, end).trim() };
+  // Build context-aware patterns - must match the number WITH its unit/type
+  const patterns: RegExp[] = [];
+  
+  // Exact match with full format (highest priority)
+  const escapedNumber = numericPart.replace(/\./g, '\\.').replace(/,/g, ',?');
+  patterns.push(new RegExp(articleNumber.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'));
+  
+  // Context-specific patterns
+  if (hasPercent) {
+    // Must match as percentage: "35%" or "35 percent"
+    patterns.push(new RegExp(`${escapedNumber}\\s*%`, 'gi'));
+    patterns.push(new RegExp(`${escapedNumber}\\s+percent`, 'gi'));
+  }
+  
+  if (hasCurrency) {
+    // Must match as currency: "$35" or "$35.50" or "$303 PT" (allow text after)
+    // Pattern 1: Match with optional text after (like "PT", "price target", etc.)
+    patterns.push(new RegExp(`\\$${escapedNumber}(?:\\s*[/\\s]+[A-Z]+)?`, 'gi')); // Allow "/PT" or " PT" after
+    // Pattern 2: Match standalone currency
+    patterns.push(new RegExp(`\\$${escapedNumber}\\b`, 'gi'));
+    // Pattern 3: Match currency with word boundary (handles "$303" in "$303 PT")
+    patterns.push(new RegExp(`\\$${escapedNumber}(?=\\s|$|/|[A-Z])`, 'gi'));
+  }
+  
+  if (hasBillion) {
+    // Must match with billion: "35 billion" or "35B"
+    patterns.push(new RegExp(`${escapedNumber}\\s+(billion|B)\\b`, 'gi'));
+  }
+  
+  if (hasMillion) {
+    // Must match with million: "35 million" or "35M"
+    patterns.push(new RegExp(`${escapedNumber}\\s+(million|M)\\b`, 'gi'));
+  }
+  
+  if (hasTrillion) {
+    // Must match with trillion: "35 trillion" or "35T"
+    patterns.push(new RegExp(`${escapedNumber}\\s+(trillion|T)\\b`, 'gi'));
+  }
+  
+  if (hasMultiplier) {
+    // Must match with multiplier: "35x"
+    patterns.push(new RegExp(`${escapedNumber}x`, 'gi'));
+  }
+  
+  if (hasYear) {
+    // Must match year format: "2026", "CY26", "FY26", etc.
+    patterns.push(new RegExp(`\\b${articleNumber.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'gi'));
+  }
+  
+  // If no specific unit, try to match with context from article
+  // Extract key words from article context to ensure semantic match
+  const articleContextLower = articleContext.toLowerCase();
+  const contextKeywords: string[] = [];
+  
+  // Extract relevant keywords from context (avoid common words)
+  const commonWords = new Set(['the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'from', 'as', 'is', 'was', 'are', 'were', 'be', 'been', 'being', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may', 'might', 'must', 'can']);
+  const words = articleContextLower.split(/\s+/).filter(w => w.length > 3 && !commonWords.has(w));
+  contextKeywords.push(...words.slice(0, 5)); // Take first 5 meaningful words
+  
+  // Try each pattern
+  for (const pattern of patterns) {
+    const matches = [...sourceText.matchAll(pattern)];
+    for (const match of matches) {
+      if (match.index === undefined) continue;
+      
+      // Get context around the match in source
+      const start = Math.max(0, match.index - 100);
+      const end = Math.min(sourceText.length, match.index + match[0].length + 100);
+      const sourceContext = sourceText.substring(start, end);
+      const sourceContextLower = sourceContext.toLowerCase();
+      
+      // Check if the source context shares semantic similarity with article context
+      // Count how many context keywords appear in the source context
+      const matchingKeywords = contextKeywords.filter(keyword => 
+        sourceContextLower.includes(keyword)
+      );
+      
+      // For currency values, be more lenient - check price-related context first
+      if (hasCurrency) {
+        const priceContextWords = ['price', 'target', 'pt', 'pt.', 'dollar', '$', 'cost', 'value', 'estimate', 'forecast', 'rating', 'buy', 'sell', 'hold', 'outperform', 'underperform', 'reiterate', 'maintain', 'upgrade', 'downgrade', 'raise', 'cut', 'boost', 'hike', 'lower'];
+        const hasPriceContextInSource = priceContextWords.some(word => sourceContextLower.includes(word));
+        const hasPriceContextInArticle = priceContextWords.some(word => articleContextLower.includes(word));
+        
+        // If we found the currency match and either context has price-related terms, accept it
+        // This handles "$303 PT" matching "$303 price target" even if keywords don't match exactly
+        if (hasPriceContextInSource || hasPriceContextInArticle) {
+          return { 
+            found: true, 
+            context: sourceContext.trim() 
+          };
+        }
+        
+        // Fallback: If we found an exact currency match (same numeric value with $),
+        // accept it even without context matching, as currency values are usually unambiguous
+        // This handles cases like "$303" matching "$303 PT" when context words don't align
+        const exactCurrencyMatch = new RegExp(`\\$${escapedNumber}(?:\\s|$|/|[^\\d])`, 'i').test(sourceContext);
+        if (exactCurrencyMatch) {
+          return { 
+            found: true, 
+            context: sourceContext.trim() 
+          };
+        }
       }
+      
+      // For numbers with units (%, $, billion, etc.), require at least 1 keyword match
+      // For plain numbers, require at least 2 keyword matches to avoid false positives
+      // For currency, we already checked above, so skip the keyword requirement
+      const requiredMatches = (hasPercent || hasBillion || hasMillion || hasTrillion || hasMultiplier || hasYear) ? 1 : 2;
+      
+      if (matchingKeywords.length >= requiredMatches) {
+        return { 
+          found: true, 
+          context: sourceContext.trim() 
+        };
+      }
+      
+      // If no keyword match but we have a unit, still check if it's in a similar semantic context
+      // by looking for related terms (e.g., "sales", "revenue", "growth" for percentages)
+      if (hasPercent) {
+        const percentContextWords = ['sales', 'revenue', 'growth', 'increase', 'decrease', 'change', 'percent', '%', 'y/y', 'yoy', 'year-over-year', 'quarter', 'q1', 'q2', 'q3', 'q4'];
+        const hasPercentContext = percentContextWords.some(word => sourceContextLower.includes(word));
+        if (hasPercentContext && articleContextLower.split(/\s+/).some(w => percentContextWords.includes(w))) {
+          return { 
+            found: true, 
+            context: sourceContext.trim() 
+          };
+        }
+      }
+      
     }
   }
   
+  // If no context-aware match found, return false
+  // This prevents matching "35%" against "35 locations"
   return { found: false };
 }
 
@@ -243,9 +361,25 @@ function extractBodyQuotes(article: string): Array<{ quote: string; context: str
   return quotes;
 }
 
+// Calculate similarity between two text strings (simple word overlap)
+function calculateSimilarity(text1: string, text2: string): number {
+  const words1 = text1.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+  const words2 = text2.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+  
+  if (words1.length === 0 || words2.length === 0) return 0;
+  
+  const set1 = new Set(words1);
+  const set2 = new Set(words2);
+  
+  const intersection = new Set([...set1].filter(x => set2.has(x)));
+  const union = new Set([...set1, ...set2]);
+  
+  return intersection.size / union.size; // Jaccard similarity
+}
+
 // Check if a quote from article exists exactly in source text (word-for-word match)
-// Allows for minor punctuation differences and optional leading articles
-function findQuoteInSource(articleQuote: string, sourceText: string): { found: boolean; context?: string } {
+// Also detects paraphrasing (similar meaning but different wording)
+function findQuoteInSource(articleQuote: string, sourceText: string): { found: boolean; context?: string; isParaphrased?: boolean; similarity?: number } {
   // Remove quote marks for comparison
   let quoteText = articleQuote.replace(/['"]/g, '').trim();
   
@@ -370,6 +504,38 @@ function findQuoteInSource(articleQuote: string, sourceText: string): { found: b
     }
   }
   
+  // Sixth try: Check for paraphrasing - similar meaning but different wording
+  // Look for similar phrases in the source (using word overlap)
+  // Split source into sentences/phrases and check similarity
+  const sourceSentences = normalizedSourceText.split(/[.!?;]\s+/);
+  let bestMatch: { similarity: number; context: string } | null = null;
+  
+  for (const sentence of sourceSentences) {
+    const similarity = calculateSimilarity(quoteTextNormalized, sentence);
+    if (similarity > 0.4 && (!bestMatch || similarity > bestMatch.similarity)) {
+      // Find the sentence in the original text for context
+      const sentenceIndex = normalizedSourceText.indexOf(sentence);
+      if (sentenceIndex !== -1) {
+        const start = Math.max(0, sentenceIndex - 50);
+        const end = Math.min(normalizedSourceText.length, sentenceIndex + sentence.length + 50);
+        bestMatch = {
+          similarity,
+          context: normalizedSourceText.substring(start, end).trim()
+        };
+      }
+    }
+  }
+  
+  // If we found a similar phrase (similarity > 0.4), it's likely paraphrased
+  if (bestMatch && bestMatch.similarity > 0.4) {
+    return { 
+      found: true, 
+      context: bestMatch.context,
+      isParaphrased: true,
+      similarity: bestMatch.similarity
+    };
+  }
+  
   return { found: false };
 }
 
@@ -381,12 +547,34 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Article and source text are required' }, { status: 400 });
     }
     
-    // Extract numbers from article
-    const articleNumbers = extractNumbers(article);
+    // Remove price action line from article before checking numbers/quotes
+    // Price action is generated from Benzinga API (real-time data) and shouldn't be verified against source
+    // The source text is analyst notes, which don't contain current price data
+    let articleForChecking = article;
     
-    // Extract quotes: single quotes from headline, double quotes from body
-    const headlineQuotes = extractHeadlineQuotes(article);
-    const bodyQuotes = extractBodyQuotes(article);
+    // Remove price action line (can appear at end with or without newlines, with or without HTML bold tags)
+    // Pattern: "Price Action:" followed by any text until end of string
+    const priceActionPatterns = [
+      /\n\n<strong>Price Action:<\/strong>.*$/i,  // With HTML bold and newlines
+      /\n\nPrice Action:.*$/i,                      // With newlines, no HTML
+      /<strong>Price Action:<\/strong>.*$/i,        // HTML bold, no leading newlines
+      /Price Action:.*$/i                           // Plain text, no newlines
+    ];
+    
+    for (const pattern of priceActionPatterns) {
+      if (pattern.test(articleForChecking)) {
+        articleForChecking = articleForChecking.replace(pattern, '');
+        console.log('Removed price action line from article before verification');
+        break; // Only need to remove once
+      }
+    }
+    
+    // Extract numbers from article (excluding price action line)
+    const articleNumbers = extractNumbers(articleForChecking);
+    
+    // Extract quotes: single quotes from headline, double quotes from body (excluding price action)
+    const headlineQuotes = extractHeadlineQuotes(articleForChecking);
+    const bodyQuotes = extractBodyQuotes(articleForChecking);
     const allQuotes = [
       ...headlineQuotes.map(q => ({ ...q, source: 'headline' as const })),
       ...bodyQuotes.map(q => ({ ...q, source: 'body' as const }))
@@ -414,11 +602,11 @@ export async function POST(req: NextRequest) {
       }
     }
     
-    // Check each number from article against source
+    // Check each number from article against source (with context-aware matching)
     const numberChecks: CheckResult[] = [];
     
     for (const articleNum of articleNumbers) {
-      const searchResult = findNumberInSource(articleNum.value, sourceText);
+      const searchResult = findNumberInSource(articleNum.value, articleNum.context, sourceText);
       
       numberChecks.push({
         number: articleNum.value,
@@ -435,13 +623,21 @@ export async function POST(req: NextRequest) {
     for (const articleQuote of uniqueQuotes) {
       const searchResult = findQuoteInSource(articleQuote.quote, sourceText);
       
+      let status: 'exact' | 'paraphrased' | 'not_found';
+      if (searchResult.found) {
+        status = searchResult.isParaphrased ? 'paraphrased' : 'exact';
+      } else {
+        status = 'not_found';
+      }
+      
       quoteChecks.push({
         quote: articleQuote.quote,
         found: searchResult.found,
         articleContext: articleQuote.context,
         sourceContext: searchResult.context,
-        status: searchResult.found ? 'exact' : 'not_found',
-        source: articleQuote.source // Track if from headline or body
+        status: status,
+        source: articleQuote.source, // Track if from headline or body
+        similarityScore: searchResult.similarity
       });
     }
     
@@ -452,6 +648,7 @@ export async function POST(req: NextRequest) {
     
     const totalQuoteChecks = quoteChecks.length;
     const exactQuotes = quoteChecks.filter(c => c.status === 'exact').length;
+    const paraphrasedQuotes = quoteChecks.filter(c => c.status === 'paraphrased').length;
     const notFoundQuotes = quoteChecks.filter(c => c.status === 'not_found').length;
     
     return NextResponse.json({
@@ -469,6 +666,7 @@ export async function POST(req: NextRequest) {
         summary: {
           total: totalQuoteChecks,
           exact: exactQuotes,
+          paraphrased: paraphrasedQuotes,
           notFound: notFoundQuotes,
           exactRate: totalQuoteChecks > 0 ? ((exactQuotes / totalQuoteChecks) * 100).toFixed(1) : '0'
         }

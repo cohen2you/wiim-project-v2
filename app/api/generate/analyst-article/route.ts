@@ -21,56 +21,90 @@ function truncateText(text: string, maxChars: number): string {
 // Helper function to extract ticker from analyst note text
 function extractTickerFromText(text: string): string | null {
   // Common patterns for ticker symbols in analyst notes:
-  // 1. "TICKER US" or "TICKER" at the start of a line
-  // 2. "(NASDAQ:TICKER)" or "(NYSE:TICKER)" patterns
-  // 3. "TICKER" in uppercase, 1-5 characters, often near company name
+  // 1. "(TICKER, Rating, $PT)" format - e.g., "(LULU, Buy, $303 PT)"
+  // 2. "TICKER US" or "TICKER" at the start of a line
+  // 3. "(NASDAQ:TICKER)" or "(NYSE:TICKER)" patterns
+  // 4. "TICKER" in parentheses alone - e.g., "(LULU)"
+  // 5. "TICKER" in uppercase, 1-5 characters, often near company name
   
-  // Try pattern 1: "AVGO US" or "AVGO" at start of line
-  const pattern1 = /^([A-Z]{1,5})\s+US\b/mi;
+  // Try pattern 1: "(LULU, Buy, $303 PT)" or similar - very common in analyst notes
+  const pattern1 = /\(([A-Z]{1,5}),\s*(?:Buy|Sell|Hold|Outperform|Underperform|Neutral|Overweight|Underweight|Equal Weight|Market Perform|Strong Buy|Strong Sell|Positive|Negative|Neutral).*?\)/i;
   const match1 = text.match(pattern1);
   if (match1) {
-    return match1[1].toUpperCase();
+    const ticker = match1[1].toUpperCase();
+    console.log(`Extracted ticker using pattern 1 (parentheses with rating): ${ticker}`);
+    return ticker;
   }
   
-  // Try pattern 2: "(NASDAQ:AVGO)" or "(NYSE:AVGO)"
-  const pattern2 = /\((?:NASDAQ|NYSE|AMEX|OTC):([A-Z]{1,5})\)/i;
+  // Try pattern 2: "(NASDAQ:LULU)" or "(NYSE:LULU)"
+  const pattern2 = /\((?:NASDAQ|NYSE|AMEX|OTC|Nasdaq|NYSE):([A-Z]{1,5})\)/i;
   const match2 = text.match(pattern2);
   if (match2) {
-    return match2[1].toUpperCase();
+    const ticker = match2[1].toUpperCase();
+    console.log(`Extracted ticker using pattern 2 (exchange format): ${ticker}`);
+    return ticker;
   }
   
-  // Try pattern 3: Look for common ticker patterns near company mentions
-  // This is less reliable but can catch cases like "AVGO" mentioned in context
-  const tickerPattern = /\b([A-Z]{2,5})\s+(?:US|NASDAQ|NYSE|shares|stock)/i;
-  const match3 = text.match(tickerPattern);
+  // Try pattern 3: "(LULU)" - ticker in parentheses alone
+  const pattern3 = /\(([A-Z]{1,5})\)/;
+  const match3 = text.match(pattern3);
   if (match3) {
     const potentialTicker = match3[1].toUpperCase();
     // Filter out common words that might match
-    const invalidTickers = ['THE', 'AND', 'FOR', 'ARE', 'WAS', 'HAS', 'HAD', 'WILL', 'THIS', 'THAT'];
-    if (!invalidTickers.includes(potentialTicker)) {
+    const invalidTickers = ['THE', 'AND', 'FOR', 'ARE', 'WAS', 'HAS', 'HAD', 'WILL', 'THIS', 'THAT', 'INC', 'CORP', 'LLC', 'LTD'];
+    if (!invalidTickers.includes(potentialTicker) && potentialTicker.length >= 2) {
+      console.log(`Extracted ticker using pattern 3 (parentheses alone): ${potentialTicker}`);
       return potentialTicker;
     }
   }
   
+  // Try pattern 4: "AVGO US" or "LULU US" at start of line
+  const pattern4 = /^([A-Z]{1,5})\s+US\b/mi;
+  const match4 = text.match(pattern4);
+  if (match4) {
+    const ticker = match4[1].toUpperCase();
+    console.log(`Extracted ticker using pattern 4 (TICKER US): ${ticker}`);
+    return ticker;
+  }
+  
+  // Try pattern 5: Look for common ticker patterns near company mentions
+  const tickerPattern = /\b([A-Z]{2,5})\s+(?:US|NASDAQ|NYSE|shares|stock|ticker)/i;
+  const match5 = text.match(tickerPattern);
+  if (match5) {
+    const potentialTicker = match5[1].toUpperCase();
+    const invalidTickers = ['THE', 'AND', 'FOR', 'ARE', 'WAS', 'HAS', 'HAD', 'WILL', 'THIS', 'THAT', 'INC', 'CORP', 'LLC', 'LTD'];
+    if (!invalidTickers.includes(potentialTicker)) {
+      console.log(`Extracted ticker using pattern 5 (near company mention): ${potentialTicker}`);
+      return potentialTicker;
+    }
+  }
+  
+  console.log('No ticker found in text using any pattern');
   return null;
 }
 
 // Helper function to fetch price data from Benzinga
 async function fetchPriceData(ticker: string) {
   try {
-    const response = await fetch(`https://api.benzinga.com/api/v2/quoteDelayed?token=${process.env.BENZINGA_API_KEY}&symbols=${encodeURIComponent(ticker)}`);
+    const apiUrl = `https://api.benzinga.com/api/v2/quoteDelayed?token=${process.env.BENZINGA_API_KEY}&symbols=${encodeURIComponent(ticker)}`;
+    console.log(`Fetching price data from Benzinga API for ${ticker}:`, apiUrl.replace(process.env.BENZINGA_API_KEY || '', '[API_KEY]'));
+    
+    const response = await fetch(apiUrl);
     
     if (!response.ok) {
-      console.error('Failed to fetch price data');
+      console.error(`Failed to fetch price data: ${response.status} ${response.statusText}`);
+      const errorText = await response.text();
+      console.error('Error response:', errorText);
       return null;
     }
     
     const data = await response.json();
+    console.log(`Benzinga API response for ${ticker}:`, JSON.stringify(data, null, 2));
     
     if (data && typeof data === 'object') {
       const quote = data[ticker.toUpperCase()];
       if (quote && typeof quote === 'object') {
-        return {
+        const priceData = {
           last: quote.lastTradePrice || 0,
           change: quote.change || 0,
           change_percent: quote.changePercent || quote.change_percent || 0,
@@ -80,7 +114,22 @@ async function fetchPriceData(ticker: string) {
           extendedHoursPrice: quote.ethPrice || quote.extendedHoursPrice || quote.afterHoursPrice || null,
           extendedHoursChangePercent: quote.ethChangePercent || quote.extendedHoursChangePercent || quote.afterHoursChangePercent || null,
         };
+        console.log(`Processed price data for ${ticker}:`, {
+          last: priceData.last,
+          change: priceData.change,
+          change_percent: priceData.change_percent,
+          close: priceData.close,
+          previousClose: priceData.previousClose,
+          companyName: priceData.companyName,
+          extendedHoursPrice: priceData.extendedHoursPrice,
+          extendedHoursChangePercent: priceData.extendedHoursChangePercent
+        });
+        return priceData;
+      } else {
+        console.warn(`No quote data found for ${ticker} in API response`);
       }
+    } else {
+      console.warn(`Unexpected API response format for ${ticker}:`, typeof data);
     }
     
     return null;
@@ -120,12 +169,28 @@ function getCurrentDayName() {
 // Helper function to generate price action line (matching add-price-action format)
 function generatePriceActionLine(ticker: string, priceData: any): string {
   if (!priceData) {
+    console.log(`No price data available for ${ticker}, using generic price action line`);
     return `Price Action: ${ticker} shares closed on ${getCurrentDayName()}.`;
   }
 
   const marketSession = getMarketSession();
   const dayName = getCurrentDayName();
   const companyName = priceData.companyName || ticker.toUpperCase();
+  
+  console.log(`Generating price action for ${ticker}:`, {
+    marketSession,
+    dayName,
+    companyName,
+    rawData: {
+      last: priceData.last,
+      change: priceData.change,
+      change_percent: priceData.change_percent,
+      close: priceData.close,
+      previousClose: priceData.previousClose,
+      extendedHoursPrice: priceData.extendedHoursPrice,
+      extendedHoursChangePercent: priceData.extendedHoursChangePercent
+    }
+  });
   
   // Regular session data
   const regularLast = parseFloat(priceData.close || priceData.last || 0).toFixed(2);
@@ -136,12 +201,15 @@ function generatePriceActionLine(ticker: string, priceData: any): string {
     const regularChange = parseFloat(priceData.close) - parseFloat(priceData.previousClose);
     const calculatedChangePercent = (regularChange / parseFloat(priceData.previousClose) * 100).toFixed(2);
     regularChangePercent = calculatedChangePercent;
+    console.log(`Calculated change percent from close/previousClose: ${regularChangePercent}%`);
   } else if (priceData.change && priceData.previousClose && priceData.previousClose > 0) {
     const calculatedChangePercent = (parseFloat(priceData.change.toString()) / parseFloat(priceData.previousClose.toString()) * 100).toFixed(2);
     regularChangePercent = calculatedChangePercent;
+    console.log(`Calculated change percent from change/previousClose: ${regularChangePercent}%`);
   } else {
     const apiChangePercent = parseFloat(priceData.change_percent || 0);
     regularChangePercent = apiChangePercent.toFixed(2);
+    console.log(`Using API change_percent: ${regularChangePercent}%`);
   }
   
   const regularDisplayChangePercent = regularChangePercent.startsWith('-') ? regularChangePercent.substring(1) : regularChangePercent;
@@ -188,24 +256,69 @@ function generatePriceActionLine(ticker: string, priceData: any): string {
 
 export async function POST(req: Request) {
   try {
-    const { analystNoteText, ticker, aiProvider: providerOverride } = await req.json();
+    const { analystNoteText, ticker, aiProvider: providerOverride, multipleNotes } = await req.json();
     
-    if (!analystNoteText || !analystNoteText.trim()) {
+    // Handle both single note and multiple notes
+    let combinedNoteText = analystNoteText || '';
+    
+    if (multipleNotes && Array.isArray(multipleNotes) && multipleNotes.length > 0) {
+      // Combine multiple notes with clear separators
+      combinedNoteText = multipleNotes.map((note: any, index: number) => {
+        const noteHeader = `\n\n=== ANALYST NOTE ${index + 1}${note.filename ? `: ${note.filename}` : ''}${note.ticker ? ` (${note.ticker})` : ''} ===\n\n`;
+        return noteHeader + (note.text || '');
+      }).join('\n\n');
+      
+      console.log(`Combining ${multipleNotes.length} analyst notes into single article`);
+    }
+    
+    if (!combinedNoteText || !combinedNoteText.trim()) {
       return NextResponse.json({ error: 'Analyst note text is required' }, { status: 400 });
     }
 
     const provider: AIProvider = providerOverride || 'openai';
     
-    // Extract ticker from text if not provided, or use provided ticker
-    let finalTicker = ticker?.trim() || '';
+    // Extract ticker from analyst notes - prioritize tickers from notes, then extract from text
+    // Do NOT use ticker from main app - price action should be based on note ticker only
+    let finalTicker = '';
+    
+    console.log('Ticker extraction - provided ticker:', ticker);
+    console.log('Ticker extraction - multipleNotes count:', multipleNotes?.length || 0);
+    
+    // First, try to get ticker from multipleNotes if provided
+    if (multipleNotes && Array.isArray(multipleNotes) && multipleNotes.length > 0) {
+      const noteWithTicker = multipleNotes.find((note: any) => note.ticker);
+      if (noteWithTicker) {
+        finalTicker = noteWithTicker.ticker.toUpperCase();
+        console.log(`✓ Using ticker from analyst note object: ${finalTicker}`);
+      } else {
+        console.log('No ticker found in multipleNotes objects, will try extraction from text');
+      }
+    }
+    
+    // If no ticker from notes, try the provided ticker (which should only come from notes now)
+    if (!finalTicker && ticker?.trim()) {
+      finalTicker = ticker.trim().toUpperCase();
+      console.log(`✓ Using provided ticker parameter: ${finalTicker}`);
+    }
+    
+    // If still no ticker, extract from the text
     if (!finalTicker) {
-      const extractedTicker = extractTickerFromText(analystNoteText);
+      console.log('Attempting to extract ticker from combined note text...');
+      console.log('Text preview (first 500 chars):', combinedNoteText.substring(0, 500));
+      const extractedTicker = extractTickerFromText(combinedNoteText);
       if (extractedTicker) {
         finalTicker = extractedTicker;
-        console.log(`Extracted ticker from analyst note: ${finalTicker}`);
+        console.log(`✓ Extracted ticker from analyst note text: ${finalTicker}`);
+      } else {
+        console.log('✗ Failed to extract ticker from text');
       }
+    }
+    
+    if (!finalTicker) {
+      console.warn('⚠️ No ticker found in analyst notes. Price action will be generic.');
+      console.warn('Text sample for debugging:', combinedNoteText.substring(0, 1000));
     } else {
-      finalTicker = finalTicker.toUpperCase();
+      console.log(`✓ Final ticker for price action: ${finalTicker}`);
     }
     
     // Fetch price data for price action line (if ticker is available)
@@ -226,19 +339,25 @@ export async function POST(req: Request) {
       ? 800000  // Gemini can handle very long documents
       : 400000; // GPT-4-turbo/gpt-4o can handle ~100k tokens (400k chars)
 
-    const truncatedText = truncateText(analystNoteText.trim(), maxInputChars);
+    const truncatedText = truncateText(combinedNoteText.trim(), maxInputChars);
     
-    if (truncatedText !== analystNoteText.trim()) {
-      console.log(`Truncated analyst note from ${analystNoteText.length} to ${truncatedText.length} characters`);
+    if (truncatedText !== combinedNoteText.trim()) {
+      console.log(`Truncated analyst note(s) from ${combinedNoteText.length} to ${truncatedText.length} characters`);
     }
 
-    const prompt = `Write a news article based on the following analyst note text. Follow the "Benzinga Style" guidelines strictly. This is editorial content for traders - create a compelling narrative with intrigue, conflict, and tradeable information.
+    const isMultipleNotes = multipleNotes && Array.isArray(multipleNotes) && multipleNotes.length > 1;
+    const multipleNotesInstruction = isMultipleNotes 
+      ? `\n\nIMPORTANT: You are synthesizing information from ${multipleNotes.length} different analyst notes. Combine insights from all notes into a cohesive narrative. If analysts have different perspectives, ratings, or price targets, present both views clearly. Include all relevant analyst names and firms from the notes.`
+      : '';
+
+    const prompt = `Write a news article based on the following analyst note text. Follow the "Benzinga Style" guidelines strictly. This is editorial content for traders - create a compelling narrative with intrigue, conflict, and tradeable information.${multipleNotesInstruction}
 
 ### STYLE GUIDELINES:
 
 1. **Headline:** Create a narrative, editorial headline that tells a story. Use quotes, conflict, or intrigue when possible. Include specific numbers/metrics.
    - Good examples: "BofA Says 'Ignore The Noise': Broadcom Poised For $500 As AI Backlog Swells To $73 Billion" or "[Firm] Sees [Company] Hitting $[Target] As [Key Metric] Surges"
    - Use company name without "Inc." in headline (just "Broadcom" not "Broadcom Inc.")
+   - **CRITICAL: Headline must be PLAIN TEXT ONLY - NO HTML TAGS, NO BOLD TAGS, NO TICKER FORMATS like (NASDAQ:XXX). Just plain text.**
    - Create intrigue: "Mystery Customer", "Ignore The Noise", "Beat Goes On"
    - Include specific numbers when impactful: "$73 billion", "$500 target"
    - Keep under 100 characters when possible
@@ -260,6 +379,7 @@ export async function POST(req: Request) {
    - **CRITICAL: Keep paragraphs SHORT - maximum 2 sentences per paragraph. Break up long thoughts into multiple short paragraphs for better readability.**
    - Under each header, write 3-5 very short paragraphs (1-2 sentences each) with specific details
    - Create story elements: "mystery customer", "undue noise", "beat goes on"
+   - **QUOTE FORMATTING (CRITICAL): In the BODY of the article, use DOUBLE QUOTES (") for all direct quotes. Example: "momentum is accelerating" not 'momentum is accelerating'. Single quotes (') are ONLY for headlines.**
    - **QUOTE ACCURACY (CRITICAL): When you use quotation marks, the text inside MUST be a word-for-word exact copy from the source. Do NOT reorder words, change word forms, or paraphrase. Example: If source says "momentum is accelerating", you MUST write "momentum is accelerating" - NOT "accelerating momentum". Before using ANY quote, search the source text for the exact phrase word-for-word. If you cannot find the exact phrase, do NOT use quotation marks - paraphrase without quotes instead (e.g., "Cassidy noted that momentum is accelerating" without quotes).**
    - Include specific numbers, metrics, and catalysts
    - Use phrases like "Arya believes", "Arya pointed to", "Arya noted" to maintain narrative flow
@@ -288,7 +408,7 @@ export async function POST(req: Request) {
    - Create story elements around key catalysts (e.g., "mystery customer", "Apple Factor")
    - Use active voice and engaging language
 
-### INPUT TEXT (Analyst Note):
+### INPUT TEXT (Analyst Note${isMultipleNotes ? 's' : ''}):
 
 ${truncatedText}
 
@@ -298,7 +418,7 @@ ${truncatedText}
       [
         {
           role: "system",
-          content: "You are an editorial financial journalist writing for Benzinga, a fast-paced trading news site. Your articles are read by traders who scan content quickly but appreciate compelling narratives. Create editorial, story-driven content with intrigue, conflict, and tradeable information. Use narrative hooks, create story elements (like 'mystery customer'), and include analyst quotes to support the narrative. Use 2-3 editorial section headers (e.g., 'The Broadcom Thesis', 'The Mystery Customer Catalyst'). NEVER include formal datelines or conclusion sections. Do NOT generate a Price Action line - it will be added automatically. Use HTML <strong> tags for bold text, NOT markdown ** syntax. CRITICAL: You MUST bold ALL section headers/subheads using <strong> tags. ONLY bold company names on first mention - do NOT bold any other text (no numbers, metrics, analyst names, firms, or phrases) except for section headers. Always include the analyst's name along with the firm name. On first mention, bold ONLY the company name (e.g., <strong>Broadcom Inc.</strong>), then include the full exchange ticker format (NASDAQ:AVGO) without bolding and with no space after the colon. MOST IMPORTANT: Keep ALL paragraphs SHORT - maximum 2 sentences per paragraph. Break up any long thoughts into multiple short, punchy paragraphs. Never create dense blocks of text. QUOTE ACCURACY IS ABSOLUTELY CRITICAL IN HEADLINES AND BODY: If you use quotation marks anywhere (headline or body), the text inside MUST be a word-for-word exact copy from the source. Do NOT reorder words, change word forms, or paraphrase. Example: If source says 'momentum is accelerating', you MUST write 'momentum is accelerating' - NOT 'accelerating momentum'. Before using ANY quote in the headline or body, search the source text for the exact phrase word-for-word. If you cannot find the exact phrase, do NOT use quotation marks - paraphrase without quotes instead."
+          content: "You are an editorial financial journalist writing for Benzinga, a fast-paced trading news site. Your articles are read by traders who scan content quickly but appreciate compelling narratives. Create editorial, story-driven content with intrigue, conflict, and tradeable information. Use narrative hooks, create story elements (like 'mystery customer'), and include analyst quotes to support the narrative. Use 2-3 editorial section headers (e.g., 'The Broadcom Thesis', 'The Mystery Customer Catalyst'). NEVER include formal datelines or conclusion sections. Do NOT generate a Price Action line - it will be added automatically. Use HTML <strong> tags for bold text, NOT markdown ** syntax. CRITICAL: You MUST bold ALL section headers/subheads using <strong> tags. ONLY bold company names on first mention - do NOT bold any other text (no numbers, metrics, analyst names, firms, or phrases) except for section headers. Always include the analyst's name along with the firm name. On first mention, bold ONLY the company name (e.g., <strong>Broadcom Inc.</strong>), then include the full exchange ticker format (NASDAQ:AVGO) without bolding and with no space after the colon. MOST IMPORTANT: Keep ALL paragraphs SHORT - maximum 2 sentences per paragraph. Break up any long thoughts into multiple short, punchy paragraphs. Never create dense blocks of text. QUOTE FORMATTING: Use SINGLE QUOTES (') in headlines only. Use DOUBLE QUOTES (\") in the body of the article for all direct quotes. QUOTE ACCURACY IS ABSOLUTELY CRITICAL IN HEADLINES AND BODY: If you use quotation marks anywhere (headline or body), the text inside MUST be a word-for-word exact copy from the source. Do NOT reorder words, change word forms, or paraphrase. Example: If source says 'momentum is accelerating', you MUST write 'momentum is accelerating' in headlines or \"momentum is accelerating\" in body - NOT 'accelerating momentum' or \"accelerating momentum\". Before using ANY quote in the headline or body, search the source text for the exact phrase word-for-word. If you cannot find the exact phrase, do NOT use quotation marks - paraphrase without quotes instead."
         },
         {
           role: "user",
@@ -328,6 +448,12 @@ ${truncatedText}
     const headlineMatch = article.match(/^([^\n]+)/);
     let headline = headlineMatch ? headlineMatch[1] : '';
     
+    // Remove all HTML tags from headline (headlines should be plain text only)
+    headline = headline.replace(/<[^>]*>/g, '');
+    
+    // Remove ticker format patterns like "(NASDAQ:LULU)" or "(NYSE:AAPL)" from headline
+    headline = headline.replace(/\s*\([A-Z]+:[A-Z]+\)/gi, '');
+    
     // Remove quotes that wrap the entire headline (common AI mistake)
     // Check if headline starts and ends with matching quotes
     headline = headline.trim();
@@ -339,8 +465,44 @@ ${truncatedText}
     // Convert double quotes to single quotes in headline (for quoted phrases within headline)
     headline = headline.replace(/"([^"]+)"/g, "'$1'");
     
+    // Decode HTML entities that might remain
+    headline = headline.replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'");
+    
+    // Clean up any extra whitespace
+    headline = headline.replace(/\s+/g, ' ').trim();
+    
     // Remove headline from article body (everything after first line)
     let articleBody = headlineMatch ? article.substring(headlineMatch[0].length).trim() : article;
+    
+    // Clean up any leading newlines or whitespace
+    articleBody = articleBody.replace(/^\n+/, '').trim();
+    
+    // If articleBody is empty or too short, use the full article (maybe headline wasn't on first line)
+    if (!articleBody || articleBody.length < 50) {
+      console.warn('Article body too short after headline extraction, using full article. Body length:', articleBody?.length);
+      articleBody = article.trim();
+      // Try to find and remove headline from body if it appears (but only if it's at the start)
+      if (headline && articleBody.startsWith(headline)) {
+        articleBody = articleBody.substring(headline.length).trim();
+      } else if (headline) {
+        // Try to find headline anywhere and remove it
+        const headlineIndex = articleBody.indexOf(headline);
+        if (headlineIndex === 0 || (headlineIndex > 0 && headlineIndex < 100)) {
+          articleBody = articleBody.substring(headlineIndex + headline.length).trim();
+        }
+      }
+    }
+    
+    // Convert single quotes in body to double quotes (headlines should use single quotes, body should use double)
+    // This handles cases where the AI uses single quotes in the body instead of double quotes
+    // Pattern: Match single quotes that contain at least 2 characters (to avoid matching apostrophes in contractions)
+    // Match quotes that are likely direct quotations (have spaces/punctuation around them)
+    articleBody = articleBody.replace(/\b'([^']{2,})'\b/g, '"$1"');
+    // Also handle quotes at sentence boundaries
+    articleBody = articleBody.replace(/(\s|>|\(|\[|{)'([^']{2,})'(\s|\.|,|;|:|!|\?|\)|]|}|$|<)/g, '$1"$2"$3');
+    
+    console.log('Article body length after processing:', articleBody.length);
+    console.log('Article body preview (first 200 chars):', articleBody.substring(0, 200));
     
     // Verify quotes in headline match source exactly
     if (headline) {
@@ -479,9 +641,24 @@ ${truncatedText}
     // Add the real price action line from Benzinga API
     articleBody = articleBody.trim() + '\n\n' + boldedPriceActionLine;
 
+    // Ensure we have content to return
+    const finalArticleBody = articleBody.trim();
+    if (!finalArticleBody || finalArticleBody.length < 50) {
+      console.error('Generated article body is too short or empty. Length:', finalArticleBody?.length);
+      console.error('Full generated content length:', article?.length);
+      console.error('First 500 chars of generated content:', article?.substring(0, 500));
+      console.error('Headline extracted:', headline);
+      console.error('Article body after headline removal:', articleBody?.substring(0, 500));
+      return NextResponse.json({ 
+        error: `Generated article is too short or empty (${finalArticleBody?.length || 0} characters). Please try again.` 
+      }, { status: 500 });
+    }
+    
+    console.log('Returning article. Headline length:', headline?.length, 'Article length:', finalArticleBody.length);
+    
     return NextResponse.json({ 
-      headline: headline || '',
-      article: articleBody || ''
+      headline: headline || 'No headline generated',
+      article: finalArticleBody
     });
 
   } catch (error: any) {
