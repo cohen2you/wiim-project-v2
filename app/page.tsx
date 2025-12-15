@@ -1064,7 +1064,6 @@ export default function PRStoryGeneratorPage() {
         onArticlesSelected={handleCustomContextGeneration}
         loading={loadingCustomContext}
       />
-      
 
     </div>
   );

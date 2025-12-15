@@ -9,20 +9,23 @@ export async function POST(req: Request) {
     if (!ticker) return NextResponse.json({ error: 'Ticker is required' }, { status: 400 });
     // Fetch more items to ensure enough non-PR articles after filtering
     const desiredCount = count && typeof count === 'number' ? count : 10;
-    const items = Math.max(desiredCount * 3, 30);
+    const items = Math.max(desiredCount * 5, 50); // Fetch more items to ensure we get recent articles after filtering
     
-    // Calculate date range - go back 30 days to get more articles
-    const endDate = new Date();
+    // Fetch articles - start with last 7 days, don't use dateTo to get all articles up to today
     const startDate = new Date();
-    startDate.setDate(startDate.getDate() - 30);
+    startDate.setDate(startDate.getDate() - 7);
     
-    const url = `${BZ_NEWS_URL}?token=${BENZINGA_API_KEY}&tickers=${encodeURIComponent(ticker)}&items=${items}&fields=headline,title,created,body,teaser,id,url,channels&accept=application/json&displayOutput=full&dateFrom=${startDate.toISOString().split('T')[0]}&dateTo=${endDate.toISOString().split('T')[0]}`;
-    const res = await fetch(url, {
+    // Don't use dateTo parameter - let API return all articles up to today
+    let url = `${BZ_NEWS_URL}?token=${BENZINGA_API_KEY}&tickers=${encodeURIComponent(ticker)}&items=${items}&fields=headline,title,created,body,teaser,id,url,channels&accept=application/json&displayOutput=full&dateFrom=${startDate.toISOString().split('T')[0]}`;
+    
+    console.log(`Fetching articles from ${startDate.toISOString().split('T')[0]} to today for ticker ${ticker}`);
+    
+    let res = await fetch(url, {
       headers: {
         Accept: 'application/json',
       },
     });
-    const text = await res.text();
+    let text = await res.text();
     if (!res.ok) {
       console.error('Benzinga API error:', text);
       throw new Error(`Benzinga API error: ${text}`);
@@ -39,8 +42,17 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Invalid response format from Benzinga', raw: data }, { status: 500 });
     }
     
-    console.log(`Benzinga API returned ${data.length} articles for ticker ${ticker}`);
-    console.log(`Requested ${desiredCount} articles, fetching ${items} items initially`);
+    console.log(`Benzinga API returned ${data.length} raw articles for ticker ${ticker}`);
+    
+    // Log first few article dates for debugging
+    if (data.length > 0) {
+      const sampleDates = data.slice(0, 5).map((item: any) => ({
+        headline: item.headline || item.title,
+        created: item.created,
+        date: item.created ? new Date(item.created).toISOString().split('T')[0] : 'N/A'
+      }));
+      console.log('Sample article dates:', JSON.stringify(sampleDates, null, 2));
+    }
     // Exclude PRs and insights URLs by filtering out items with PR channel names or insights URLs
     const prChannelNames = ['press releases', 'press-releases', 'pressrelease', 'pr'];
     const normalize = (str: string) => str.toLowerCase().replace(/[-_]/g, ' ');
@@ -101,7 +113,23 @@ export async function POST(req: Request) {
         url: item.url || '',
       }))
       .filter(item => item.headline !== '[No Headline]' && item.headline !== 'undefined');
-    articles.sort((a, b) => new Date(b.created).getTime() - new Date(a.created).getTime());
+    
+    // Sort by date descending (newest first) - handle various date formats
+    articles.sort((a, b) => {
+      const dateA = a.created ? new Date(a.created).getTime() : 0;
+      const dateB = b.created ? new Date(b.created).getTime() : 0;
+      return dateB - dateA; // Descending order (newest first)
+    });
+    
+    // Log the dates of articles we're returning
+    if (articles.length > 0) {
+      const returnedDates = articles.slice(0, Math.min(articles.length, desiredCount)).map((item: any) => ({
+        headline: item.headline,
+        created: item.created,
+        date: item.created ? new Date(item.created).toISOString().split('T')[0] : 'N/A'
+      }));
+      console.log(`Returning ${Math.min(articles.length, desiredCount)} articles with dates:`, JSON.stringify(returnedDates, null, 2));
+    }
     
     console.log(`After filtering: ${articles.length} articles remain`);
     console.log(`Returning ${Math.min(articles.length, desiredCount)} articles`);
