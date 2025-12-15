@@ -2038,7 +2038,7 @@ async function fetchMarketContext(): Promise<MarketContext | null> {
 
     return {
       indices,
-      sectors: sectors.sort((a, b) => b.change - a.change), // Sort by performance
+      sectors: sectors.sort((a: { name: string; ticker: string; change: number }, b: { name: string; ticker: string; change: number }) => b.change - a.change), // Sort by performance
       marketBreadth: { advancers, decliners, ratio },
       topGainers: gainers,
       topLosers: losers
