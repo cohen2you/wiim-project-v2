@@ -151,9 +151,12 @@ function findNumberInSource(articleNumber: string, articleContext: string, sourc
   
   // Context-specific patterns
   if (hasPercent) {
-    // Must match as percentage: "35%" or "35 percent"
+    // Must match as percentage: "35%", "35 percent", "~35%", "approximately 35%", "about 35%"
     patterns.push(new RegExp(`${escapedNumber}\\s*%`, 'gi'));
     patterns.push(new RegExp(`${escapedNumber}\\s+percent`, 'gi'));
+    // Also match with approximate indicators (~, approximately, about, around, roughly)
+    patterns.push(new RegExp(`(?:~|approximately|about|around|roughly|approx\\.?)\\s*${escapedNumber}\\s*%`, 'gi'));
+    patterns.push(new RegExp(`(?:~|approximately|about|around|roughly|approx\\.?)\\s*${escapedNumber}\\s+percent`, 'gi'));
   }
   
   if (hasCurrency) {
@@ -261,9 +264,24 @@ function findNumberInSource(articleNumber: string, articleContext: string, sourc
       // If no keyword match but we have a unit, still check if it's in a similar semantic context
       // by looking for related terms (e.g., "sales", "revenue", "growth" for percentages)
       if (hasPercent) {
-        const percentContextWords = ['sales', 'revenue', 'growth', 'increase', 'decrease', 'change', 'percent', '%', 'y/y', 'yoy', 'year-over-year', 'quarter', 'q1', 'q2', 'q3', 'q4'];
+        const percentContextWords = ['sales', 'revenue', 'growth', 'increase', 'decrease', 'change', 'percent', '%', 'y/y', 'yoy', 'year-over-year', 'quarter', 'q1', 'q2', 'q3', 'q4', 'shipments', 'accounts', 'representing'];
         const hasPercentContext = percentContextWords.some(word => sourceContextLower.includes(word));
-        if (hasPercentContext && articleContextLower.split(/\s+/).some(w => percentContextWords.includes(w))) {
+        const hasPercentContextInArticle = articleContextLower.split(/\s+/).some(w => percentContextWords.includes(w));
+        
+        // Also check for approximate indicators - if article has "approximately/about/around" and source has "~", it's likely the same number
+        const hasApproxInArticle = /\b(approximately|about|around|roughly|approx\.?)\s*\d+/.test(articleContextLower);
+        const hasApproxInSource = /~\s*\d+/.test(sourceContextLower);
+        
+        if (hasPercentContext || (hasPercentContextInArticle && (hasApproxInSource || hasApproxInArticle))) {
+          return { 
+            found: true, 
+            context: sourceContext.trim() 
+          };
+        }
+        
+        // For percentages, if we found the number with % in source and article context mentions percentage-related terms, accept it
+        // This handles "approximately 19%" matching "~19%" when both are in percentage contexts
+        if (hasPercentContextInArticle && sourceContextLower.includes(`%`)) {
           return { 
             found: true, 
             context: sourceContext.trim() 
@@ -362,8 +380,17 @@ function extractBodyQuotes(article: string): Array<{ quote: string; context: str
     // We'll be more lenient here and let the matching logic handle it
     
     // Skip quotes that are clearly not direct quotes (like possessives or fragments)
-    // Check if quote starts with just a letter and space (e.g., "s latest", " and ")
-    if (/^[a-z]\s/.test(quoteText) && quoteText.length < 20) {
+    // Check if quote starts with just a letter and space (e.g., "s latest", "s tracker", " and ")
+    // This catches possessive fragments like "s tracker" or "s lead times"
+    // Be aggressive - any quote starting with a single lowercase letter followed by space is likely a fragment
+    if (/^[a-z]\s/.test(quoteText)) {
+      continue;
+    }
+    
+    // Skip quotes that start with a lowercase letter followed by a word (likely mid-sentence fragment)
+    // Pattern: lowercase letter, space, word (e.g., "s tracker", "s lead times")
+    // Remove the length restriction to catch longer fragments too
+    if (/^[a-z]\s+\w+/.test(quoteText)) {
       continue;
     }
     
