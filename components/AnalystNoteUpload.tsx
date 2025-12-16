@@ -1302,6 +1302,167 @@ export default function AnalystNoteUpload({ onTextExtracted, ticker, aiProvider 
                   )}
                     </div>
                   )}
+                  
+                  {/* Line-by-Line Analysis */}
+                  {numberChecks.lineByLine && numberChecks.lineByLine.lineByLine && (
+                    <div style={{
+                      marginTop: '20px',
+                      padding: '16px',
+                      backgroundColor: '#f9fafb',
+                      border: '1px solid #e5e7eb',
+                      borderRadius: '8px'
+                    }}>
+                      <div style={{ 
+                        display: 'flex', 
+                        justifyContent: 'space-between', 
+                        alignItems: 'center',
+                        marginBottom: '16px'
+                      }}>
+                        <h4 style={{ margin: 0, fontSize: '16px', fontWeight: '600', color: '#374151' }}>
+                          Line-by-Line Analysis
+                        </h4>
+                        <div style={{ fontSize: '14px', color: '#6b7280' }}>
+                          {numberChecks.lineByLine.summary.verifiedLines + numberChecks.lineByLine.summary.paraphrasedLines} of {numberChecks.lineByLine.summary.totalLines} verified ({numberChecks.lineByLine.summary.verificationRate}%)
+                        </div>
+                      </div>
+                      
+                      <div style={{ 
+                        fontSize: '13px', 
+                        color: '#6b7280',
+                        marginBottom: '16px',
+                        padding: '12px',
+                        backgroundColor: '#ffffff',
+                        border: '1px solid #e5e7eb',
+                        borderRadius: '4px'
+                      }}>
+                        <div style={{ marginBottom: '4px' }}>
+                          <strong>Summary:</strong> {numberChecks.lineByLine.summary.verifiedLines} exact matches, {numberChecks.lineByLine.summary.paraphrasedLines} paraphrased, {numberChecks.lineByLine.summary.partiallyFoundLines} partially found, {numberChecks.lineByLine.summary.notFoundLines} not found
+                        </div>
+                      </div>
+                      
+                      <div style={{ maxHeight: '600px', overflowY: 'auto' }}>
+                        {numberChecks.lineByLine.lineByLine.map((lineCheck: any, index: number) => {
+                          const getStatusColor = () => {
+                            if (lineCheck.overallStatus === 'verified') return { bg: '#f0fdf4', border: '#bbf7d0', text: '#059669', badge: '#d1fae5', badgeText: '#065f46' };
+                            if (lineCheck.overallStatus === 'paraphrased') return { bg: '#fffbeb', border: '#fde68a', text: '#d97706', badge: '#fef3c7', badgeText: '#92400e' };
+                            if (lineCheck.overallStatus === 'partially_found') return { bg: '#fef3c7', border: '#fde68a', text: '#d97706', badge: '#fef3c7', badgeText: '#92400e' };
+                            return { bg: '#fef2f2', border: '#fecaca', text: '#dc2626', badge: '#fee2e2', badgeText: '#991b1b' };
+                          };
+                          const colors = getStatusColor();
+                          
+                          const bestMatch = lineCheck.sourceMatches && lineCheck.sourceMatches.length > 0 ? lineCheck.sourceMatches[0] : null;
+                          
+                          return (
+                            <div
+                              key={index}
+                              style={{
+                                padding: '16px',
+                                marginBottom: '12px',
+                                backgroundColor: colors.bg,
+                                border: `2px solid ${colors.border}`,
+                                borderRadius: '8px'
+                              }}
+                            >
+                              <div style={{ 
+                                display: 'flex', 
+                                alignItems: 'flex-start', 
+                                gap: '12px',
+                                marginBottom: '12px'
+                              }}>
+                                <div style={{
+                                  minWidth: '40px',
+                                  padding: '4px 8px',
+                                  backgroundColor: colors.badge,
+                                  color: colors.badgeText,
+                                  borderRadius: '4px',
+                                  fontSize: '12px',
+                                  fontWeight: '600',
+                                  textAlign: 'center'
+                                }}>
+                                  Line {lineCheck.articleLineNumber}
+                                </div>
+                                <div style={{ flex: 1 }}>
+                                  <div style={{ 
+                                    fontSize: '14px', 
+                                    color: colors.text,
+                                    fontWeight: '500',
+                                    marginBottom: '8px',
+                                    lineHeight: '1.5'
+                                  }}>
+                                    {lineCheck.articleLine}
+                                  </div>
+                                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '8px' }}>
+                                    <span style={{
+                                      padding: '4px 10px',
+                                      borderRadius: '4px',
+                                      fontSize: '12px',
+                                      fontWeight: '500',
+                                      backgroundColor: colors.badge,
+                                      color: colors.badgeText
+                                    }}>
+                                      {lineCheck.overallStatus === 'verified' ? '✓ Verified' : 
+                                       lineCheck.overallStatus === 'paraphrased' ? `⚠ Paraphrased${bestMatch?.similarityScore ? ` (${Math.round(bestMatch.similarityScore * 100)}%)` : ''}` : 
+                                       lineCheck.overallStatus === 'partially_found' ? `⚠ Partial Match${bestMatch?.similarityScore ? ` (${Math.round(bestMatch.similarityScore * 100)}%)` : ''}` : 
+                                       '✗ Not Found'}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                              
+                              {bestMatch && bestMatch.sourceLine && (
+                                <div style={{
+                                  marginTop: '12px',
+                                  padding: '12px',
+                                  backgroundColor: '#ffffff',
+                                  border: '1px solid #e5e7eb',
+                                  borderRadius: '4px'
+                                }}>
+                                  <div style={{ fontSize: '12px', fontWeight: '600', color: '#374151', marginBottom: '6px' }}>
+                                    Source Line {bestMatch.sourceLineNumber}:
+                                  </div>
+                                  <div style={{ fontSize: '13px', color: '#6b7280', lineHeight: '1.5', fontStyle: 'italic' }}>
+                                    {bestMatch.sourceLine}
+                                  </div>
+                                  
+                                  {bestMatch.matchedPhrases && bestMatch.matchedPhrases.length > 0 && (
+                                    <div style={{ marginTop: '8px', fontSize: '12px' }}>
+                                      <strong style={{ color: '#059669' }}>Matched phrases:</strong> {bestMatch.matchedPhrases.join(', ')}
+                                    </div>
+                                  )}
+                                  
+                                  {bestMatch.missingPhrases && bestMatch.missingPhrases.length > 0 && (
+                                    <div style={{ marginTop: '8px', fontSize: '12px' }}>
+                                      <strong style={{ color: '#dc2626' }}>Missing from source:</strong> {bestMatch.missingPhrases.join(', ')}
+                                    </div>
+                                  )}
+                                  
+                                  {bestMatch.addedPhrases && bestMatch.addedPhrases.length > 0 && (
+                                    <div style={{ marginTop: '8px', fontSize: '12px' }}>
+                                      <strong style={{ color: '#d97706' }}>Added in article:</strong> {bestMatch.addedPhrases.join(', ')}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                              
+                              {!bestMatch || !bestMatch.sourceLine ? (
+                                <div style={{
+                                  marginTop: '12px',
+                                  padding: '12px',
+                                  backgroundColor: '#fee2e2',
+                                  border: '1px solid #fecaca',
+                                  borderRadius: '4px',
+                                  fontSize: '13px',
+                                  color: '#991b1b'
+                                }}>
+                                  ⚠️ This line does not appear in the source text. The information may have been added or inferred by the AI.
+                                </div>
+                              ) : null}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
                 </>
               )}
             </>

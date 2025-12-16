@@ -135,10 +135,14 @@ export async function POST(request: Request) {
 function embedH2sInArticle(articleLines: string[], h2s: string[]): string {
   // Simple embedding logic - insert H2s at natural break points
   const totalLines = articleLines.length;
+  
+  // Ensure we never place a subhead before at least 3 paragraphs (first paragraph should always be free)
+  // Minimum position for first subhead is after at least 3 lines
+  const minFirstSubheadPosition = Math.max(3, Math.floor(totalLines * 0.2));
   const h2Positions = [
-    Math.floor(totalLines * 0.2), // After ~20% of content
-    Math.floor(totalLines * 0.5), // After ~50% of content  
-    Math.floor(totalLines * 0.8)  // After ~80% of content
+    minFirstSubheadPosition, // After at least 3 lines (never before first paragraph)
+    Math.max(minFirstSubheadPosition + 2, Math.floor(totalLines * 0.5)), // After ~50% of content, but at least 2 lines after first subhead
+    Math.max(minFirstSubheadPosition + 4, Math.floor(totalLines * 0.8))  // After ~80% of content, but at least 4 lines after first subhead
   ];
 
   const result: string[] = [];
@@ -148,7 +152,8 @@ function embedH2sInArticle(articleLines: string[], h2s: string[]): string {
     result.push(articleLines[i]);
     
     // Insert H2 if we're at a position and have H2s left
-    if (h2Index < h2s.length && i === h2Positions[h2Index]) {
+    // Also ensure we never insert at position 0 or 1 (always after first paragraph)
+    if (h2Index < h2s.length && i >= h2Positions[h2Index] && i >= 2) {
       result.push(''); // Empty line before H2
       result.push(h2s[h2Index]);
       result.push(''); // Empty line after H2

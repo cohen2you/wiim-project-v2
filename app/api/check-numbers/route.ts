@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
+import OpenAI from 'openai';
 
 export const dynamic = 'force-dynamic';
+
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY!,
+});
 
 interface NumberMatch {
   value: string;
@@ -25,6 +30,33 @@ interface QuoteCheckResult {
   status: 'exact' | 'paraphrased' | 'not_found';
   source?: 'headline' | 'body'; // Track where quote came from
   similarityScore?: number; // For paraphrased quotes, how similar (0-1)
+}
+
+interface LineComparison {
+  articleLine: string;
+  articleLineNumber: number;
+  sourceMatches: Array<{
+    sourceLine: string;
+    sourceLineNumber: number;
+    matchType: 'exact' | 'semantic' | 'partial' | 'not_found';
+    similarityScore?: number;
+    matchedPhrases?: string[];
+    missingPhrases?: string[];
+    addedPhrases?: string[];
+  }>;
+  overallStatus: 'verified' | 'paraphrased' | 'not_found' | 'partially_found';
+}
+
+interface DetailedAnalysis {
+  lineByLine: LineComparison[];
+  summary: {
+    totalLines: number;
+    verifiedLines: number;
+    paraphrasedLines: number;
+    notFoundLines: number;
+    partiallyFoundLines: number;
+    verificationRate: string;
+  };
 }
 
 // Extract all numbers from text (including currency, percentages, etc.)
@@ -392,101 +424,162 @@ function extractHeadlineQuotes(article: string): Array<{ quote: string; context:
   return quotes;
 }
 
-// Extract double quotes from article body (everything after headline)
-function extractBodyQuotes(article: string): Array<{ quote: string; context: string; index: number }> {
-  const quotes: Array<{ quote: string; context: string; index: number }> = [];
+// NEW: Use AI to intelligently extract and verify quotes
+async function extractAndVerifyQuotesWithAI(article: string, sourceText: string): Promise<Array<{ quote: string; context: string; index: number; source: 'headline' | 'body'; found: boolean; status: 'exact' | 'paraphrased' | 'not_found'; sourceContext?: string; similarityScore?: number }>> {
+  const startTime = Date.now();
+  console.log('[CHECK-NUMBERS] Using AI to extract and verify quotes...');
   
-  // Get everything after the first line (body)
+  try {
+    // Get headline and body
+    const headlineMatch = article.match(/^([^\n]+)/);
+    const headline = headlineMatch ? headlineMatch[1] : '';
+    const bodyStart = headlineMatch ? headlineMatch[0].length : 0;
+    const body = article.substring(bodyStart);
+    
+    // Remove HTML tags for AI analysis
+    const cleanHeadline = headline.replace(/<[^>]+>/g, ' ').trim();
+    const cleanBody = body.replace(/<[^>]+>/g, ' ').trim();
+    
+    const prompt = `You are a fact-checking expert. Your task is to identify EVERY direct quote in the article and verify it against the source text.
+
+CRITICAL: You must find ALL quotes, including:
+- Single word quotes: "Buy", "Sell", "Hold"
+- Short phrases: "sector-low multiple", "multi-year LOE period", "fair multiple"
+- Medium phrases: "buying opportunity", "Trough Multiple"
+- Long quotes: full sentences or phrases
+- Headline quotes (single quotes 'text')
+- Body quotes (double quotes "text")
+
+ARTICLE TEXT:
+HEADLINE: ${cleanHeadline}
+
+BODY: ${cleanBody}
+
+SOURCE TEXT:
+${sourceText.substring(0, 15000)}${sourceText.length > 15000 ? '...' : ''}
+
+For EACH quote you find:
+1. Extract the exact quoted text (including the quote marks)
+2. Determine if it's an EXACT word-for-word match in source (status: "exact")
+3. If not exact, check if it's PARAPHRASED (same meaning, different words) (status: "paraphrased")
+4. If neither, mark as "not_found"
+5. Provide the matching text from source if found
+6. Calculate similarity score (1.0 for exact, 0.5-0.9 for paraphrased, 0.0-0.4 for not found)
+
+Return JSON:
+{
+  "quotes": [
+    {
+      "quote": "exact text with quote marks as it appears",
+      "location": "headline" or "body",
+      "context": "50 chars before and after the quote",
+      "status": "exact" | "paraphrased" | "not_found",
+      "sourceMatch": "matching text from source (if found)",
+      "similarityScore": 0.0 to 1.0
+    }
+  ]
+}
+
+Be extremely thorough - scan the entire article character by character to find every quote.`;
+
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.1,
+      max_tokens: 4000, // Increased to handle many quotes
+      response_format: { type: 'json_object' }
+    });
+
+    const response = JSON.parse(completion.choices[0].message?.content || '{}');
+    const aiTime = Date.now() - startTime;
+    console.log(`[CHECK-NUMBERS] AI quote extraction completed in ${aiTime}ms`);
+    
+    if (response.quotes && Array.isArray(response.quotes)) {
+      return response.quotes.map((q: any) => ({
+        quote: q.quote || '',
+        context: q.context || '',
+        index: 0, // AI doesn't provide index
+        source: (q.location === 'headline' ? 'headline' : 'body') as 'headline' | 'body',
+        found: q.status !== 'not_found',
+        status: (q.status || 'not_found') as 'exact' | 'paraphrased' | 'not_found',
+        sourceContext: q.sourceMatch,
+        similarityScore: q.similarityScore || 0
+      }));
+    }
+    
+    return [];
+  } catch (error: any) {
+    console.error('[CHECK-NUMBERS] AI quote extraction failed:', error.message);
+    console.log('[CHECK-NUMBERS] Falling back to regex-based extraction and verification...');
+    // Fallback: extract with regex, then verify with findQuoteInSource
+    const fallbackQuotes = extractQuotesFallback(article);
+    // Verify each quote against source
+    return fallbackQuotes.map(q => {
+      const searchResult = findQuoteInSource(q.quote, sourceText);
+      return {
+        ...q,
+        found: searchResult.found,
+        status: searchResult.isParaphrased ? 'paraphrased' : (searchResult.found ? 'exact' : 'not_found'),
+        sourceContext: searchResult.context,
+        similarityScore: searchResult.similarity || 0
+      };
+    });
+  }
+}
+
+// Fallback: Extract quotes using regex (simpler, no AI)
+function extractQuotesFallback(article: string): Array<{ quote: string; context: string; index: number; source: 'headline' | 'body'; found: boolean; status: 'exact' | 'paraphrased' | 'not_found'; sourceContext?: string; similarityScore?: number }> {
+  const quotes: Array<{ quote: string; context: string; index: number; source: 'headline' | 'body'; found: boolean; status: 'exact' | 'paraphrased' | 'not_found'; sourceContext?: string; similarityScore?: number }> = [];
+  
+  // Get headline and body
   const headlineMatch = article.match(/^([^\n]+)/);
+  const headline = headlineMatch ? headlineMatch[1] : '';
   const bodyStart = headlineMatch ? headlineMatch[0].length : 0;
   const body = article.substring(bodyStart);
   
-  // Remove HTML tags and decode HTML entities
-  let cleanBody = body.replace(/<[^>]+>/g, ' ');
-  cleanBody = cleanBody.replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&#39;/g, "'");
-  
-  // Match double quotes in body - must be at least 10 characters and 2 words, max 500 to avoid errors
-  const doubleQuotePattern = /"([^"]{10,500})"/g;
+  // Extract from headline (single quotes)
+  const cleanHeadline = headline.replace(/<[^>]+>/g, ' ');
+  const singleQuotePattern = /'([^']{2,})'/g;
   let match;
+  while ((match = singleQuotePattern.exec(cleanHeadline)) !== null) {
+    const quoteText = match[1].trim();
+    if (quoteText.length >= 2 && !/[a-z]'s/i.test(quoteText)) { // Not possessive
+      quotes.push({
+        quote: match[0],
+        context: cleanHeadline.substring(Math.max(0, match.index - 30), Math.min(cleanHeadline.length, match.index + match[0].length + 30)),
+        index: match.index,
+        source: 'headline',
+        found: false, // Will be checked later
+        status: 'not_found'
+      });
+    }
+  }
+  
+  // Extract from body (double quotes)
+  const cleanBody = body.replace(/<[^>]+>/g, ' ').replace(/&quot;/g, '"');
+  const doubleQuotePattern = /"([^"]{2,})"/g;
   while ((match = doubleQuotePattern.exec(cleanBody)) !== null) {
     const quoteText = match[1].trim();
-    
-    // Skip if quote is too long (likely a matching error)
-    if (quoteText.length > 500) {
-      continue;
+    if (quoteText.length >= 2) {
+      quotes.push({
+        quote: match[0],
+        context: cleanBody.substring(Math.max(0, match.index - 50), Math.min(cleanBody.length, match.index + match[0].length + 50)),
+        index: match.index,
+        source: 'body',
+        found: false, // Will be checked later
+        status: 'not_found'
+      });
     }
-    
-    // Skip if quote is too short (less than 10 characters)
-    if (quoteText.length < 10) {
-      continue;
-    }
-    
-    // Skip if quote doesn't contain at least 2 words (to filter out things like " and " or "s latest")
-    const wordCount = quoteText.split(/\s+/).filter(w => w.length > 0).length;
-    if (wordCount < 2) {
-      continue;
-    }
-    
-    // Skip if quote starts with a lowercase letter followed by a space (likely mid-sentence fragment)
-    // But allow if it's a proper quote that happens to start with lowercase
-    // We'll be more lenient here and let the matching logic handle it
-    
-    // Skip quotes that are clearly not direct quotes (like possessives or fragments)
-    // Check if quote starts with just a letter and space (e.g., "s latest", "s tracker", " and ")
-    // This catches possessive fragments like "s tracker" or "s lead times"
-    // Be aggressive - any quote starting with a single lowercase letter followed by space is likely a fragment
-    if (/^[a-z]\s/.test(quoteText)) {
-      continue;
-    }
-    
-    // Skip quotes that start with a lowercase letter followed by a word (likely mid-sentence fragment)
-    // Pattern: lowercase letter, space, word (e.g., "s tracker", "s lead times")
-    // Remove the length restriction to catch longer fragments too
-    if (/^[a-z]\s+\w+/.test(quoteText)) {
-      continue;
-    }
-    
-    // Skip quotes that are just punctuation or very short phrases
-    if (/^[^\w]+\s*$/.test(quoteText) || quoteText.split(/\s+/).filter(w => w.length > 2).length < 2) {
-      continue;
-    }
-    
-    // Skip quotes that end with incomplete sentences (e.g., " will create a ", " marks the start of a ")
-    // These are typically fragments that shouldn't be quotes
-    if (/\s+(a|an|the|this|that|these|those)\s*$/i.test(quoteText)) {
-      continue;
-    }
-    
-    // Skip quotes that start with section headers (like " Navigating the Patent Cliff")
-    // Section headers are usually bolded and shouldn't be in quotes
-    if (/^[A-Z][a-z]+\s+the\s+[A-Z]/.test(quoteText) && quoteText.length < 100) {
-      // Check if it looks like a section header (title case, starts with verb/noun)
-      const firstWords = quoteText.split(/\s+/).slice(0, 3).join(' ');
-      if (/^[A-Z][a-z]+(\s+[A-Z][a-z]+)*\s+the\s+[A-Z]/.test(firstWords)) {
-        continue;
-      }
-    }
-    
-    // Skip quotes that span across what looks like section boundaries
-    // If a quote contains multiple capitalized words at the start (likely section headers), skip it
-    const words = quoteText.split(/\s+/);
-    if (words.length > 5) {
-      const firstFewWords = words.slice(0, 5);
-      const capitalizedCount = firstFewWords.filter(w => /^[A-Z]/.test(w)).length;
-      // If 3+ of first 5 words are capitalized, it might be spanning a section header
-      if (capitalizedCount >= 3 && quoteText.length > 150) {
-        continue;
-      }
-    }
-    
-    const quote = match[0]; // Full quote with marks
-    const start = Math.max(0, match.index - 50);
-    const end = Math.min(cleanBody.length, match.index + quote.length + 50);
-    const context = cleanBody.substring(start, end).trim();
-    quotes.push({ quote, context, index: match.index });
   }
   
   return quotes;
+}
+
+// Extract double quotes from article body (everything after headline) - LEGACY, kept for compatibility
+function extractBodyQuotes(article: string): Array<{ quote: string; context: string; index: number }> {
+  // This is now a wrapper that uses the fallback
+  const results = extractQuotesFallback(article);
+  return results.filter(q => q.source === 'body').map(({ source, ...rest }) => rest);
 }
 
 // Calculate similarity between two text strings (simple word overlap)
@@ -691,6 +784,479 @@ function findQuoteInSource(articleQuote: string, sourceText: string): { found: b
   return { found: false };
 }
 
+// Split text into meaningful lines (sentences or paragraphs)
+function splitIntoLines(text: string): string[] {
+  // Remove HTML tags
+  const cleanText = text.replace(/<[^>]+>/g, ' ');
+  
+  // Split by paragraph breaks first (double newlines)
+  const paragraphs = cleanText.split(/\n\s*\n/).filter(p => p.trim().length > 0);
+  
+  // For each paragraph, split into sentences if it's long
+  const lines: string[] = [];
+  for (const para of paragraphs) {
+    if (para.trim().length < 100) {
+      // Short paragraph, keep as one line
+      lines.push(para.trim());
+    } else {
+      // Long paragraph, split into sentences
+      const sentences = para.split(/(?<=[.!?])\s+/).filter(s => s.trim().length > 0);
+      lines.push(...sentences.map(s => s.trim()));
+    }
+  }
+  
+  return lines.filter(line => line.length > 10); // Filter out very short fragments
+}
+
+// Use AI to do a thorough semantic comparison - optimized with smart filtering
+async function compareLinesWithSourceBatch(articleLines: Array<{ line: string; lineNumber: number }>, sourceLines: string[]): Promise<Array<LineComparison['sourceMatches'][0]>> {
+  const startTime = Date.now();
+  console.log(`[CHECK-NUMBERS] Starting line comparison: ${articleLines.length} article lines vs ${sourceLines.length} source lines`);
+  
+  try {
+    // Step 1: Exact matching (fast, no AI needed)
+    console.log('[CHECK-NUMBERS] Step 1: Performing exact matching...');
+    const exactMatches: Array<{ index: number; match: LineComparison['sourceMatches'][0] }> = [];
+    const needsAICheck: Array<{ line: string; lineNumber: number; index: number; candidateSourceLines: number[] }> = [];
+    
+    articleLines.forEach((articleLine, idx) => {
+      const exactMatch = sourceLines.findIndex(line => 
+        line.toLowerCase().trim() === articleLine.line.toLowerCase().trim()
+      );
+      
+      if (exactMatch !== -1) {
+        exactMatches.push({
+          index: idx,
+          match: {
+            sourceLine: sourceLines[exactMatch],
+            sourceLineNumber: exactMatch + 1,
+            matchType: 'exact',
+            similarityScore: 1.0
+          }
+        });
+      } else {
+        // Find candidate source lines with significant word overlap (smart filtering)
+        const articleWords = articleLine.line.toLowerCase().split(/\s+/).filter(w => w.length > 3);
+        interface BestMatchType {
+          index: number;
+          similarity: number;
+        }
+        let bestMatch: BestMatchType | null = null;
+        const candidateIndices: number[] = [];
+        
+        sourceLines.forEach((sourceLine, srcIdx) => {
+          const sourceWords = sourceLine.toLowerCase().split(/\s+/).filter(w => w.length > 3);
+          const commonWords = articleWords.filter(w => sourceWords.includes(w));
+          const similarity = articleWords.length > 0 ? commonWords.length / articleWords.length : 0;
+          
+          // If 60%+ word overlap, consider it a good match and skip AI
+          if (similarity >= 0.6) {
+            if (bestMatch === null || similarity > bestMatch.similarity) {
+              bestMatch = { index: srcIdx, similarity };
+            }
+          }
+          
+          // If 30%+ word overlap, it's a candidate for AI analysis
+          if (similarity >= 0.3) {
+            candidateIndices.push(srcIdx);
+          }
+        });
+        
+        // If we found a good match (60%+ similarity), use it without AI
+        if (bestMatch !== null) {
+          const bm = bestMatch as BestMatchType;
+          exactMatches.push({
+            index: idx,
+            match: {
+              sourceLine: sourceLines[bm.index],
+              sourceLineNumber: bm.index + 1,
+              matchType: 'partial',
+              similarityScore: bm.similarity
+            }
+          });
+        } else {
+          needsAICheck.push({ 
+            ...articleLine, 
+            index: idx,
+            candidateSourceLines: candidateIndices.slice(0, 8) // Limit to top 8 candidates to reduce token usage
+          });
+        }
+      }
+    });
+    
+    console.log(`[CHECK-NUMBERS] Exact matches: ${exactMatches.length}, Lines needing AI: ${needsAICheck.length}`);
+    
+    // If all lines have exact matches, return early
+    if (needsAICheck.length === 0) {
+      console.log('[CHECK-NUMBERS] All lines matched exactly, returning early');
+      const results: Array<LineComparison['sourceMatches'][0]> = new Array(articleLines.length);
+      exactMatches.forEach(({ index, match }) => {
+        results[index] = match;
+      });
+      return results;
+    }
+    
+    // Step 2: AI analysis for non-exact matches (only send candidate lines, not all source lines)
+    console.log(`[CHECK-NUMBERS] Step 2: Starting AI analysis for ${needsAICheck.length} lines...`);
+    const batchSize = 5; // Increased batch size to reduce API calls
+    const aiResults: Array<{ index: number; match: LineComparison['sourceMatches'][0] }> = [];
+    const totalBatches = Math.ceil(needsAICheck.length / batchSize);
+    const maxTimeAllowed = 60000; // 60 seconds max for all AI calls
+    const startAITime = Date.now();
+    
+    for (let i = 0; i < needsAICheck.length; i += batchSize) {
+      // Check if we've exceeded time limit
+      const elapsedTime = Date.now() - startAITime;
+      if (elapsedTime > maxTimeAllowed) {
+        console.log(`[CHECK-NUMBERS] Time limit reached (${elapsedTime}ms), skipping remaining ${needsAICheck.length - i} lines`);
+        // Use fallback matching for remaining lines
+        for (let j = i; j < needsAICheck.length; j++) {
+          const item = needsAICheck[j];
+          const articleWords = item.line.toLowerCase().split(/\s+/).filter(w => w.length > 3);
+          const bestMatch = sourceLines.findIndex(line => {
+            const sourceWords = line.toLowerCase().split(/\s+/).filter(w => w.length > 3);
+            const commonWords = articleWords.filter(w => sourceWords.includes(w));
+            return commonWords.length >= articleWords.length * 0.4;
+          });
+          
+          if (bestMatch !== -1) {
+            aiResults.push({
+              index: item.index,
+              match: {
+                sourceLine: sourceLines[bestMatch],
+                sourceLineNumber: bestMatch + 1,
+                matchType: 'partial',
+                similarityScore: 0.5
+              }
+            });
+          }
+        }
+        break;
+      }
+      
+      const batchNum = Math.floor(i / batchSize) + 1;
+      console.log(`[CHECK-NUMBERS] Processing batch ${batchNum}/${totalBatches} (lines ${i + 1}-${Math.min(i + batchSize, needsAICheck.length)})...`);
+      
+      const batch = needsAICheck.slice(i, i + batchSize);
+      
+      // Collect unique candidate source lines for this batch
+      const candidateSourceIndices = new Set<number>();
+      batch.forEach(item => {
+        item.candidateSourceLines.forEach(idx => candidateSourceIndices.add(idx));
+      });
+      
+      // If no candidates found, use a broader search (first 15 source lines to reduce tokens)
+      const relevantSourceLines = candidateSourceIndices.size > 0
+        ? Array.from(candidateSourceIndices).map(idx => ({ idx, line: sourceLines[idx] }))
+        : sourceLines.slice(0, 15).map((line, idx) => ({ idx, line }));
+      
+      const prompt = `Compare each article line with source lines. For each article line, find the best matching source line.
+
+ARTICLE LINES:
+${batch.map((item) => `Line ${item.lineNumber}: "${item.line}"`).join('\n\n')}
+
+SOURCE LINES:
+${relevantSourceLines.map(({ idx, line }) => `${idx + 1}. ${line}`).join('\n')}
+
+Return JSON:
+{
+  "results": [
+    {
+      "articleLineNumber": <number>,
+      "bestMatch": {
+        "lineNumber": <number or null>,
+        "sourceLine": "<text>",
+        "matchType": "exact" | "semantic" | "partial" | "not_found",
+        "similarityScore": <0.0-1.0>,
+        "matchedPhrases": ["phrases"],
+        "missingPhrases": ["phrases"],
+        "addedPhrases": ["phrases"]
+      }
+    }
+  ]
+}`;
+
+      const batchStartTime = Date.now();
+      try {
+        const completion = await Promise.race([
+          openai.chat.completions.create({
+            model: 'gpt-4o-mini', // Use faster, cheaper model
+            messages: [{ role: 'user', content: prompt }],
+            temperature: 0.1,
+            max_tokens: 2000, // Reduced for faster responses
+            response_format: { type: 'json_object' }
+          }),
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('AI request timeout after 20 seconds')), 20000)
+          )
+        ]) as any;
+
+        const batchTime = Date.now() - batchStartTime;
+        console.log(`[CHECK-NUMBERS] Batch ${batchNum} completed in ${batchTime}ms`);
+
+        const response = JSON.parse(completion.choices[0].message?.content || '{}');
+        
+        if (response.results && Array.isArray(response.results)) {
+          response.results.forEach((result: any) => {
+            const batchItem = batch.find(b => b.lineNumber === result.articleLineNumber);
+            if (batchItem && result.bestMatch) {
+              aiResults.push({
+                index: batchItem.index,
+                match: {
+                  sourceLine: result.bestMatch.sourceLine || (result.bestMatch.lineNumber ? sourceLines[result.bestMatch.lineNumber - 1] : '') || '',
+                  sourceLineNumber: result.bestMatch.lineNumber || 0,
+                  matchType: result.bestMatch.matchType || 'not_found',
+                  similarityScore: result.bestMatch.similarityScore || 0,
+                  matchedPhrases: result.bestMatch.matchedPhrases || [],
+                  missingPhrases: result.bestMatch.missingPhrases || [],
+                  addedPhrases: result.bestMatch.addedPhrases || []
+                }
+              });
+            }
+          });
+        }
+      } catch (batchError: any) {
+        console.error(`[CHECK-NUMBERS] Error in batch ${batchNum}:`, batchError.message);
+        // Continue with fallback for this batch
+        batch.forEach(item => {
+          // Use simple word matching as fallback
+          const bestMatch = sourceLines.findIndex(line => {
+            const articleWords = item.line.toLowerCase().split(/\s+/).filter(w => w.length > 3);
+            const sourceWords = line.toLowerCase().split(/\s+/).filter(w => w.length > 3);
+            const commonWords = articleWords.filter(w => sourceWords.includes(w));
+            return commonWords.length >= articleWords.length * 0.4;
+          });
+          
+          if (bestMatch !== -1) {
+            aiResults.push({
+              index: item.index,
+              match: {
+                sourceLine: sourceLines[bestMatch],
+                sourceLineNumber: bestMatch + 1,
+                matchType: 'partial',
+                similarityScore: 0.5
+              }
+            });
+          }
+        });
+      }
+    }
+    
+    console.log(`[CHECK-NUMBERS] AI analysis complete. Found ${aiResults.length} matches`);
+    
+    // Combine exact matches and AI results
+    const results: Array<LineComparison['sourceMatches'][0]> = new Array(articleLines.length);
+    [...exactMatches, ...aiResults].forEach(({ index, match }) => {
+      results[index] = match;
+    });
+    
+    // Fill in any missing results with not_found
+    for (let i = 0; i < results.length; i++) {
+      if (!results[i]) {
+        results[i] = {
+          sourceLine: '',
+          sourceLineNumber: 0,
+          matchType: 'not_found',
+          similarityScore: 0
+        };
+      }
+    }
+    
+    const totalTime = Date.now() - startTime;
+    console.log(`[CHECK-NUMBERS] Line comparison complete in ${totalTime}ms`);
+    
+    return results;
+  } catch (error: any) {
+    console.error('[CHECK-NUMBERS] Error in AI batch line comparison:', error.message);
+    // Fallback to simple text matching for all lines
+    console.log('[CHECK-NUMBERS] Falling back to simple word matching...');
+    return articleLines.map(articleLine => {
+      const bestMatch = sourceLines.findIndex(line => {
+        const articleWords = articleLine.line.toLowerCase().split(/\s+/).filter(w => w.length > 3);
+        const sourceWords = line.toLowerCase().split(/\s+/).filter(w => w.length > 3);
+        const commonWords = articleWords.filter(w => sourceWords.includes(w));
+        return commonWords.length >= articleWords.length * 0.5; // 50% word overlap
+      });
+      
+      if (bestMatch !== -1) {
+        return {
+          sourceLine: sourceLines[bestMatch],
+          sourceLineNumber: bestMatch + 1,
+          matchType: 'partial' as const,
+          similarityScore: 0.5
+        };
+      }
+      
+      return {
+        sourceLine: '',
+        sourceLineNumber: 0,
+        matchType: 'not_found' as const,
+        similarityScore: 0
+      };
+    });
+  }
+}
+
+// Perform a quick but thorough semantic analysis (target: 15-20 seconds)
+async function performQuickSemanticAnalysis(article: string, sourceText: string): Promise<DetailedAnalysis> {
+  const analysisStartTime = Date.now();
+  console.log('[CHECK-NUMBERS] ===== Starting quick semantic analysis =====');
+  
+  const articleLines = splitIntoLines(article);
+  const sourceLines = splitIntoLines(sourceText);
+  
+  console.log(`[CHECK-NUMBERS] Article: ${articleLines.length} lines, Source: ${sourceLines.length} lines`);
+  
+  // Analyze first 15 lines (key content) - faster than full analysis
+  const maxLinesToAnalyze = 15;
+  const linesToAnalyze = articleLines.slice(0, maxLinesToAnalyze);
+  
+  if (articleLines.length > maxLinesToAnalyze) {
+    console.log(`[CHECK-NUMBERS] Analyzing first ${maxLinesToAnalyze} lines (key content)`);
+  }
+  
+  // Prepare article lines for batch processing
+  const articleLinesWithNumbers = linesToAnalyze.map((line, idx) => ({
+    line,
+    lineNumber: idx + 1
+  }));
+  
+  // Use optimized batch comparison (faster than before)
+  console.log(`[CHECK-NUMBERS] Starting optimized batch comparison...`);
+  const matches = await compareLinesWithSourceBatch(articleLinesWithNumbers, sourceLines);
+  
+  const lineComparisons: LineComparison[] = [];
+  
+  // Build line comparisons from matches
+  console.log(`[CHECK-NUMBERS] Building line comparisons from ${matches.length} matches...`);
+  for (let i = 0; i < linesToAnalyze.length; i++) {
+    const bestMatch = matches[i];
+    
+    // Determine overall status
+    let overallStatus: LineComparison['overallStatus'] = 'not_found';
+    if (bestMatch.matchType === 'exact') {
+      overallStatus = 'verified';
+    } else if (bestMatch.matchType === 'semantic' && (bestMatch.similarityScore || 0) > 0.7) {
+      overallStatus = 'paraphrased';
+    } else if (bestMatch.matchType === 'partial' || (bestMatch.similarityScore || 0) > 0.4) {
+      overallStatus = 'partially_found';
+    } else {
+      overallStatus = 'not_found';
+    }
+    
+    lineComparisons.push({
+      articleLine: linesToAnalyze[i],
+      articleLineNumber: i + 1,
+      sourceMatches: [bestMatch],
+      overallStatus
+    });
+  }
+  
+  const analysisTime = Date.now() - analysisStartTime;
+  console.log(`[CHECK-NUMBERS] Quick semantic analysis complete in ${analysisTime}ms`);
+  
+  // Calculate summary
+  const verifiedLines = lineComparisons.filter(l => l.overallStatus === 'verified').length;
+  const paraphrasedLines = lineComparisons.filter(l => l.overallStatus === 'paraphrased').length;
+  const notFoundLines = lineComparisons.filter(l => l.overallStatus === 'not_found').length;
+  const partiallyFoundLines = lineComparisons.filter(l => l.overallStatus === 'partially_found').length;
+  const totalLines = lineComparisons.length;
+  const verificationRate = totalLines > 0 ? (((verifiedLines + paraphrasedLines) / totalLines) * 100).toFixed(1) : '0';
+  
+  return {
+    lineByLine: lineComparisons,
+    summary: {
+      totalLines,
+      verifiedLines,
+      paraphrasedLines,
+      notFoundLines,
+      partiallyFoundLines,
+      verificationRate
+    }
+  };
+}
+
+// Perform comprehensive line-by-line analysis (legacy - slower)
+async function performLineByLineAnalysis(article: string, sourceText: string): Promise<DetailedAnalysis> {
+  const analysisStartTime = Date.now();
+  console.log('[CHECK-NUMBERS] ===== Starting line-by-line analysis =====');
+  
+  const articleLines = splitIntoLines(article);
+  const sourceLines = splitIntoLines(sourceText);
+  
+  console.log(`[CHECK-NUMBERS] Article: ${articleLines.length} lines, Source: ${sourceLines.length} lines`);
+  console.log(`[CHECK-NUMBERS] Article preview (first 100 chars): ${article.substring(0, 100)}...`);
+  console.log(`[CHECK-NUMBERS] Source preview (first 100 chars): ${sourceText.substring(0, 100)}...`);
+  
+  // Limit analysis to first 20 lines for speed (can be adjusted)
+  const maxLinesToAnalyze = 20;
+  const linesToAnalyze = articleLines.slice(0, maxLinesToAnalyze);
+  
+  if (articleLines.length > maxLinesToAnalyze) {
+    console.log(`[CHECK-NUMBERS] WARNING: Article has ${articleLines.length} lines, analyzing first ${maxLinesToAnalyze} only`);
+  }
+  
+  // Prepare article lines for batch processing
+  const articleLinesWithNumbers = linesToAnalyze.map((line, idx) => ({
+    line,
+    lineNumber: idx + 1
+  }));
+  
+  // Batch compare all lines at once (more efficient)
+  console.log(`[CHECK-NUMBERS] Starting batch comparison...`);
+  const matches = await compareLinesWithSourceBatch(articleLinesWithNumbers, sourceLines);
+  
+  const lineComparisons: LineComparison[] = [];
+  
+  // Build line comparisons from matches
+  console.log(`[CHECK-NUMBERS] Building line comparisons from ${matches.length} matches...`);
+  for (let i = 0; i < linesToAnalyze.length; i++) {
+    const bestMatch = matches[i];
+    
+    // Determine overall status
+    let overallStatus: LineComparison['overallStatus'] = 'not_found';
+    if (bestMatch.matchType === 'exact') {
+      overallStatus = 'verified';
+    } else if (bestMatch.matchType === 'semantic' && (bestMatch.similarityScore || 0) > 0.7) {
+      overallStatus = 'paraphrased';
+    } else if (bestMatch.matchType === 'partial' || (bestMatch.similarityScore || 0) > 0.4) {
+      overallStatus = 'partially_found';
+    } else {
+      overallStatus = 'not_found';
+    }
+    
+    lineComparisons.push({
+      articleLine: linesToAnalyze[i],
+      articleLineNumber: i + 1,
+      sourceMatches: [bestMatch],
+      overallStatus
+    });
+  }
+  
+  const analysisTime = Date.now() - analysisStartTime;
+  console.log(`[CHECK-NUMBERS] Line-by-line analysis complete in ${analysisTime}ms`);
+  
+  // Calculate summary
+  const verifiedLines = lineComparisons.filter(l => l.overallStatus === 'verified').length;
+  const paraphrasedLines = lineComparisons.filter(l => l.overallStatus === 'paraphrased').length;
+  const notFoundLines = lineComparisons.filter(l => l.overallStatus === 'not_found').length;
+  const partiallyFoundLines = lineComparisons.filter(l => l.overallStatus === 'partially_found').length;
+  const totalLines = lineComparisons.length;
+  const verificationRate = totalLines > 0 ? (((verifiedLines + paraphrasedLines) / totalLines) * 100).toFixed(1) : '0';
+  
+  return {
+    lineByLine: lineComparisons,
+    summary: {
+      totalLines,
+      verifiedLines,
+      paraphrasedLines,
+      notFoundLines,
+      partiallyFoundLines,
+      verificationRate
+    }
+  };
+}
+
 export async function POST(req: NextRequest) {
   try {
     const { article, sourceText } = await req.json();
@@ -724,36 +1290,6 @@ export async function POST(req: NextRequest) {
     // Extract numbers from article (excluding price action line)
     const articleNumbers = extractNumbers(articleForChecking);
     
-    // Extract quotes: single quotes from headline, double quotes from body (excluding price action)
-    const headlineQuotes = extractHeadlineQuotes(articleForChecking);
-    const bodyQuotes = extractBodyQuotes(articleForChecking);
-    const allQuotes = [
-      ...headlineQuotes.map(q => ({ ...q, source: 'headline' as const })),
-      ...bodyQuotes.map(q => ({ ...q, source: 'body' as const }))
-    ];
-    
-    // Remove duplicates (same quote text, case-insensitive and punctuation-insensitive)
-    const uniqueQuotes: Array<{ quote: string; context: string; index: number; source: 'headline' | 'body' }> = [];
-    for (const q of allQuotes) {
-      // Normalize for comparison: lowercase, remove quotes, remove leading/trailing punctuation
-      const normalizedQuote = q.quote.toLowerCase()
-        .replace(/['"]/g, '')
-        .replace(/^[.,;:!?\s]+|[.,;:!?\s]+$/g, '')
-        .trim();
-      
-      const isDuplicate = uniqueQuotes.some(existing => {
-        const existingNormalized = existing.quote.toLowerCase()
-          .replace(/['"]/g, '')
-          .replace(/^[.,;:!?\s]+|[.,;:!?\s]+$/g, '')
-          .trim();
-        return existingNormalized === normalizedQuote;
-      });
-      
-      if (!isDuplicate) {
-        uniqueQuotes.push(q);
-      }
-    }
-    
     // Check each number from article against source (with context-aware matching)
     const numberChecks: CheckResult[] = [];
     
@@ -769,29 +1305,26 @@ export async function POST(req: NextRequest) {
       });
     }
     
-    // Check each quote from article against source
-    const quoteChecks: QuoteCheckResult[] = [];
+    // NEW: Use AI to extract and verify quotes (much more accurate)
+    console.log('[CHECK-NUMBERS] Extracting and verifying quotes using AI...');
+    const aiQuoteResults = await extractAndVerifyQuotesWithAI(articleForChecking, sourceText);
     
-    for (const articleQuote of uniqueQuotes) {
-      const searchResult = findQuoteInSource(articleQuote.quote, sourceText);
-      
-      let status: 'exact' | 'paraphrased' | 'not_found';
-      if (searchResult.found) {
-        status = searchResult.isParaphrased ? 'paraphrased' : 'exact';
-      } else {
-        status = 'not_found';
-      }
-      
-      quoteChecks.push({
-        quote: articleQuote.quote,
-        found: searchResult.found,
-        articleContext: articleQuote.context,
-        sourceContext: searchResult.context,
-        status: status,
-        source: articleQuote.source, // Track if from headline or body
-        similarityScore: searchResult.similarity
-      });
-    }
+    // Convert AI results to QuoteCheckResult format
+    const quoteChecks: QuoteCheckResult[] = aiQuoteResults.map(q => ({
+      quote: q.quote,
+      found: q.found,
+      articleContext: q.context,
+      sourceContext: q.sourceContext,
+      status: q.status,
+      source: q.source,
+      similarityScore: q.similarityScore
+    }));
+    
+    console.log(`[CHECK-NUMBERS] Quote checks complete: ${quoteChecks.filter(c => c.status === 'exact').length} exact, ${quoteChecks.filter(c => c.status === 'paraphrased').length} paraphrased, ${quoteChecks.filter(c => c.status === 'not_found').length} not found`);
+    
+    // Perform a quick but thorough semantic analysis (15-20 seconds target)
+    console.log('[CHECK-NUMBERS] ===== Starting quick semantic analysis =====');
+    const semanticAnalysis = await performQuickSemanticAnalysis(articleForChecking, sourceText);
     
     // Summary statistics
     const totalNumberChecks = numberChecks.length;
@@ -822,7 +1355,8 @@ export async function POST(req: NextRequest) {
           notFound: notFoundQuotes,
           exactRate: totalQuoteChecks > 0 ? ((exactQuotes / totalQuoteChecks) * 100).toFixed(1) : '0'
         }
-      }
+      },
+      lineByLine: semanticAnalysis
     });
     
   } catch (error: any) {

@@ -375,12 +375,15 @@ export async function POST(req: Request) {
 
 4. **The Body Structure:** Use 2-3 editorial section headers to organize the narrative:
    - Headers should be narrative/editorial: "The [Company] Thesis", "The 'Mystery' Customer Catalyst", "Valuation & Risks", "The [Company] Factor"
+   - **CRITICAL: NEVER place a section header before the first paragraph. Always start with the opening paragraph (the lede), then place section headers after the first paragraph and throughout the rest of the article.**
    - **IMPORTANT: All section headers MUST be wrapped in <strong> tags to make them bold**
    - **CRITICAL: Keep paragraphs SHORT - maximum 2 sentences per paragraph. Break up long thoughts into multiple short paragraphs for better readability.**
    - Under each header, write 3-5 very short paragraphs (1-2 sentences each) with specific details
    - Create story elements: "mystery customer", "undue noise", "beat goes on"
    - **QUOTE FORMATTING (CRITICAL): In the BODY of the article, use DOUBLE QUOTES (") for all direct quotes. Example: "momentum is accelerating" not 'momentum is accelerating'. Single quotes (') are ONLY for headlines.**
    - **QUOTE ACCURACY (CRITICAL): When you use quotation marks, the text inside MUST be a word-for-word exact copy from the source. Do NOT reorder words, change word forms, or paraphrase. Example: If source says "momentum is accelerating", you MUST write "momentum is accelerating" - NOT "accelerating momentum". Before using ANY quote, search the source text for the exact phrase word-for-word. If you cannot find the exact phrase, do NOT use quotation marks - paraphrase without quotes instead (e.g., "Cassidy noted that momentum is accelerating" without quotes).**
+   - **QUOTE PLACEMENT (CRITICAL): NEVER place quotation marks before dollar amounts or numbers. Examples: Write "consensus $2.5 billion" NOT "consensus" $2.5 billion". Write "target of $61" NOT "target of" $61". Quotes are ONLY for exact word-for-word phrases from the source, never for numbers or dollar amounts.**
+   - **POSSESSIVES AND CONTRACTIONS (CRITICAL): ALWAYS use apostrophes (') for possessives and contractions, NEVER use double quotes ("). Examples: "company's" NOT "company"s", "it's" NOT "it"s", "don't" NOT "don"t", "won't" NOT "won"t". Double quotes (") are ONLY for direct quotations, never for possessives or contractions.**
    - Include specific numbers, metrics, and catalysts
    - Use phrases like "Arya believes", "Arya pointed to", "Arya noted" to maintain narrative flow
    - **Never create long, dense paragraphs - always break them into shorter, punchier segments**
@@ -388,7 +391,8 @@ export async function POST(req: Request) {
 5. **Bolding Strategy:** 
    - Bold company names on first mention only (see formatting rules below)
    - **Bold ALL section headers/subheads** using <strong> tags
-   - Do NOT bold narrative phrases, analyst names, firms, ratings, price targets, numbers, or metrics (except headers and company names)
+   - Do NOT bold narrative phrases, analyst names, firms, ratings, price targets, numbers, dollar amounts, or metrics (except headers and company names)
+   - **CRITICAL: NEVER bold dollar amounts like "$2.5 billion" or numbers - these should always be plain text**
 
 6. **Formatting:** - Use HTML <strong> tags to bold text. DO NOT use markdown ** syntax.
    
@@ -427,7 +431,7 @@ ${truncatedText}
       ],
       {
         // Use models with larger context windows
-        model: provider === 'gemini' ? 'gemini-3-pro-preview' : 'gpt-4-turbo',
+        model: provider === 'gemini' ? 'gemini-2.5-flash' : 'gpt-4-turbo',
         temperature: 0.5, // Lower temperature for more accurate quotes
         maxTokens: 2000,
       },
@@ -442,7 +446,29 @@ ${truncatedText}
 
     // Post-process: Convert any markdown **bold** syntax to HTML <strong> tags
     // This ensures compatibility even if the AI occasionally uses markdown
-    article = article.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    // BUT: Don't bold dollar amounts, numbers, or metrics
+    article = article.replace(/\*\*([^*]+?)\*\*/g, (match, content) => {
+      // Don't bold if it's a dollar amount, number, or metric
+      if (/^\$[\d.,]+\s*(billion|million|thousand|B|M|K)?$/i.test(content.trim()) ||
+          /^[\d.,]+\s*(billion|million|thousand|B|M|K|%|percent)$/i.test(content.trim()) ||
+          /^\$[\d.,]+$/.test(content.trim())) {
+        return content; // Return without bold tags
+      }
+      return `<strong>${content}</strong>`;
+    });
+    
+    // Fix misplaced quotes before dollar amounts or numbers
+    // Pattern: word" $number or word" number (remove the quote before $ or number)
+    article = article.replace(/([a-zA-Z])"\s*(\$[\d.,]+|[\d.,]+\s*(?:billion|million|thousand|B|M|K))/gi, "$1 $2");
+    
+    // Fix quotes that appear right before dollar signs in the middle of sentences
+    // Pattern: " $number (quote mark followed by space and dollar sign)
+    article = article.replace(/"\s*(\$[\d.,]+)/g, "$1");
+    
+    // Remove bold tags from dollar amounts and numbers (should never be bolded)
+    // Pattern: <strong>$X.X billion</strong> or <strong>$X</strong>
+    article = article.replace(/<strong>(\$[\d.,]+\s*(?:billion|million|thousand|B|M|K)?)<\/strong>/gi, "$1");
+    article = article.replace(/<strong>([\d.,]+\s*(?:billion|million|thousand|B|M|K|%|percent))<\/strong>/gi, "$1");
     
     // Extract headline (first line before any blank line or paragraph break)
     const headlineMatch = article.match(/^([^\n]+)/);
@@ -462,9 +488,22 @@ ${truncatedText}
       headline = headline.slice(1, -1).trim();
     }
     
-    // Fix possessives that were incorrectly generated with double quotes (e.g., "company"s" -> "company's")
-    // Pattern: word followed by "s" or "S" (possessive)
-    headline = headline.replace(/([a-zA-Z])"([sS])(\s|$|,|\.|;|:)/g, "$1'$2$3");
+    // Fix possessives that were incorrectly generated with double quotes (e.g., "company"s" -> "company's", "Apple"s" -> "Apple's")
+    // Also fix contractions like "isn"t" -> "isn't"
+    // Be VERY aggressive - match any letter followed by "s" or "S"
+    
+    // First pass: match letter + "s with various following characters
+    headline = headline.replace(/([a-zA-Z])"([sS])(?!["'])/g, "$1'$2");
+    headline = headline.replace(/([a-zA-Z])"([sS])\s/g, "$1'$2 ");
+    headline = headline.replace(/([a-zA-Z])"([sS])([.,;:!?\)\]\}])/g, "$1'$2$3");
+    
+    // Fix contractions
+    headline = headline.replace(/([a-zA-Z]{2,})"([td])(?!["'])/g, "$1'$2");
+    headline = headline.replace(/([a-zA-Z]{2,})"([td])\s/g, "$1'$2 ");
+    headline = headline.replace(/([a-zA-Z]{2,})"([td])([.,;:!?\)\]\}])/g, "$1'$2$3");
+    
+    // Final pass: catch any remaining letter + "s patterns
+    headline = headline.replace(/([a-zA-Z])"([sS])/g, "$1'$2");
     
     // Convert double quotes to single quotes in headline (for quoted phrases within headline)
     headline = headline.replace(/"([^"]+)"/g, "'$1'");
@@ -497,10 +536,19 @@ ${truncatedText}
       }
     }
     
-    // Fix possessives that were incorrectly generated with double quotes (e.g., "company"s" -> "company's")
-    // Pattern: word followed by "s" or "S" (possessive), but not at start of quote
-    // This fixes cases like "company"s" or "BofA"s" -> "company's" or "BofA's"
-    articleBody = articleBody.replace(/([a-zA-Z])"([sS])(\s|$|,|\.|;|:)/g, "$1'$2$3");
+    // PRIORITY FIX: Fix possessives that were incorrectly generated with double quotes
+    // In English text, letter + "s is ALWAYS a possessive, never a quotation mark
+    // Use the simplest, most direct pattern: match ANY letter + "s and replace with 's
+    // This will catch: company"s, BofA"s, it"s, Apple"s, Squibb"s, BMY"s, etc.
+    
+    // Direct replacement - match any letter (upper or lower) followed by "s or "S
+    articleBody = articleBody.replace(/([a-zA-Z])"([sS])/g, "$1'$2");
+    
+    // Fix contractions: match word + "t or "d (isn"t, don"t, won"t, etc.)
+    articleBody = articleBody.replace(/([a-zA-Z]{2,})"([td])/g, "$1'$2");
+    
+    // Double-check pass: if any "s still exists after a letter, fix it (safety net)
+    articleBody = articleBody.replace(/([a-zA-Z])"([sS])/g, "$1'$2");
     
     // Convert single quotes in body to double quotes (headlines should use single quotes, body should use double)
     // This handles cases where the AI uses single quotes in the body instead of double quotes
@@ -591,6 +639,37 @@ ${truncatedText}
       });
     }
     
+    // Remove any section header that appears at the very beginning of the article (before first paragraph)
+    // Headers should never come before the opening paragraph
+    // Pattern matches: <strong>Header Text</strong> or Header Text at start of article
+    const headerAtStartPattern = /^(<strong>)?([A-Z][^<\n]{10,100}:?)(<\/strong>)?(\s*\n\s*)/m;
+    const startMatch = articleBody.match(headerAtStartPattern);
+    if (startMatch && startMatch.index === 0) {
+      // Check if this looks like a header (not a sentence - no period, reasonable length, title case)
+      const potentialHeader = (startMatch[2] || startMatch[0]).trim();
+      const isLikelyHeader = !potentialHeader.includes('.') && 
+                            potentialHeader.length > 10 && 
+                            potentialHeader.length < 100 &&
+                            /^[A-Z]/.test(potentialHeader) && // Starts with capital
+                            !potentialHeader.toLowerCase().startsWith('in a') && // Not "In a bold move..."
+                            !potentialHeader.toLowerCase().startsWith('analysts'); // Not "Analysts at..."
+      
+      if (isLikelyHeader) {
+        console.log('Removing header that appears before first paragraph:', potentialHeader);
+        // Remove the header and any following newlines/whitespace
+        articleBody = articleBody.substring(startMatch[0].length).trim();
+      }
+    }
+    
+    // Remove bold tags from dollar amounts and numbers (should never be bolded)
+    // This must happen before other bold processing
+    articleBody = articleBody.replace(/<strong>(\$[\d.,]+\s*(?:billion|million|thousand|B|M|K)?)<\/strong>/gi, "$1");
+    articleBody = articleBody.replace(/<strong>([\d.,]+\s*(?:billion|million|thousand|B|M|K|%|percent))<\/strong>/gi, "$1");
+    
+    // Fix misplaced quotes before dollar amounts (e.g., "consensus" $2.5 billion)
+    articleBody = articleBody.replace(/([a-zA-Z])"\s*(\$[\d.,]+)/gi, "$1 $2");
+    articleBody = articleBody.replace(/"\s*(\$[\d.,]+)/g, "$1");
+    
     // Bold section headers that might not be bolded (common patterns)
     // Look for headers that are on their own line and not already bolded
     articleBody = articleBody.replace(/^(The [A-Z][^<\n]+?)(\n|$)/gm, (match, header, newline) => {
@@ -645,11 +724,21 @@ ${truncatedText}
     articleBody = articleBody.replace(/\n\nPrice Action:.*$/i, '');
     articleBody = articleBody.replace(/Price Action:.*$/i, '');
     
+    // FINAL PASS: Fix any remaining possessives that might have been missed or re-introduced
+    // This is the absolute last step to ensure ALL possessives are fixed
+    // Use the same simple pattern - match ANY letter + "s and replace
+    articleBody = articleBody.replace(/([a-zA-Z])"([sS])/g, "$1'$2");
+    articleBody = articleBody.replace(/([a-zA-Z]{2,})"([td])/g, "$1'$2");
+    
     // Bold "Price Action:" in the price action line
     const boldedPriceActionLine = priceActionLine.replace(/^(Price Action:)/i, '<strong>$1</strong>');
     
     // Add the real price action line from Benzinga API
     articleBody = articleBody.trim() + '\n\n' + boldedPriceActionLine;
+    
+    // ONE MORE FINAL PASS on the complete article (including price action line)
+    articleBody = articleBody.replace(/([a-zA-Z])"([sS])([^"'])/g, "$1'$2$3");
+    articleBody = articleBody.replace(/([a-zA-Z])"([sS])$/g, "$1'$2");
 
     // Ensure we have content to return
     const finalArticleBody = articleBody.trim();
