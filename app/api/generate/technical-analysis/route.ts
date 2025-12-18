@@ -21,6 +21,29 @@ function normalizeCompanyName(name: string): string {
   return name;
 }
 
+// Helper function to get exchange name from exchange code
+function getExchangeName(exchangeCode: string | null | undefined): string {
+  const exchangeNames: { [key: string]: string } = {
+    'XNAS': 'NASDAQ',
+    'XNYS': 'NYSE',
+    'XASE': 'AMEX',
+    'ARCX': 'NYSE ARCA',
+    'BATS': 'BATS',
+    'EDGX': 'EDGX',
+    'EDGA': 'EDGA'
+  };
+  
+  if (!exchangeCode) return 'NASDAQ'; // Default fallback
+  
+  return exchangeNames[exchangeCode] || exchangeCode;
+}
+
+// Helper function to format company name with exchange and ticker
+function formatCompanyNameWithExchange(companyName: string, ticker: string, exchangeCode?: string | null): string {
+  const exchange = getExchangeName(exchangeCode);
+  return `${companyName} (${exchange}:${ticker})`;
+}
+
 // Helper to get market status using proper timezone handling
 function getMarketStatusTimeBased(): 'open' | 'premarket' | 'afterhours' | 'closed' {
   const now = new Date();
@@ -181,6 +204,7 @@ interface TechnicalAnalysisData {
   symbol: string;
 
   companyName: string;
+  companyNameWithExchange?: string;
 
   currentPrice: number;
 
@@ -1820,6 +1844,8 @@ async function fetchTechnicalData(symbol: string): Promise<TechnicalAnalysisData
     const overviewData = overview.results;
 
     const companyName = overviewData?.name || symbol;
+    const exchangeCode = overviewData?.primary_exchange || overviewData?.market || null;
+    const companyNameWithExchange = formatCompanyNameWithExchange(companyName, symbol, exchangeCode);
 
     const marketCap = overviewData?.market_cap || 0;
 
@@ -2329,7 +2355,7 @@ CRITICAL: Adjust your language based on market status:
 
 
 
-STOCK: ${data.symbol} (${data.companyName})
+STOCK: ${data.companyNameWithExchange || `${data.companyName} (${data.symbol})`}
 
 Current Price: $${formatPrice(data.currentPrice)}
 
@@ -2339,7 +2365,7 @@ CRITICAL: The "Daily Change (REGULAR SESSION ONLY)" value above is the REGULAR T
 
 ${sectorPerformance && sp500Change !== null ? `
 COMPARISON LINE (USE THIS EXACT FORMAT AT THE START OF THE ARTICLE, IMMEDIATELY AFTER THE HEADLINE):
-${data.companyName} stock is ${data.changePercent >= 0 ? 'up' : 'down'} approximately ${Math.abs(data.changePercent).toFixed(1)}% on ${dayOfWeek} versus a ${sectorPerformance.sectorChange.toFixed(1)}% ${sectorPerformance.sectorChange >= 0 ? 'gain' : 'loss'} in the ${sectorPerformance.sectorName} sector and a ${Math.abs(sp500Change).toFixed(1)}% ${sp500Change >= 0 ? 'gain' : 'loss'} in the S&P 500.
+${data.companyNameWithExchange || data.companyName} stock is ${data.changePercent >= 0 ? 'up' : 'down'} approximately ${Math.abs(data.changePercent).toFixed(1)}% on ${dayOfWeek} versus a ${sectorPerformance.sectorChange.toFixed(1)}% ${sectorPerformance.sectorChange >= 0 ? 'gain' : 'loss'} in the ${sectorPerformance.sectorName} sector and a ${Math.abs(sp500Change).toFixed(1)}% ${sp500Change >= 0 ? 'gain' : 'loss'} in the S&P 500.
 
 CRITICAL: This comparison line should appear immediately after the headline and before the main story content. Use this exact format.
 ` : ''}
@@ -2681,7 +2707,7 @@ CRITICAL RULES - PARAGRAPH LENGTH IS MANDATORY:
 
 - Use normal, everyday language that's clear and accessible - write like you're talking to someone, not writing a formal report
 
-- FIRST PARAGRAPH (2 sentences max): ${newsContext && (newsContext.scrapedContent || (newsContext.selectedArticles && newsContext.selectedArticles.length > 0)) ? `Start with the company name in bold (**Company Name**), followed by the ticker in parentheses (not bold) - e.g., **Microsoft Corp** (MSFT) or **Apple Inc.** (AAPL). Use proper company name formatting with periods (Inc., Corp., etc.). Lead with the primary news article and include the hyperlink by selecting any three consecutive words from your natural sentence flow and hyperlinking them - do NOT use phrases like "as detailed in a recent article" or "according to reports". Connect the price action to the news context. When mentioning the day, use ONLY the day name (e.g., "on Thursday", "on Monday") - DO NOT include the date (e.g., do NOT use "on Thursday, December 18, 2025" or any date format).` : `Start with the company name in bold (**Company Name**), followed by the ticker in parentheses (not bold) - e.g., **Apple Inc.** (AAPL) or **Applied Digital Corp.** (NASDAQ: APLD). Use proper company name formatting with periods (Inc., Corp., etc.). LEAD with the current price move direction using the Daily Change data provided - note ONLY the direction and day of week (e.g., "shares are tumbling on Monday" if down, "shares are surging on Tuesday" if up). Use ONLY the day name (e.g., "on Thursday", "on Monday") - DO NOT include the date. DO NOT include the percentage in the first paragraph - it's already in the price action section. ${marketContext ? 'Then IMMEDIATELY reference broader market context to explain the move - is the stock moving with or against broader market trends? Reference specific sector performance when relevant (e.g., "The move comes as Technology stocks are broadly lower today, contributing to the decline" or "Despite a strong market day with the S&P 500 up 0.5%, the stock is down, suggesting company-specific concerns" or "The stock is caught in a broader sell-off, with the Nasdaq down 1.2% and Technology sector declining 1.5%").' : 'Then immediately pivot to the technical analysis context - use moving average positioning, support/resistance levels, or key technical signals to explain what traders are seeing on the charts (e.g., "Traders are focused on the technical picture, which shows the stock is currently testing key support levels while facing mixed signals from moving averages" or "The move comes as the stock flashes a \'mixed\' signal—breaking down in the short term while testing a crucial long-term floor").'} Focus on using market context and technical indicators to add context to the move rather than declaring there's no news. STOP AFTER 2 SENTENCES.`}
+- FIRST PARAGRAPH (2 sentences max): ${newsContext && (newsContext.scrapedContent || (newsContext.selectedArticles && newsContext.selectedArticles.length > 0)) ? `Start with the company name in bold (**Company Name**), followed by the ticker with exchange in parentheses (not bold) - e.g., **Microsoft Corp** (NASDAQ:MSFT) or **Apple Inc.** (NASDAQ:AAPL). The format should be **Company Name** (EXCHANGE:TICKER) - always include the exchange prefix (NASDAQ, NYSE, etc.). Use proper company name formatting with periods (Inc., Corp., etc.). Lead with the primary news article and include the hyperlink by selecting any three consecutive words from your natural sentence flow and hyperlinking them - do NOT use phrases like "as detailed in a recent article" or "according to reports". Connect the price action to the news context. When mentioning the day, use ONLY the day name (e.g., "on Thursday", "on Monday") - DO NOT include the date (e.g., do NOT use "on Thursday, December 18, 2025" or any date format).` : `Start with the company name in bold (**Company Name**), followed by the ticker with exchange in parentheses (not bold) - e.g., **Apple Inc.** (NASDAQ:AAPL) or **Applied Digital Corp.** (NASDAQ:APLD). The format should be **Company Name** (EXCHANGE:TICKER) - always include the exchange prefix (NASDAQ, NYSE, etc.). Use proper company name formatting with periods (Inc., Corp., etc.). LEAD with the current price move direction using the Daily Change data provided - note ONLY the direction and day of week (e.g., "shares are tumbling on Monday" if down, "shares are surging on Tuesday" if up). Use ONLY the day name (e.g., "on Thursday", "on Monday") - DO NOT include the date. DO NOT include the percentage in the first paragraph - it's already in the price action section. ${marketContext ? 'Then IMMEDIATELY reference broader market context to explain the move - is the stock moving with or against broader market trends? Reference specific sector performance when relevant (e.g., "The move comes as Technology stocks are broadly lower today, contributing to the decline" or "Despite a strong market day with the S&P 500 up 0.5%, the stock is down, suggesting company-specific concerns" or "The stock is caught in a broader sell-off, with the Nasdaq down 1.2% and Technology sector declining 1.5%").' : 'Then immediately pivot to the technical analysis context - use moving average positioning, support/resistance levels, or key technical signals to explain what traders are seeing on the charts (e.g., "Traders are focused on the technical picture, which shows the stock is currently testing key support levels while facing mixed signals from moving averages" or "The move comes as the stock flashes a \'mixed\' signal—breaking down in the short term while testing a crucial long-term floor").'} Focus on using market context and technical indicators to add context to the move rather than declaring there's no news. STOP AFTER 2 SENTENCES.`}
 
 - SECOND PARAGRAPH (2 sentences, SUBSTANTIVE NEWS DETAILS - PART 1): ${newsContext && (newsContext.scrapedContent || (newsContext.selectedArticles && newsContext.selectedArticles.length > 0)) ? `MANDATORY: Provide detailed, specific information from the news source article. Focus on the first set of key details such as:
   * Analyst ratings, price targets, or specific analyst commentary if mentioned (e.g., "Analyst Samik Chatterjee from JPMorgan has maintained an Overweight rating on Apple")
