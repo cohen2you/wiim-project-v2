@@ -1768,7 +1768,50 @@ async function fetchTechnicalData(symbol: string): Promise<TechnicalAnalysisData
 
     const currentPrice = tickerData?.lastTrade?.p || tickerData?.day?.c || 0;
 
-    const changePercent = tickerData?.todaysChangePerc || 0;
+    // Calculate regular session change percent (not including after-hours)
+    // Prefer Benzinga data for accurate regular session change calculation
+    // Fallback to Polygon's day data if Benzinga unavailable
+    let changePercent = 0;
+    
+    // If Benzinga data is available, calculate regular session change from close vs previousClosePrice
+    // This matches how the price action line calculates it - ensures we use regular session change, not after-hours adjusted change
+    if (benzingaData && benzingaData[symbol]) {
+      const benzingaQuote = benzingaData[symbol];
+      // Try previousClosePrice first (matches price action line calculation), then fallback to previousClose
+      const benzingaClose = typeof benzingaQuote.close === 'number' ? benzingaQuote.close : parseFloat(benzingaQuote.close);
+      const benzingaPrevClose = typeof benzingaQuote.previousClosePrice === 'number' ? benzingaQuote.previousClosePrice : 
+                                 (typeof benzingaQuote.previousClose === 'number' ? benzingaQuote.previousClose : parseFloat(benzingaQuote.previousClose || benzingaQuote.previousClosePrice));
+      
+      if (benzingaClose && benzingaPrevClose && benzingaPrevClose > 0 && !isNaN(benzingaClose) && !isNaN(benzingaPrevClose)) {
+        const regularSessionChange = ((benzingaClose - benzingaPrevClose) / benzingaPrevClose) * 100;
+        changePercent = regularSessionChange;
+        console.log(`Using regular session change from Benzinga: ${changePercent.toFixed(2)}% (close: ${benzingaClose}, previousClosePrice: ${benzingaPrevClose})`);
+      } else if (benzingaQuote.change && benzingaPrevClose && benzingaPrevClose > 0) {
+        // Fallback: calculate from change amount
+        const benzingaChange = typeof benzingaQuote.change === 'number' ? benzingaQuote.change : parseFloat(benzingaQuote.change);
+        if (!isNaN(benzingaChange)) {
+          const regularSessionChange = (benzingaChange / benzingaPrevClose) * 100;
+          changePercent = regularSessionChange;
+          console.log(`Using regular session change from Benzinga change amount: ${changePercent.toFixed(2)}%`);
+        }
+      }
+    }
+    
+    // Fallback to Polygon's day data for regular session change if Benzinga data not available
+    if (changePercent === 0 && tickerData?.day?.c && tickerData?.day?.o) {
+      const dayClose = tickerData.day.c;
+      const dayOpen = tickerData.day.o;
+      if (dayClose && dayOpen && dayOpen > 0) {
+        changePercent = ((dayClose - dayOpen) / dayOpen) * 100;
+        console.log(`Using Polygon day change (close vs open): ${changePercent.toFixed(2)}%`);
+      }
+    }
+    
+    // Last resort: use Polygon's todaysChangePerc (but this may include after-hours)
+    if (changePercent === 0) {
+      changePercent = tickerData?.todaysChangePerc || 0;
+      console.log(`Using Polygon todaysChangePerc (may include after-hours): ${changePercent.toFixed(2)}%`);
+    }
 
     const volume = tickerData?.day?.v || 0;
 
@@ -1967,6 +2010,122 @@ interface MarketContext {
   topLosers: Array<{ name: string; ticker: string; change: number }>;
 }
 
+// Helper function to map sector name to sector ETF ticker
+function getSectorETFTicker(sectorName: string): string | null {
+  const sectorMap: { [key: string]: string } = {
+    'Technology': 'XLK',
+    'Financials': 'XLF',
+    'Energy': 'XLE',
+    'Healthcare': 'XLV',
+    'Industrials': 'XLI',
+    'Consumer Staples': 'XLP',
+    'Consumer Discretionary': 'XLY',
+    'Utilities': 'XLU',
+    'Real Estate': 'XLRE',
+    'Communication Services': 'XLC',
+    'Materials': 'XLB'
+  };
+  
+  // Try exact match first
+  if (sectorMap[sectorName]) {
+    return sectorMap[sectorName];
+  }
+  
+  // Try case-insensitive match
+  const sectorLower = sectorName.toLowerCase();
+  for (const [key, value] of Object.entries(sectorMap)) {
+    if (key.toLowerCase() === sectorLower) {
+      return value;
+    }
+  }
+  
+  return null;
+}
+
+// Helper function to map sector name to readable sector name (same as market-report)
+function getSectorName(ticker: string): string {
+  return ticker === 'XLK' ? 'Technology' :
+         ticker === 'XLF' ? 'Financials' :
+         ticker === 'XLE' ? 'Energy' :
+         ticker === 'XLV' ? 'Healthcare' :
+         ticker === 'XLI' ? 'Industrials' :
+         ticker === 'XLP' ? 'Consumer Staples' :
+         ticker === 'XLY' ? 'Consumer Discretionary' :
+         ticker === 'XLU' ? 'Utilities' :
+         ticker === 'XLRE' ? 'Real Estate' :
+         ticker === 'XLC' ? 'Communication Services' :
+         ticker === 'XLB' ? 'Materials' : ticker;
+}
+
+// Helper function to get stock sector and performance
+async function getStockSectorPerformance(ticker: string, marketContext: MarketContext | null): Promise<{ sectorName: string; sectorChange: number } | null> {
+  if (!marketContext) return null;
+  
+  try {
+    // Fetch stock overview to get sector info
+    const overviewRes = await fetch(`https://api.polygon.io/v3/reference/tickers/${ticker}?apikey=${process.env.POLYGON_API_KEY}`);
+    if (!overviewRes.ok) return null;
+    
+    const overview = await overviewRes.json();
+    const result = overview.results;
+    
+    if (!result) return null;
+    
+    // Try multiple fields - sector is most reliable, then sic_description, then industry
+    let sectorField = result.sector || result.sic_description || result.industry || null;
+    
+    if (!sectorField) return null;
+    
+    // Map sector name/description to ETF ticker
+    // Handle common variations and partial matches
+    const sectorLower = sectorField.toLowerCase();
+    
+    // Direct mapping attempts
+    let sectorETF: string | null = null;
+    
+    if (sectorLower.includes('technology') || sectorLower.includes('software') || sectorLower.includes('tech')) {
+      sectorETF = 'XLK';
+    } else if (sectorLower.includes('financial') || sectorLower.includes('bank') || sectorLower.includes('insurance')) {
+      sectorETF = 'XLF';
+    } else if (sectorLower.includes('energy') || sectorLower.includes('oil') || sectorLower.includes('gas')) {
+      sectorETF = 'XLE';
+    } else if (sectorLower.includes('health') || sectorLower.includes('pharma') || sectorLower.includes('biotech')) {
+      sectorETF = 'XLV';
+    } else if (sectorLower.includes('industrial') || sectorLower.includes('manufacturing')) {
+      sectorETF = 'XLI';
+    } else if (sectorLower.includes('consumer staple') || sectorLower.includes('staples')) {
+      sectorETF = 'XLP';
+    } else if (sectorLower.includes('consumer discretion') || sectorLower.includes('retail') || sectorLower.includes('automotive')) {
+      sectorETF = 'XLY';
+    } else if (sectorLower.includes('utilit')) {
+      sectorETF = 'XLU';
+    } else if (sectorLower.includes('real estate') || sectorLower.includes('reit')) {
+      sectorETF = 'XLRE';
+    } else if (sectorLower.includes('communication') || sectorLower.includes('telecom') || sectorLower.includes('media')) {
+      sectorETF = 'XLC';
+    } else if (sectorLower.includes('material') || sectorLower.includes('chemical') || sectorLower.includes('mining')) {
+      sectorETF = 'XLB';
+    } else {
+      // Fallback to direct mapping function
+      sectorETF = getSectorETFTicker(sectorField);
+    }
+    
+    if (!sectorETF) return null;
+    
+    // Find sector in market context
+    const sector = marketContext.sectors.find(s => s.ticker === sectorETF);
+    if (!sector) return null;
+    
+    return {
+      sectorName: getSectorName(sectorETF),
+      sectorChange: sector.change
+    };
+  } catch (error) {
+    console.error('Error getting stock sector performance:', error);
+    return null;
+  }
+}
+
 // Fetch market context for broader market analysis
 async function fetchMarketContext(): Promise<MarketContext | null> {
   try {
@@ -2060,6 +2219,13 @@ async function generateTechnicalAnalysis(data: TechnicalAnalysisData, provider?:
     const today = new Date();
 
     const dayOfWeek = dayNames[today.getDay()];
+    
+    // Get market status to adjust language appropriately
+    const marketStatus = getMarketStatusTimeBased();
+    
+    // Get stock sector performance for comparison line
+    const sectorPerformance = await getStockSectorPerformance(data.symbol, marketContext || null);
+    const sp500Change = marketContext?.indices.find(idx => idx.ticker === 'SPY')?.change || null;
 
     
 
@@ -2153,7 +2319,13 @@ async function generateTechnicalAnalysis(data: TechnicalAnalysisData, provider?:
 
     
 
-    const prompt = `You are a professional technical analyst writing a comprehensive stock analysis focused on longer-term trends and technical indicators. Today is ${dayOfWeek}, ${today.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}.
+    const prompt = `You are a professional technical analyst writing a comprehensive stock analysis focused on longer-term trends and technical indicators. Today is ${dayOfWeek}.
+
+CURRENT MARKET STATUS: ${marketStatus === 'open' ? 'Markets are currently OPEN' : marketStatus === 'premarket' ? 'Markets are in PREMARKET trading' : marketStatus === 'afterhours' ? 'Markets are CLOSED (after-hours session ended)' : 'Markets are CLOSED'}
+
+CRITICAL: Adjust your language based on market status:
+- If markets are OPEN or in PREMARKET: Use present tense (e.g., "the market is experiencing", "the sector is gaining", "stocks are trading")
+- If markets are CLOSED or AFTER-HOURS: Use past tense (e.g., "the market experienced", "the sector gained", "stocks closed", "on the trading day")
 
 
 
@@ -2161,7 +2333,16 @@ STOCK: ${data.symbol} (${data.companyName})
 
 Current Price: $${formatPrice(data.currentPrice)}
 
-Daily Change: ${data.changePercent.toFixed(2)}%
+Daily Change (REGULAR SESSION ONLY): ${data.changePercent.toFixed(2)}%
+
+CRITICAL: The "Daily Change (REGULAR SESSION ONLY)" value above is the REGULAR TRADING SESSION change percentage only (does NOT include after-hours movement). Use this value to determine if shares were UP or DOWN during regular trading. ${data.changePercent >= 0 ? 'Shares were UP during regular trading.' : 'Shares were DOWN during regular trading.'} Use this direction when writing the lead paragraph and comparison line.
+
+${sectorPerformance && sp500Change !== null ? `
+COMPARISON LINE (USE THIS EXACT FORMAT AT THE START OF THE ARTICLE, IMMEDIATELY AFTER THE HEADLINE):
+${data.companyName} stock is ${data.changePercent >= 0 ? 'up' : 'down'} approximately ${Math.abs(data.changePercent).toFixed(1)}% on ${dayOfWeek} versus a ${sectorPerformance.sectorChange.toFixed(1)}% ${sectorPerformance.sectorChange >= 0 ? 'gain' : 'loss'} in the ${sectorPerformance.sectorName} sector and a ${Math.abs(sp500Change).toFixed(1)}% ${sp500Change >= 0 ? 'gain' : 'loss'} in the S&P 500.
+
+CRITICAL: This comparison line should appear immediately after the headline and before the main story content. Use this exact format.
+` : ''}
 
 ${marketContext ? `
 BROADER MARKET CONTEXT (use this to explain the stock's move):
@@ -2410,15 +2591,19 @@ PRIMARY NEWS ARTICLE (LEAD WITH THIS):
 
 ${newsContext.scrapedContent ? `
 Scraped Article URL: ${newsContext.newsUrl || 'N/A'}
-Scraped Article Content:
-${newsContext.scrapedContent.substring(0, 3000)}${newsContext.scrapedContent.length > 3000 ? '...' : ''}
+Scraped Article Content (EXTRACT DETAILS FROM THIS):
+${newsContext.scrapedContent.substring(0, 5000)}${newsContext.scrapedContent.length > 5000 ? '...' : ''}
+
+CRITICAL: The article content above contains detailed information. You MUST extract and use specific numbers, figures, percentages, dates, metrics, analyst commentary, regional variations, product details, and other concrete facts from this content. Do NOT summarize - use the actual details.
 ` : ''}
 
 ${newsContext.selectedArticles && newsContext.selectedArticles.length > 0 && !newsContext.scrapedContent ? `
-Primary Article (use the first selected article):
+Primary Article (EXTRACT DETAILS FROM THIS):
 Headline: ${newsContext.selectedArticles[0].headline}
-Content: ${newsContext.selectedArticles[0].body?.substring(0, 3000) || ''}${newsContext.selectedArticles[0].body && newsContext.selectedArticles[0].body.length > 3000 ? '...' : ''}
+Content: ${newsContext.selectedArticles[0].body?.substring(0, 5000) || ''}${newsContext.selectedArticles[0].body && newsContext.selectedArticles[0].body.length > 5000 ? '...' : ''}
 URL: ${newsContext.selectedArticles[0].url || 'N/A'}
+
+CRITICAL: The article content above contains detailed information. You MUST extract and use specific numbers, figures, percentages, dates, metrics, analyst commentary, regional variations, product details, and other concrete facts from this content. Do NOT summarize - use the actual details.
 ` : ''}
 
 ${newsContext.selectedArticles && newsContext.selectedArticles.length > 1 ? `
@@ -2432,29 +2617,63 @@ URL: ${article.url || 'N/A'}
 
 CRITICAL INSTRUCTIONS FOR NEWS INTEGRATION:
 
-1. LEAD THE STORY WITH PRICE ACTION: The first paragraph MUST start with the stock's current price move (direction and day of week, e.g., "shares are tumbling Monday" or "shares are surging Tuesday"). DO NOT include the percentage in the first paragraph - it's already in the price action section. Then reference the news article to explain what's going on - either the news is contributing to the move, OR the stock is moving despite positive/negative news (suggesting larger market elements may be at play). The angle should answer "What's Going On" by connecting the price action to the news context.
+1. LEAD THE STORY WITH PRICE ACTION: The first paragraph MUST start with the stock's current price move (direction and day of week, e.g., "shares closed up on Thursday" or "shares closed down on Monday"). Use the "Daily Change (REGULAR SESSION ONLY)" value provided above to determine direction - if it's positive, say "closed up" or "were up"; if it's negative, say "closed down" or "were down". When mentioning the day, use ONLY the day name (e.g., "on Thursday", "on Monday") - DO NOT include the date (e.g., do NOT use "on Thursday, December 18, 2025" or any date format). ${marketStatus === 'open' || marketStatus === 'premarket' ? 'Use present tense (e.g., "shares are tumbling", "shares are surging") since markets are currently open.' : 'Use past tense (e.g., "shares closed up", "shares closed down", "shares were up", "shares were down") since markets are closed.'} DO NOT include the percentage in the first paragraph - it's already in the price action section. Then reference the news article to explain what's going on - either the news is contributing to the move, OR the stock is moving despite positive/negative news (suggesting larger market elements may be at play). The angle should answer "What's Going On" by connecting the price action to the news context.
 
-2. HYPERLINK FORMATTING (MUST BE IN FIRST PARAGRAPH):
-   ${isBenzinga ? `- This is a Benzinga article. Use a THREE-WORD hyperlink in the first paragraph with format: <a href="${primaryUrl}">[three word phrase]</a>
-   - Example: <a href="${primaryUrl}">recent market developments</a> or <a href="${primaryUrl}">latest trading activity</a>` : `- This is NOT a Benzinga article (${outletName || 'external source'}). Use a ONE-WORD hyperlink with outlet credit in the first paragraph.
+2. HYPERLINK FORMATTING (MANDATORY - MUST BE IN FIRST PARAGRAPH):
+   ${isBenzinga ? `- This is a Benzinga article. You MUST include a hyperlink in the first paragraph by choosing ANY THREE CONSECUTIVE WORDS from your first paragraph and wrapping them in a hyperlink with format: <a href="${primaryUrl}">[three consecutive words]</a>
+   - The hyperlink should be embedded naturally within the sentence flow - do NOT use phrases like "as detailed in a recent article" or "according to reports" to introduce it
+   - Simply select three consecutive words that are part of the natural sentence structure and hyperlink them
+   - Example: "Apple Inc. (AAPL) shares closed up on Thursday as the company is <a href="${primaryUrl}">reportedly deepening its</a> India strategy" or "The stock moved higher amid <a href="${primaryUrl}">signs of resilient</a> iPhone demand"
+   - The three words should flow naturally - they don't need to explicitly mention "article" or "report"
+   - CRITICAL: The hyperlink MUST appear in the first paragraph - this is mandatory, not optional` : `- This is NOT a Benzinga article (${outletName || 'external source'}). You MUST include a ONE-WORD hyperlink with outlet credit in the first paragraph.
    - Format: <a href="${primaryUrl}">${outletName || 'Source'}</a> reports
    - Example: <a href="${primaryUrl}">CNBC</a> reports or <a href="${primaryUrl}">Reuters</a> reports
-   - Extract the outlet name from the URL domain and capitalize it properly (e.g., "cnbc.com" → "CNBC", "reuters.com" → "Reuters", "bloomberg.com" → "Bloomberg")`}
+   - Extract the outlet name from the URL domain and capitalize it properly (e.g., "cnbc.com" → "CNBC", "reuters.com" → "Reuters", "bloomberg.com" → "Bloomberg")
+   - CRITICAL: The hyperlink MUST appear in the first paragraph - this is mandatory, not optional`}
 
-3. The hyperlink MUST appear in the FIRST paragraph of the story, integrated naturally into the text.
+3. The hyperlink MUST appear in the FIRST paragraph of the story, integrated naturally into the text flow without calling attention to the fact that it links to an article. Do NOT use phrases like "as detailed in a recent article", "according to reports", or "as highlighted in" - just hyperlink three consecutive words naturally within the sentence. This is MANDATORY - the first paragraph must contain a hyperlink to the source article.
 
-4. After leading with the news, naturally transition to the technical analysis data provided above.
+4. SECOND PARAGRAPH WITH SUBSTANTIVE NEWS DETAILS (MANDATORY): The second paragraph MUST provide detailed, specific information from the news source article. This is CRITICAL - do NOT just summarize. Focus on the first set of key details such as:
+   - Analyst ratings, price targets, or specific analyst commentary if mentioned
+   - Primary metrics, numbers, figures, or percentages (e.g., "iPhone 17 lead times have increased to around five days, up from three days a year ago")
+   - Key comparative data or timeframes
+   
+   The goal is to give readers concrete, actionable details from the source article - not vague generalities. This paragraph should be 2 sentences and contain substantive details. Do NOT try to pack everything into this paragraph - save additional details for the third paragraph.
 
-5. Maximum 2 sentences per news integration in other paragraphs.`;
+5. THIRD PARAGRAPH WITH ADDITIONAL NEWS DETAILS (MANDATORY): The third paragraph MUST continue extracting detailed, specific information from the news source article. Include additional specifics such as:
+   - Regional variations or geographic specifics (e.g., "In the U.S., lead times for the iPhone 17 have reached eight days")
+   - Product-specific details, model variations, or technical specifications (e.g., "base-model lead times exceeding one week")
+   - Additional metrics, comparative data, or year-over-year comparisons
+   - Any other concrete facts that provide depth and context
+   
+   This paragraph should also be 2 sentences and contain substantive details that complement the second paragraph. Together, paragraphs 2 and 3 should provide comprehensive coverage of the article's key details.
+
+6. After the lead paragraph, two news content paragraphs (paragraphs 2 and 3), and the broader market/sector paragraph (paragraph 4, if applicable), naturally transition to the technical analysis data provided above.
+
+6. Maximum 2 sentences per paragraph throughout the story.`;
 })() : ''}
 
-TASK: ${newsContext && (newsContext.scrapedContent || (newsContext.selectedArticles && newsContext.selectedArticles.length > 0)) ? `Write a conversational WGO article that helps readers understand "What's Going On" with the stock. LEAD with the current price move (direction and day of week, e.g., "shares are tumbling Monday" or "shares are surging Tuesday"). DO NOT include the percentage in the first paragraph. Then reference the news article provided above AND broader market context to explain what's going on - either the news is contributing to the move, OR the stock is moving despite positive/negative news (suggesting larger market elements may be at play). ${marketContext ? 'Use the broader market context (indices, sectors, market breadth) to provide additional context - is the stock moving with or against broader market trends? Reference specific sector performance when relevant (e.g., "Technology stocks are broadly lower today, contributing to the decline" or "Despite a strong market day, the stock is down, suggesting company-specific concerns").' : ''} Include the appropriate hyperlink in the first paragraph (three-word for Benzinga, one-word with outlet credit for others). After connecting price action to news and market context, provide technical analysis focusing on longer-term trends (12-month).` : `Write a conversational WGO article that helps readers understand "What's Going On" with the stock. LEAD with the current price move and note that there's no company-specific news driving the move. ${marketContext ? 'Then use broader market context (indices, sectors, market breadth) to explain the move - is the stock moving with or against broader market trends? Reference specific sector performance when relevant. For example, if the stock is down but the broader market/sector is up, note that the stock is underperforming despite positive market conditions. If the stock is down and the broader market/sector is also down, note that the stock is caught in a broader sell-off (e.g., "Technology stocks are broadly lower today, contributing to the decline").' : ''} Then use technical indicators (moving averages, RSI, MACD, support/resistance) to create a narrative that explains what's happening and why traders are seeing this price action. Focus on using technical data to tell the story - what do the charts reveal about the stock's current situation?`} Weave data points naturally into your analysis rather than listing them. Write like you're explaining the stock's technical picture to a colleague - clear, direct, and engaging. When relevant, mention key turning points and when they occurred to provide context for the current technical setup. Think like a trader: prioritize actionable insights and key technical signals over routine price updates.
+TASK: ${newsContext && (newsContext.scrapedContent || (newsContext.selectedArticles && newsContext.selectedArticles.length > 0)) ? `Write a conversational WGO article that helps readers understand "What's Going On" with the stock. LEAD with the current price move (direction and day of week, e.g., "shares are tumbling on Monday" or "shares are surging on Tuesday"). Use ONLY the day name (e.g., "on Thursday", "on Monday") - DO NOT include the date (e.g., do NOT use "on Thursday, December 18, 2025" or any date format). DO NOT include the percentage in the first paragraph. Then reference the news article provided above AND broader market context to explain what's going on - either the news is contributing to the move, OR the stock is moving despite positive/negative news (suggesting larger market elements may be at play). ${marketContext ? 'Use the broader market context (indices, sectors, market breadth) to provide additional context - is the stock moving with or against broader market trends? Reference specific sector performance when relevant (e.g., "Technology stocks are broadly lower today, contributing to the decline" or "Despite a strong market day, the stock is down, suggesting company-specific concerns").' : ''} Include the appropriate hyperlink in the first paragraph (three-word for Benzinga, one-word with outlet credit for others). 
+
+CRITICAL: The second paragraph (and optionally third paragraph) MUST include detailed, specific information from the news source article. Do NOT just summarize or use vague language. Extract and include:
+- Specific numbers, figures, percentages, dates, or metrics from the article
+- Analyst ratings, price targets, or specific analyst commentary
+- Regional variations or geographic specifics
+- Product details, model names, or technical specifications
+- Timeframes or comparative data
+- Key quotes or notable statements
+
+Use concrete facts and data points from the source article. For example, instead of "delivery times have increased", use "delivery lead times now run around five days, up from three days a year ago" or "In the U.S., lead times reached eight days for the iPhone 17 and four days for the Air." Include as much specific detail as possible while keeping paragraphs concise (2-3 sentences each).
+
+After the lead paragraph, two news content paragraphs (paragraphs 2 and 3), and the broader market/sector paragraph (paragraph 4, if applicable), transition to technical analysis focusing on longer-term trends (12-month).` : `Write a conversational WGO article that helps readers understand "What's Going On" with the stock. LEAD with the current price move and note that there's no company-specific news driving the move. ${marketContext ? 'Then use broader market context (indices, sectors, market breadth) to explain the move - is the stock moving with or against broader market trends? Reference specific sector performance when relevant. For example, if the stock is down but the broader market/sector is up, note that the stock is underperforming despite positive market conditions. If the stock is down and the broader market/sector is also down, note that the stock is caught in a broader sell-off (e.g., "Technology stocks are broadly lower today, contributing to the decline").' : ''} Then use technical indicators (moving averages, RSI, MACD, support/resistance) to create a narrative that explains what's happening and why traders are seeing this price action. Focus on using technical data to tell the story - what do the charts reveal about the stock's current situation?`} Weave data points naturally into your analysis rather than listing them. Write like you're explaining the stock's technical picture to a colleague - clear, direct, and engaging. When relevant, mention key turning points and when they occurred to provide context for the current technical setup. Think like a trader: prioritize actionable insights and key technical signals over routine price updates.
 
 
 
 CRITICAL RULES - PARAGRAPH LENGTH IS MANDATORY:
 
-- EVERY PARAGRAPH MUST BE EXACTLY 2 SENTENCES OR LESS - NO EXCEPTIONS. If you find yourself writing a third sentence, start a new paragraph instead.
+- NEWS PARAGRAPHS (second and third paragraphs when news is present): Can be 2-3 sentences to accommodate detailed information extraction from the source article.
+
+- TECHNICAL ANALYSIS AND OTHER PARAGRAPHS: Must be 2 sentences or less. If you find yourself writing a third sentence, start a new paragraph instead.
 
 - Write in a CONVERSATIONAL, DIRECT tone - avoid robotic or overly formal language
 
@@ -2462,15 +2681,39 @@ CRITICAL RULES - PARAGRAPH LENGTH IS MANDATORY:
 
 - Use normal, everyday language that's clear and accessible - write like you're talking to someone, not writing a formal report
 
-- FIRST PARAGRAPH (2 sentences max): ${newsContext && (newsContext.scrapedContent || (newsContext.selectedArticles && newsContext.selectedArticles.length > 0)) ? `Start with the company name in bold (**Company Name**), followed by the ticker in parentheses (not bold) - e.g., **Microsoft Corp** (MSFT) or **Apple Inc.** (AAPL). Use proper company name formatting with periods (Inc., Corp., etc.). Lead with the primary news article and include the appropriate hyperlink.` : `Start with the company name in bold (**Company Name**), followed by the ticker in parentheses (not bold) - e.g., **Apple Inc.** (AAPL) or **Applied Digital Corp.** (NASDAQ: APLD). Use proper company name formatting with periods (Inc., Corp., etc.). LEAD with the current price move direction using the Daily Change data provided - note ONLY the direction and day of week (e.g., "shares are tumbling Monday" if down, "shares are surging Tuesday" if up). DO NOT include the percentage in the first paragraph - it's already in the price action section. ${marketContext ? 'Then IMMEDIATELY reference broader market context to explain the move - is the stock moving with or against broader market trends? Reference specific sector performance when relevant (e.g., "The move comes as Technology stocks are broadly lower today, contributing to the decline" or "Despite a strong market day with the S&P 500 up 0.5%, the stock is down, suggesting company-specific concerns" or "The stock is caught in a broader sell-off, with the Nasdaq down 1.2% and Technology sector declining 1.5%").' : 'Then immediately pivot to the technical analysis context - use moving average positioning, support/resistance levels, or key technical signals to explain what traders are seeing on the charts (e.g., "Traders are focused on the technical picture, which shows the stock is currently testing key support levels while facing mixed signals from moving averages" or "The move comes as the stock flashes a \'mixed\' signal—breaking down in the short term while testing a crucial long-term floor").'} Focus on using market context and technical indicators to add context to the move rather than declaring there's no news. STOP AFTER 2 SENTENCES.`}
+- FIRST PARAGRAPH (2 sentences max): ${newsContext && (newsContext.scrapedContent || (newsContext.selectedArticles && newsContext.selectedArticles.length > 0)) ? `Start with the company name in bold (**Company Name**), followed by the ticker in parentheses (not bold) - e.g., **Microsoft Corp** (MSFT) or **Apple Inc.** (AAPL). Use proper company name formatting with periods (Inc., Corp., etc.). Lead with the primary news article and include the hyperlink by selecting any three consecutive words from your natural sentence flow and hyperlinking them - do NOT use phrases like "as detailed in a recent article" or "according to reports". Connect the price action to the news context. When mentioning the day, use ONLY the day name (e.g., "on Thursday", "on Monday") - DO NOT include the date (e.g., do NOT use "on Thursday, December 18, 2025" or any date format).` : `Start with the company name in bold (**Company Name**), followed by the ticker in parentheses (not bold) - e.g., **Apple Inc.** (AAPL) or **Applied Digital Corp.** (NASDAQ: APLD). Use proper company name formatting with periods (Inc., Corp., etc.). LEAD with the current price move direction using the Daily Change data provided - note ONLY the direction and day of week (e.g., "shares are tumbling on Monday" if down, "shares are surging on Tuesday" if up). Use ONLY the day name (e.g., "on Thursday", "on Monday") - DO NOT include the date. DO NOT include the percentage in the first paragraph - it's already in the price action section. ${marketContext ? 'Then IMMEDIATELY reference broader market context to explain the move - is the stock moving with or against broader market trends? Reference specific sector performance when relevant (e.g., "The move comes as Technology stocks are broadly lower today, contributing to the decline" or "Despite a strong market day with the S&P 500 up 0.5%, the stock is down, suggesting company-specific concerns" or "The stock is caught in a broader sell-off, with the Nasdaq down 1.2% and Technology sector declining 1.5%").' : 'Then immediately pivot to the technical analysis context - use moving average positioning, support/resistance levels, or key technical signals to explain what traders are seeing on the charts (e.g., "Traders are focused on the technical picture, which shows the stock is currently testing key support levels while facing mixed signals from moving averages" or "The move comes as the stock flashes a \'mixed\' signal—breaking down in the short term while testing a crucial long-term floor").'} Focus on using market context and technical indicators to add context to the move rather than declaring there's no news. STOP AFTER 2 SENTENCES.`}
 
-- SECOND PARAGRAPH (2 sentences max, MOVING AVERAGES WITH PERCENTAGES): ${newsContext && (newsContext.scrapedContent || (newsContext.selectedArticles && newsContext.selectedArticles.length > 0)) ? `Include RSI level and signal (overbought/oversold/neutral) and explain what it means for the stock. Provide insight into what this RSI level suggests about momentum and potential price action. STOP AFTER 2 SENTENCES.` : `${marketContext ? 'If market context was not fully covered in the first paragraph, briefly reference it here (1 sentence max). Then ' : ''}Use specific moving average percentages to explain the technical situation. Include the exact percentages (e.g., "9.3% below its 20-day Simple Moving Average (SMA) and 18.5% below its 50-day SMA") and explain what this positioning means for the stock's trend. Show both short-term and longer-term moving average relationships to create a complete picture (e.g., "confirming the bearish pressure" or "indicating strength"). STOP AFTER 2 SENTENCES.`}
+- SECOND PARAGRAPH (2 sentences, SUBSTANTIVE NEWS DETAILS - PART 1): ${newsContext && (newsContext.scrapedContent || (newsContext.selectedArticles && newsContext.selectedArticles.length > 0)) ? `MANDATORY: Provide detailed, specific information from the news source article. Focus on the first set of key details such as:
+  * Analyst ratings, price targets, or specific analyst commentary if mentioned (e.g., "Analyst Samik Chatterjee from JPMorgan has maintained an Overweight rating on Apple")
+  * Primary metrics, numbers, figures, or percentages (e.g., "iPhone 17 lead times have increased to around five days, up from three days a year ago")
+  * Key comparative data or timeframes
+  
+  Do NOT use vague phrases like "reports suggest" or "according to analysts" - use the specific data points, numbers, and details from the article. Extract concrete facts that weren't in the lead paragraph. This paragraph should be exactly 2 sentences with specific information. Do NOT try to pack everything here - save additional details for the third paragraph.` : ''}
 
-- THIRD PARAGRAPH (2 sentences max, MACD AND RSI FOCUS): ${newsContext && (newsContext.scrapedContent || (newsContext.selectedArticles && newsContext.selectedArticles.length > 0)) ? `Mention MACD status (whether MACD is above or below signal line) in simple terms - e.g., "MACD is below its signal line, indicating bearish pressure" or "MACD is above its signal line, indicating bullish momentum". DO NOT use the word "histogram" - just state whether MACD is above or below the signal line and what it indicates about momentum or trend strength. Provide insight into what this means for traders. STOP AFTER 2 SENTENCES.` : `Combine MACD and RSI analysis to show momentum indicators. Mention MACD status (whether MACD is above or below signal line) and what it suggests (e.g., "potential for a relief rally" or "indicating bearish pressure"). Include the RSI level with context (e.g., "RSI of 48.07 sits firmly in neutral territory—indicating the stock has not yet reached 'oversold' levels despite the double-digit decline"). Explain what these indicators together reveal about the stock's momentum. STOP AFTER 2 SENTENCES.`}
+- THIRD PARAGRAPH (2 sentences, SUBSTANTIVE NEWS DETAILS - PART 2): ${newsContext && (newsContext.scrapedContent || (newsContext.selectedArticles && newsContext.selectedArticles.length > 0)) ? `MANDATORY: Continue extracting detailed, specific information from the news source article. Include additional specifics such as:
+  * Regional variations or geographic specifics (e.g., "In the U.S., lead times for the iPhone 17 have reached eight days")
+  * Product-specific details, model variations, or technical specifications (e.g., "base-model lead times exceeding one week")
+  * Additional metrics, comparative data, or year-over-year comparisons (e.g., "This increase in lead times contrasts with the flat lead times for the iPhone 16 during the same period last year")
+  
+  Focus on specifics - numbers, regional variations, model-specific details, or other concrete facts that complement the second paragraph. This paragraph should also be exactly 2 sentences. Together, paragraphs 2 and 3 should provide comprehensive coverage of the article's key details.` : ''}
 
-- FOURTH PARAGRAPH (2 sentences max, SUPPORT/RESISTANCE FOCUS): Mention key support and resistance levels (rounded to nearest $0.50, not penny-precise) and explain what traders should anticipate if these levels are hit or breached - will it signal a trend change, continuation, or potential reversal? These are critical for traders. DO NOT repeat support and resistance levels in later paragraphs - mention them once here and move on. STOP AFTER 2 SENTENCES.
+- FOURTH PARAGRAPH (2 sentences, BROADER MARKET AND SECTOR CONTEXT): ${newsContext && (newsContext.scrapedContent || (newsContext.selectedArticles && newsContext.selectedArticles.length > 0)) && marketContext ? `MANDATORY: Include a paragraph about broader market movement and sector performance as a neutral comparison. ${marketStatus === 'open' || marketStatus === 'premarket' ? 'Use PRESENT TENSE to describe current market activity (e.g., "the broader market is experiencing", "the Technology sector is gaining", "the S&P 500 is up").' : marketStatus === 'afterhours' ? 'Use PAST TENSE to describe the trading day\'s performance (e.g., "the broader market experienced", "the Technology sector gained", "the S&P 500 closed up"). Reference the trading day that just ended.' : 'Use PAST TENSE to describe the trading day\'s performance (e.g., "the broader market experienced", "the Technology sector gained", "the S&P 500 closed up"). Reference the most recent trading day.'} 
+  
+  CRITICAL: This is a FACTUAL COMPARISON only - do NOT imply any logical relationship or contradiction between the news content and market performance. Do NOT use words like "Despite", "However", "Meanwhile", "In contrast", or start with "On the trading day" (which creates an awkward transition). The news is company-specific and has no relationship to broader market movement.
+  
+  Start with a smooth transition that flows naturally from the previous paragraph. Simply state:
+  * The broader market ${marketStatus === 'open' || marketStatus === 'premarket' ? 'performance' : 'performance'} (e.g., ${marketStatus === 'open' || marketStatus === 'premarket' ? '"The broader market saw gains, with the Technology sector up 1.47% today"' : '"The broader market saw gains, with the Technology sector rising 1.47% on the trading day"'})
+  * How the stock ${marketStatus === 'open' || marketStatus === 'premarket' ? 'performed' : 'performed'} relative to that (e.g., ${marketStatus === 'open' || marketStatus === 'premarket' ? '"AAPL\'s decline came as the broader sector moved higher, indicating company-specific factors may be at play"' : '"AAPL\'s decline came as the broader sector moved higher, indicating company-specific factors may have been at play"'})
+  
+  Use the actual percentage changes from the market context data provided. This paragraph should be exactly 2 sentences. CRITICAL: Match your verb tense to the market status - use present tense only when markets are open or in premarket, otherwise use past tense. Use smooth transitions like "The broader market saw..." or "Meanwhile, broader market indicators..." rather than awkward phrases like "On the trading day".` : ''}
 
-- FIFTH PARAGRAPH (2 sentences max, GOLDEN/DEATH CROSS ONLY IF DATE EXISTS): CRITICAL: Only mention a golden cross or death cross if there is an EXPLICIT DATE listed in the KEY TURNING POINTS section above. If there is NO golden cross date or death cross date in KEY TURNING POINTS, DO NOT mention golden cross or death cross at all - even if the MOVING AVERAGE CROSSOVERS section shows "50-day SMA above 200-day SMA" or similar. NEVER infer, guess, or make up dates for golden/death crosses. NEVER say "the golden cross occurred in [month]" unless that exact date is listed in KEY TURNING POINTS. If a golden cross or death cross date IS listed in KEY TURNING POINTS, mention it here with the EXACT MONTH NAME provided. Use proper capitalization for the month (e.g., "June" or "September", NOT "JUNE" or "SEPTEMBER" in all caps). The month name is EXPLICITLY STATED in brackets with CRITICAL INSTRUCTIONS - use that exact month name with proper case. DO NOT use the current month (December) unless it's explicitly stated in the turning points. DO NOT use vague terms like "recently" or "recent". If no golden/death cross dates are mentioned in KEY TURNING POINTS, discuss moving average relationships and what they indicate about trend strength instead. STOP AFTER 2 SENTENCES.
+- TECHNICAL ANALYSIS PARAGRAPH 1 (MOVING AVERAGES, 12-MONTH PERFORMANCE, 52-WEEK RANGE): Write a single paragraph that combines: (1) Stock position relative to 20-day and 100-day SMAs with exact percentages (e.g., "Apple stock is currently trading 2.3% below its 20-day simple moving average (SMA), but is X% above its 100-day SMA, demonstrating longer-term strength"), (2) 12-month performance (e.g., "Shares have increased/decreased X% over the past 12 months"), and (3) 52-week range position (e.g., "and are currently closer to 52-week highs than 52-week lows" or vice versa). Keep this to 2-3 sentences maximum. STOP AFTER THIS PARAGRAPH.
+
+- TECHNICAL ANALYSIS PARAGRAPH 2 (RSI AND MACD): Write a single paragraph that combines: (1) RSI level and interpretation (e.g., "The RSI is at 44.45, which is considered neutral territory"), and (2) MACD status (e.g., "Meanwhile, MACD is below its signal line, indicating bearish pressure on the stock"). Keep this to 2 sentences maximum. STOP AFTER THIS PARAGRAPH.
+
+- TECHNICAL ANALYSIS PARAGRAPH 3 (SUPPORT/RESISTANCE AND TRADING ADVICE): Write a single paragraph that includes: (1) Key support and resistance levels rounded to nearest $0.50 (e.g., "Key support is at $265.50, while resistance is at $277.00"), and (2) Trading advice/insight (e.g., "Traders should keep an eye on the support and resistance levels, as well as the momentum indicators, to gauge the stock's next moves. The current technical setup suggests that while AAPL has shown resilience, caution is warranted as it navigates these key levels"). Keep this to 2-3 sentences maximum. STOP AFTER THIS PARAGRAPH.
+
+CRITICAL: After these technical analysis paragraphs, move directly to any additional content (analyst ratings if applicable) or the price action line. Do NOT add more technical analysis paragraphs beyond these three.
 
 ${!newsContext || (!newsContext.scrapedContent && (!newsContext.selectedArticles || newsContext.selectedArticles.length === 0)) ? `- CRITICAL FOR NO-NEWS ARTICLES: Always mention the day of week (Monday, Tuesday, etc.) when describing the price move in the first paragraph. Use phrases like "shares are tumbling Monday" or "shares are surging Tuesday" to anchor the move in time. DO NOT include the percentage change in the first paragraph - it's already provided in the price action section at the bottom.
 

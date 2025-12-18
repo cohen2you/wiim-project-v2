@@ -28,6 +28,135 @@ function getCurrentDayName(): string {
   return days[nyTime.getDay()];
 }
 
+// Helper function to map sector name to sector ETF ticker
+function getSectorETFTicker(sectorName: string): string | null {
+  const sectorMap: { [key: string]: string } = {
+    'Technology': 'XLK',
+    'Financials': 'XLF',
+    'Energy': 'XLE',
+    'Healthcare': 'XLV',
+    'Industrials': 'XLI',
+    'Consumer Staples': 'XLP',
+    'Consumer Discretionary': 'XLY',
+    'Utilities': 'XLU',
+    'Real Estate': 'XLRE',
+    'Communication Services': 'XLC',
+    'Materials': 'XLB'
+  };
+  
+  // Try exact match first
+  if (sectorMap[sectorName]) {
+    return sectorMap[sectorName];
+  }
+  
+  // Try case-insensitive match
+  const sectorLower = sectorName.toLowerCase();
+  for (const [key, value] of Object.entries(sectorMap)) {
+    if (key.toLowerCase() === sectorLower) {
+      return value;
+    }
+  }
+  
+  return null;
+}
+
+// Helper function to map sector ETF ticker to readable sector name (same as market-report)
+function getSectorName(ticker: string): string {
+  return ticker === 'XLK' ? 'Technology' :
+         ticker === 'XLF' ? 'Financials' :
+         ticker === 'XLE' ? 'Energy' :
+         ticker === 'XLV' ? 'Healthcare' :
+         ticker === 'XLI' ? 'Industrials' :
+         ticker === 'XLP' ? 'Consumer Staples' :
+         ticker === 'XLY' ? 'Consumer Discretionary' :
+         ticker === 'XLU' ? 'Utilities' :
+         ticker === 'XLRE' ? 'Real Estate' :
+         ticker === 'XLC' ? 'Communication Services' :
+         ticker === 'XLB' ? 'Materials' : ticker;
+}
+
+// Helper function to get stock sector and performance
+async function getStockSectorPerformance(ticker: string): Promise<{ sectorName: string; sectorChange: number; sp500Change: number } | null> {
+  try {
+    // Fetch stock overview to get sector info
+    const overviewRes = await fetch(`https://api.polygon.io/v3/reference/tickers/${ticker}?apikey=${process.env.POLYGON_API_KEY}`);
+    if (!overviewRes.ok) return null;
+    
+    const overview = await overviewRes.json();
+    const result = overview.results;
+    
+    if (!result) return null;
+    
+    // Try multiple fields - sector is most reliable, then sic_description, then industry
+    let sectorField = result.sector || result.sic_description || result.industry || null;
+    
+    if (!sectorField) return null;
+    
+    // Map sector name/description to ETF ticker
+    // Handle common variations and partial matches
+    const sectorLower = sectorField.toLowerCase();
+    
+    // Direct mapping attempts
+    let sectorETF: string | null = null;
+    
+    if (sectorLower.includes('technology') || sectorLower.includes('software') || sectorLower.includes('tech')) {
+      sectorETF = 'XLK';
+    } else if (sectorLower.includes('financial') || sectorLower.includes('bank') || sectorLower.includes('insurance')) {
+      sectorETF = 'XLF';
+    } else if (sectorLower.includes('energy') || sectorLower.includes('oil') || sectorLower.includes('gas')) {
+      sectorETF = 'XLE';
+    } else if (sectorLower.includes('health') || sectorLower.includes('pharma') || sectorLower.includes('biotech')) {
+      sectorETF = 'XLV';
+    } else if (sectorLower.includes('industrial') || sectorLower.includes('manufacturing')) {
+      sectorETF = 'XLI';
+    } else if (sectorLower.includes('consumer staple') || sectorLower.includes('staples')) {
+      sectorETF = 'XLP';
+    } else if (sectorLower.includes('consumer discretion') || sectorLower.includes('retail') || sectorLower.includes('automotive')) {
+      sectorETF = 'XLY';
+    } else if (sectorLower.includes('utilit')) {
+      sectorETF = 'XLU';
+    } else if (sectorLower.includes('real estate') || sectorLower.includes('reit')) {
+      sectorETF = 'XLRE';
+    } else if (sectorLower.includes('communication') || sectorLower.includes('telecom') || sectorLower.includes('media')) {
+      sectorETF = 'XLC';
+    } else if (sectorLower.includes('material') || sectorLower.includes('chemical') || sectorLower.includes('mining')) {
+      sectorETF = 'XLB';
+    } else {
+      // Fallback to direct mapping function
+      sectorETF = getSectorETFTicker(sectorField);
+    }
+    
+    if (!sectorETF) return null;
+    
+    // Fetch market context
+    const INDICES = ['SPY'];
+    const SECTORS = [sectorETF];
+    const [indicesRes, sectorsRes] = await Promise.all([
+      fetch(`https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers?tickers=${INDICES.join(',')}&apikey=${process.env.POLYGON_API_KEY}`),
+      fetch(`https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers?tickers=${SECTORS.join(',')}&apikey=${process.env.POLYGON_API_KEY}`)
+    ]);
+    
+    const [indicesData, sectorsData] = await Promise.all([
+      indicesRes.json(),
+      sectorsRes.json()
+    ]);
+    
+    const sp500 = (indicesData.tickers || []).find((idx: any) => idx.ticker === 'SPY');
+    const sector = (sectorsData.tickers || []).find((s: any) => s.ticker === sectorETF);
+    
+    if (!sp500 || !sector) return null;
+    
+    return {
+      sectorName: getSectorName(sectorETF),
+      sectorChange: sector.todaysChangePerc || 0,
+      sp500Change: sp500.todaysChangePerc || 0
+    };
+  } catch (error) {
+    console.error('Error getting stock sector performance:', error);
+    return null;
+  }
+}
+
 async function fetchRecentArticles(ticker: string): Promise<any[]> {
   try {
     const dateFrom = new Date();
@@ -305,6 +434,9 @@ export async function POST(request: Request) {
       const currentDateStr = currentDate.toISOString().slice(0, 10);
       const marketStatus = getMarketStatus();
       const currentDayName = getCurrentDayName();
+      
+      // Get sector performance for comparison line
+      const sectorPerformance = await getStockSectorPerformance(ticker);
      
      // Calculate days difference for each article
      const articlesWithDateContext = stockData.recentArticles?.map((article: any) => {
@@ -352,26 +484,37 @@ CURRENT MARKET STATUS: ${marketStatus}
 STOCK DATA:
 ${JSON.stringify(stockData, null, 2)}
 
+${sectorPerformance ? `
+COMPARISON LINE (USE THIS EXACT FORMAT AT THE START OF THE ARTICLE, IMMEDIATELY AFTER THE HEADLINE):
+${stockData.priceAction?.companyName || ticker} stock is ${stockData.priceAction?.changePercent >= 0 ? 'up' : 'down'} approximately ${Math.abs(stockData.priceAction?.changePercent || 0).toFixed(1)}% on ${currentDayName} versus a ${sectorPerformance.sectorChange.toFixed(1)}% ${sectorPerformance.sectorChange >= 0 ? 'gain' : 'loss'} in the ${sectorPerformance.sectorName} sector and a ${Math.abs(sectorPerformance.sp500Change).toFixed(1)}% ${sectorPerformance.sp500Change >= 0 ? 'gain' : 'loss'} in the S&P 500.
+
+CRITICAL: This comparison line should appear immediately after the headline and before the main story content. Use this exact format.
+` : ''}
+
 CRITICAL INSTRUCTIONS:
 
 1. HEADLINE: Use format "[Company] Stock Is Trending ${currentDayName}: What's Going On?" (on its own line, no bold formatting)
 
-2. LEAD PARAGRAPH (exactly 2 sentences):
+2. ${sectorPerformance ? 'COMPARISON LINE (right after headline): Use the comparison line format provided above.' : ''}
+
+3. LEAD PARAGRAPH (exactly 2 sentences):
 - First sentence: Start with company name and ticker, describe actual price movement (up/down/unchanged) with time context
 - Second sentence: Brief context about what's driving momentum based on technical data
 
-3. TECHNICAL ANALYSIS SECTION:
-- Focus on price action, volume, and market data
-- Include technical indicators and momentum analysis
-- Reference support/resistance levels if available
-- Include volume analysis and market cap data
-- DO NOT include any analyst ratings or commentary
+4. TECHNICAL ANALYSIS SECTION (simplified structure):
+Write exactly 3 paragraphs for technical analysis:
 
-4. PRICE ACTION LINE (at the end):
+TECHNICAL ANALYSIS PARAGRAPH 1 (MOVING AVERAGES, 12-MONTH PERFORMANCE, 52-WEEK RANGE): Write a single paragraph that combines: (1) Stock position relative to 20-day and 100-day SMAs with exact percentages if available (e.g., "Apple stock is currently trading 2.3% below its 20-day simple moving average (SMA), but is X% above its 100-day SMA, demonstrating longer-term strength"), (2) 12-month performance if available (e.g., "Shares have increased/decreased X% over the past 12 months"), and (3) 52-week range position (e.g., "and are currently closer to 52-week highs than 52-week lows" or vice versa). If specific technical data is not available in the stock data, use general language about the stock's technical position. Keep this to 2-3 sentences maximum.
+
+TECHNICAL ANALYSIS PARAGRAPH 2 (RSI AND MACD): Write a single paragraph that combines: (1) RSI level and interpretation if available (e.g., "The RSI is at 44.45, which is considered neutral territory"), and (2) MACD status if available (e.g., "Meanwhile, MACD is below its signal line, indicating bearish pressure on the stock"). If specific indicator data is not available, use general language about momentum indicators. Keep this to 2 sentences maximum.
+
+TECHNICAL ANALYSIS PARAGRAPH 3 (SUPPORT/RESISTANCE AND TRADING ADVICE): Write a single paragraph that includes: (1) Key support and resistance levels if available, rounded to nearest $0.50 (e.g., "Key support is at $265.50, while resistance is at $277.00"), and (2) Trading advice/insight (e.g., "Traders should keep an eye on the support and resistance levels, as well as the momentum indicators, to gauge the stock's next moves. The current technical setup suggests that while the stock has shown resilience, caution is warranted as it navigates these key levels"). Keep this to 2-3 sentences maximum.
+
+5. PRICE ACTION LINE (at the end):
 - Format: "[TICKER] Price Action: [Company Name] shares were [up/down] [X.XX]% at $[XX.XX] [during premarket trading/during after-hours trading/while the market was closed] on [Day], according to <a href=\"https://pro.benzinga.com\">Benzinga Pro</a>."
 - All prices must be formatted to exactly 2 decimal places
 
-5. WRITING STYLE:
+6. WRITING STYLE:
 - Professional financial journalism
 - Active voice, clear language
 - No flowery phrases like "amidst" or "whilst"
