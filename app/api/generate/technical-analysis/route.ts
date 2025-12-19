@@ -1791,50 +1791,73 @@ async function fetchTechnicalData(symbol: string): Promise<TechnicalAnalysisData
     const tickerData = snapshot.ticker;
 
     const currentPrice = tickerData?.lastTrade?.p || tickerData?.day?.c || 0;
+    const marketStatus = getMarketStatusTimeBased();
 
-    // Calculate regular session change percent (not including after-hours)
-    // Prefer Benzinga data for accurate regular session change calculation
-    // Fallback to Polygon's day data if Benzinga unavailable
+    // Calculate change percent based on market status
+    // During premarket, use premarket change (current price vs previous close)
+    // Otherwise, use regular session change
     let changePercent = 0;
     
-    // If Benzinga data is available, calculate regular session change from close vs previousClosePrice
-    // This matches how the price action line calculates it - ensures we use regular session change, not after-hours adjusted change
-    if (benzingaData && benzingaData[symbol]) {
+    if (marketStatus === 'premarket' && benzingaData && benzingaData[symbol]) {
+      // During premarket, calculate change from current premarket price vs previous close
       const benzingaQuote = benzingaData[symbol];
-      // Try previousClosePrice first (matches price action line calculation), then fallback to previousClose
-      const benzingaClose = typeof benzingaQuote.close === 'number' ? benzingaQuote.close : parseFloat(benzingaQuote.close);
+      const premarketPrice = typeof benzingaQuote.lastTradePrice === 'number' ? benzingaQuote.lastTradePrice : parseFloat(benzingaQuote.lastTradePrice || currentPrice);
       const benzingaPrevClose = typeof benzingaQuote.previousClosePrice === 'number' ? benzingaQuote.previousClosePrice : 
                                  (typeof benzingaQuote.previousClose === 'number' ? benzingaQuote.previousClose : parseFloat(benzingaQuote.previousClose || benzingaQuote.previousClosePrice));
       
-      if (benzingaClose && benzingaPrevClose && benzingaPrevClose > 0 && !isNaN(benzingaClose) && !isNaN(benzingaPrevClose)) {
-        const regularSessionChange = ((benzingaClose - benzingaPrevClose) / benzingaPrevClose) * 100;
-        changePercent = regularSessionChange;
-        console.log(`Using regular session change from Benzinga: ${changePercent.toFixed(2)}% (close: ${benzingaClose}, previousClosePrice: ${benzingaPrevClose})`);
-      } else if (benzingaQuote.change && benzingaPrevClose && benzingaPrevClose > 0) {
-        // Fallback: calculate from change amount
-        const benzingaChange = typeof benzingaQuote.change === 'number' ? benzingaQuote.change : parseFloat(benzingaQuote.change);
-        if (!isNaN(benzingaChange)) {
-          const regularSessionChange = (benzingaChange / benzingaPrevClose) * 100;
+      if (premarketPrice && benzingaPrevClose && benzingaPrevClose > 0 && !isNaN(premarketPrice) && !isNaN(benzingaPrevClose)) {
+        const premarketChange = ((premarketPrice - benzingaPrevClose) / benzingaPrevClose) * 100;
+        changePercent = premarketChange;
+        console.log(`Using premarket change from Benzinga: ${changePercent.toFixed(2)}% (premarket price: ${premarketPrice}, previousClose: ${benzingaPrevClose})`);
+      } else if (benzingaQuote.changePercent && typeof benzingaQuote.changePercent === 'number') {
+        // Fallback: use changePercent from Benzinga (should be premarket change during premarket)
+        changePercent = benzingaQuote.changePercent;
+        console.log(`Using Benzinga changePercent for premarket: ${changePercent.toFixed(2)}%`);
+      }
+    } else {
+      // Regular session or after-hours: calculate regular session change percent (not including after-hours)
+      // Prefer Benzinga data for accurate regular session change calculation
+      // Fallback to Polygon's day data if Benzinga unavailable
+      
+      // If Benzinga data is available, calculate regular session change from close vs previousClosePrice
+      // This matches how the price action line calculates it - ensures we use regular session change, not after-hours adjusted change
+      if (benzingaData && benzingaData[symbol]) {
+        const benzingaQuote = benzingaData[symbol];
+        // Try previousClosePrice first (matches price action line calculation), then fallback to previousClose
+        const benzingaClose = typeof benzingaQuote.close === 'number' ? benzingaQuote.close : parseFloat(benzingaQuote.close);
+        const benzingaPrevClose = typeof benzingaQuote.previousClosePrice === 'number' ? benzingaQuote.previousClosePrice : 
+                                   (typeof benzingaQuote.previousClose === 'number' ? benzingaQuote.previousClose : parseFloat(benzingaQuote.previousClose || benzingaQuote.previousClosePrice));
+        
+        if (benzingaClose && benzingaPrevClose && benzingaPrevClose > 0 && !isNaN(benzingaClose) && !isNaN(benzingaPrevClose)) {
+          const regularSessionChange = ((benzingaClose - benzingaPrevClose) / benzingaPrevClose) * 100;
           changePercent = regularSessionChange;
-          console.log(`Using regular session change from Benzinga change amount: ${changePercent.toFixed(2)}%`);
+          console.log(`Using regular session change from Benzinga: ${changePercent.toFixed(2)}% (close: ${benzingaClose}, previousClosePrice: ${benzingaPrevClose})`);
+        } else if (benzingaQuote.change && benzingaPrevClose && benzingaPrevClose > 0) {
+          // Fallback: calculate from change amount
+          const benzingaChange = typeof benzingaQuote.change === 'number' ? benzingaQuote.change : parseFloat(benzingaQuote.change);
+          if (!isNaN(benzingaChange)) {
+            const regularSessionChange = (benzingaChange / benzingaPrevClose) * 100;
+            changePercent = regularSessionChange;
+            console.log(`Using regular session change from Benzinga change amount: ${changePercent.toFixed(2)}%`);
+          }
         }
       }
-    }
-    
-    // Fallback to Polygon's day data for regular session change if Benzinga data not available
-    if (changePercent === 0 && tickerData?.day?.c && tickerData?.day?.o) {
-      const dayClose = tickerData.day.c;
-      const dayOpen = tickerData.day.o;
-      if (dayClose && dayOpen && dayOpen > 0) {
-        changePercent = ((dayClose - dayOpen) / dayOpen) * 100;
-        console.log(`Using Polygon day change (close vs open): ${changePercent.toFixed(2)}%`);
+      
+      // Fallback to Polygon's day data for regular session change if Benzinga data not available
+      if (changePercent === 0 && tickerData?.day?.c && tickerData?.day?.o) {
+        const dayClose = tickerData.day.c;
+        const dayOpen = tickerData.day.o;
+        if (dayClose && dayOpen && dayOpen > 0) {
+          changePercent = ((dayClose - dayOpen) / dayOpen) * 100;
+          console.log(`Using Polygon day change (close vs open): ${changePercent.toFixed(2)}%`);
+        }
       }
-    }
-    
-    // Last resort: use Polygon's todaysChangePerc (but this may include after-hours)
-    if (changePercent === 0) {
-      changePercent = tickerData?.todaysChangePerc || 0;
-      console.log(`Using Polygon todaysChangePerc (may include after-hours): ${changePercent.toFixed(2)}%`);
+      
+      // Last resort: use Polygon's todaysChangePerc (but this may include after-hours)
+      if (changePercent === 0) {
+        changePercent = tickerData?.todaysChangePerc || 0;
+        console.log(`Using Polygon todaysChangePerc (may include after-hours): ${changePercent.toFixed(2)}%`);
+      }
     }
 
     const volume = tickerData?.day?.v || 0;
@@ -2153,11 +2176,14 @@ async function getStockSectorPerformance(ticker: string, marketContext: MarketCo
 }
 
 // Fetch market context for broader market analysis
-async function fetchMarketContext(): Promise<MarketContext | null> {
+async function fetchMarketContext(usePreviousDay: boolean = false): Promise<MarketContext | null> {
   try {
     const INDICES = ['SPY', 'QQQ', 'DIA', 'IWM'];
     const SECTORS = ['XLK', 'XLF', 'XLE', 'XLV', 'XLI', 'XLP', 'XLY', 'XLU', 'XLRE', 'XLC', 'XLB'];
     
+    // If we need previous day's data (e.g., during premarket), we'll use the previous trading day's snapshot
+    // For now, Polygon snapshot API returns current/latest data, which during premarket would be previous day's close
+    // The todaysChangePerc during premarket should reflect previous day's change
     const [indicesRes, sectorsRes, gainersRes, losersRes] = await Promise.all([
       fetch(`https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers?tickers=${INDICES.join(',')}&apikey=${process.env.POLYGON_API_KEY}`),
       fetch(`https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers?tickers=${SECTORS.join(',')}&apikey=${process.env.POLYGON_API_KEY}`),
@@ -2359,9 +2385,11 @@ STOCK: ${data.companyNameWithExchange || `${data.companyName} (${data.symbol})`}
 
 Current Price: $${formatPrice(data.currentPrice)}
 
-Daily Change (REGULAR SESSION ONLY): ${data.changePercent.toFixed(2)}%
+${marketStatus === 'premarket' ? `Premarket Change: ${data.changePercent.toFixed(2)}%
 
-CRITICAL: The "Daily Change (REGULAR SESSION ONLY)" value above is the REGULAR TRADING SESSION change percentage only (does NOT include after-hours movement). Use this value to determine if shares were UP or DOWN during regular trading. ${data.changePercent >= 0 ? 'Shares were UP during regular trading.' : 'Shares were DOWN during regular trading.'} Use this direction when writing the lead paragraph and comparison line.
+CRITICAL: The "Premarket Change" value above is the PREMARKET change percentage (current premarket price vs previous day's close). Use this value to determine if shares are UP or DOWN during premarket trading. ${data.changePercent >= 0 ? 'Shares are UP during premarket trading.' : 'Shares are DOWN during premarket trading.'} Use this direction when writing the lead paragraph and comparison line.` : `Daily Change (REGULAR SESSION ONLY): ${data.changePercent.toFixed(2)}%
+
+CRITICAL: The "Daily Change (REGULAR SESSION ONLY)" value above is the REGULAR TRADING SESSION change percentage only (does NOT include after-hours movement). Use this value to determine if shares were UP or DOWN during regular trading. ${data.changePercent >= 0 ? 'Shares were UP during regular trading.' : 'Shares were DOWN during regular trading.'} Use this direction when writing the lead paragraph and comparison line.`}
 
 ${sectorPerformance && sp500Change !== null ? `
 COMPARISON LINE (USE THIS EXACT FORMAT AT THE START OF THE ARTICLE, IMMEDIATELY AFTER THE HEADLINE):
@@ -2723,7 +2751,7 @@ CRITICAL RULES - PARAGRAPH LENGTH IS MANDATORY:
   
   Focus on specifics - numbers, regional variations, model-specific details, or other concrete facts that complement the second paragraph. This paragraph should also be exactly 2 sentences. Together, paragraphs 2 and 3 should provide comprehensive coverage of the article's key details.` : ''}
 
-- FOURTH PARAGRAPH (2 sentences, BROADER MARKET AND SECTOR CONTEXT): ${newsContext && (newsContext.scrapedContent || (newsContext.selectedArticles && newsContext.selectedArticles.length > 0)) && marketContext ? `MANDATORY: Include a paragraph about broader market movement and sector performance as a neutral comparison. ${marketStatus === 'open' || marketStatus === 'premarket' ? 'Use PRESENT TENSE to describe current market activity (e.g., "the broader market is experiencing", "the Technology sector is gaining", "the S&P 500 is up").' : marketStatus === 'afterhours' ? 'Use PAST TENSE to describe the trading day\'s performance (e.g., "the broader market experienced", "the Technology sector gained", "the S&P 500 closed up"). Reference the trading day that just ended.' : 'Use PAST TENSE to describe the trading day\'s performance (e.g., "the broader market experienced", "the Technology sector gained", "the S&P 500 closed up"). Reference the most recent trading day.'} 
+- FOURTH PARAGRAPH (2 sentences, BROADER MARKET AND SECTOR CONTEXT): ${newsContext && (newsContext.scrapedContent || (newsContext.selectedArticles && newsContext.selectedArticles.length > 0)) && marketContext ? `MANDATORY: Include a paragraph about broader market movement and sector performance as a neutral comparison. ${marketStatus === 'premarket' ? 'CRITICAL: During premarket, the market context data provided is from the PREVIOUS TRADING DAY (markets are not yet open). Use PAST TENSE to describe the previous trading day\'s performance (e.g., "the broader market experienced", "the Technology sector gained", "the S&P 500 closed up on the previous trading day"). Reference it as "on the previous trading day" or "yesterday" to make it clear this is historical data.' : marketStatus === 'open' ? 'Use PRESENT TENSE to describe current market activity (e.g., "the broader market is experiencing", "the Technology sector is gaining", "the S&P 500 is up").' : marketStatus === 'afterhours' ? 'Use PAST TENSE to describe the trading day\'s performance (e.g., "the broader market experienced", "the Technology sector gained", "the S&P 500 closed up"). Reference the trading day that just ended.' : 'Use PAST TENSE to describe the trading day\'s performance (e.g., "the broader market experienced", "the Technology sector gained", "the S&P 500 closed up"). Reference the most recent trading day.'} 
   
   CRITICAL: This is a FACTUAL COMPARISON only - do NOT imply any logical relationship or contradiction between the news content and market performance. Do NOT use words like "Despite", "However", "Meanwhile", "In contrast", or start with "On the trading day" (which creates an awkward transition). The news is company-specific and has no relationship to broader market movement.
   
