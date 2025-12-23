@@ -207,6 +207,7 @@ interface TechnicalAnalysisData {
   companyNameWithExchange?: string;
 
   currentPrice: number;
+  regularSessionClosePrice?: number; // Regular session close price (separate from after-hours current price)
 
   changePercent: number;
 
@@ -1797,6 +1798,7 @@ async function fetchTechnicalData(symbol: string): Promise<TechnicalAnalysisData
     // During premarket, use premarket change (current price vs previous close)
     // Otherwise, use regular session change
     let changePercent = 0;
+    let regularSessionClosePrice: number | undefined = undefined; // Regular session close price (separate from after-hours current price)
     
     if (marketStatus === 'premarket' && benzingaData && benzingaData[symbol]) {
       // During premarket, calculate change from current premarket price vs previous close
@@ -1829,6 +1831,7 @@ async function fetchTechnicalData(symbol: string): Promise<TechnicalAnalysisData
                                    (typeof benzingaQuote.previousClose === 'number' ? benzingaQuote.previousClose : parseFloat(benzingaQuote.previousClose || benzingaQuote.previousClosePrice));
         
         if (benzingaClose && benzingaPrevClose && benzingaPrevClose > 0 && !isNaN(benzingaClose) && !isNaN(benzingaPrevClose)) {
+          regularSessionClosePrice = benzingaClose;
           const regularSessionChange = ((benzingaClose - benzingaPrevClose) / benzingaPrevClose) * 100;
           changePercent = regularSessionChange;
           console.log(`Using regular session change from Benzinga: ${changePercent.toFixed(2)}% (close: ${benzingaClose}, previousClosePrice: ${benzingaPrevClose})`);
@@ -1836,6 +1839,8 @@ async function fetchTechnicalData(symbol: string): Promise<TechnicalAnalysisData
           // Fallback: calculate from change amount
           const benzingaChange = typeof benzingaQuote.change === 'number' ? benzingaQuote.change : parseFloat(benzingaQuote.change);
           if (!isNaN(benzingaChange)) {
+            // Calculate regular session close from previous close + change
+            regularSessionClosePrice = benzingaPrevClose + benzingaChange;
             const regularSessionChange = (benzingaChange / benzingaPrevClose) * 100;
             changePercent = regularSessionChange;
             console.log(`Using regular session change from Benzinga change amount: ${changePercent.toFixed(2)}%`);
@@ -1848,6 +1853,7 @@ async function fetchTechnicalData(symbol: string): Promise<TechnicalAnalysisData
         const dayClose = tickerData.day.c;
         const dayOpen = tickerData.day.o;
         if (dayClose && dayOpen && dayOpen > 0) {
+          regularSessionClosePrice = dayClose;
           changePercent = ((dayClose - dayOpen) / dayOpen) * 100;
           console.log(`Using Polygon day change (close vs open): ${changePercent.toFixed(2)}%`);
         }
@@ -1855,6 +1861,8 @@ async function fetchTechnicalData(symbol: string): Promise<TechnicalAnalysisData
       
       // Last resort: use Polygon's todaysChangePerc (but this may include after-hours)
       if (changePercent === 0) {
+        // Use day.c as regular session close if available
+        regularSessionClosePrice = tickerData?.day?.c || undefined;
         changePercent = tickerData?.todaysChangePerc || 0;
         console.log(`Using Polygon todaysChangePerc (may include after-hours): ${changePercent.toFixed(2)}%`);
       }
@@ -1987,6 +1995,7 @@ async function fetchTechnicalData(symbol: string): Promise<TechnicalAnalysisData
       companyName,
 
       currentPrice,
+      regularSessionClosePrice,
 
       changePercent,
 
@@ -2199,6 +2208,40 @@ async function fetchMarketContext(usePreviousDay: boolean = false): Promise<Mark
       losersRes.json()
     ]);
 
+    // Log detailed raw API response to debug date issues
+    console.log('[MARKET CONTEXT] Raw indices data:');
+    (indicesData.tickers || []).forEach((idx: any) => {
+      console.log(`[MARKET CONTEXT] ${idx.ticker} (${idx.ticker === 'SPY' ? 'S&P 500' : idx.ticker === 'QQQ' ? 'Nasdaq' : idx.ticker === 'DIA' ? 'Dow Jones' : idx.ticker === 'IWM' ? 'Russell 2000' : idx.ticker}):`, {
+        ticker: idx.ticker,
+        market: idx.market,
+        locale: idx.locale,
+        primaryExch: idx.primaryExch,
+        type: idx.type,
+        todaysChangePerc: idx.todaysChangePerc,
+        day: idx.day ? {
+          o: idx.day.o,
+          h: idx.day.h,
+          l: idx.day.l,
+          c: idx.day.c,
+          v: idx.day.v,
+          vw: idx.day.vw
+        } : null,
+        prevDay: idx.prevDay ? {
+          o: idx.prevDay.o,
+          h: idx.prevDay.h,
+          l: idx.prevDay.l,
+          c: idx.prevDay.c,
+          v: idx.prevDay.v,
+          vw: idx.prevDay.vw
+        } : null,
+        lastTrade: idx.lastTrade ? {
+          p: idx.lastTrade.p,
+          s: idx.lastTrade.s,
+          t: idx.lastTrade.t
+        } : null
+      });
+    });
+
     const indices = (indicesData.tickers || []).map((idx: any) => ({
       name: idx.ticker === 'SPY' ? 'S&P 500' : 
             idx.ticker === 'QQQ' ? 'Nasdaq' : 
@@ -2207,6 +2250,43 @@ async function fetchMarketContext(usePreviousDay: boolean = false): Promise<Mark
       ticker: idx.ticker,
       change: idx.todaysChangePerc || 0
     }));
+
+    // Log detailed raw sectors data
+    console.log('[MARKET CONTEXT] Raw sectors data:');
+    (sectorsData.tickers || []).forEach((sector: any) => {
+      const sectorName = sector.ticker === 'XLK' ? 'Technology' :
+            sector.ticker === 'XLF' ? 'Financials' :
+            sector.ticker === 'XLE' ? 'Energy' :
+            sector.ticker === 'XLV' ? 'Healthcare' :
+            sector.ticker === 'XLI' ? 'Industrials' :
+            sector.ticker === 'XLP' ? 'Consumer Staples' :
+            sector.ticker === 'XLY' ? 'Consumer Discretionary' :
+            sector.ticker === 'XLU' ? 'Utilities' :
+            sector.ticker === 'XLRE' ? 'Real Estate' :
+            sector.ticker === 'XLC' ? 'Communication Services' :
+            sector.ticker === 'XLB' ? 'Materials' : sector.ticker;
+      console.log(`[MARKET CONTEXT] ${sector.ticker} (${sectorName}):`, {
+        ticker: sector.ticker,
+        market: sector.market,
+        locale: sector.locale,
+        primaryExch: sector.primaryExch,
+        type: sector.type,
+        todaysChangePerc: sector.todaysChangePerc,
+        day: sector.day ? {
+          o: sector.day.o,
+          h: sector.day.h,
+          l: sector.day.l,
+          c: sector.day.c,
+          v: sector.day.v
+        } : null,
+        prevDay: sector.prevDay ? {
+          o: sector.prevDay.o,
+          h: sector.prevDay.h,
+          l: sector.prevDay.l,
+          c: sector.prevDay.c
+        } : null
+      });
+    });
 
     const sectors = (sectorsData.tickers || []).map((sector: any) => ({
       name: sector.ticker === 'XLK' ? 'Technology' :
@@ -2248,6 +2328,11 @@ async function fetchMarketContext(usePreviousDay: boolean = false): Promise<Mark
     const decliners = sectors.filter((s: { name: string; ticker: string; change: number }) => s.change < 0).length;
     const ratio = decliners > 0 ? (advancers / decliners).toFixed(1) : 'N/A';
 
+    console.log('[MARKET CONTEXT] Market data fetched successfully:');
+    console.log(`[MARKET CONTEXT] Indices: ${indices.map((i: { name: string; ticker: string; change: number }) => `${i.name} ${i.change > 0 ? '+' : ''}${i.change.toFixed(2)}%`).join(', ')}`);
+    console.log(`[MARKET CONTEXT] Top sectors: ${sectors.slice(0, 3).map((s: { name: string; ticker: string; change: number }) => `${s.name} ${s.change > 0 ? '+' : ''}${s.change.toFixed(2)}%`).join(', ')}`);
+    console.log(`[MARKET CONTEXT] Market breadth: ${advancers} advancing, ${decliners} declining (ratio: ${ratio})`);
+
     return {
       indices,
       sectors: sectors.sort((a: { name: string; ticker: string; change: number }, b: { name: string; ticker: string; change: number }) => b.change - a.change), // Sort by performance
@@ -2256,7 +2341,7 @@ async function fetchMarketContext(usePreviousDay: boolean = false): Promise<Mark
       topLosers: losers
     };
   } catch (error) {
-    console.error('Error fetching market context:', error);
+    console.error('[MARKET CONTEXT] Error fetching market context:', error);
     return null;
   }
 }
@@ -2384,7 +2469,9 @@ CRITICAL: Adjust your language based on market status:
 
 STOCK: ${data.companyNameWithExchange || `${data.companyName} (${data.symbol})`}
 
-Current Price: $${formatPrice(data.currentPrice)}
+Current Price: $${formatPrice(data.currentPrice)}${marketStatus === 'afterhours' && data.regularSessionClosePrice ? `
+Regular Session Close Price: $${formatPrice(data.regularSessionClosePrice)}
+CRITICAL: During after-hours, the "Current Price" above is the AFTER-HOURS price. When writing about the closing price in the lede, use ONLY the "Regular Session Close Price" shown above, or better yet, DO NOT include a specific closing price amount in the lede - only mention the direction (up/down) and day. The specific closing price is already provided in the price action line at the bottom of the article.` : ''}
 
 ${marketStatus === 'premarket' ? `Premarket Change: ${data.changePercent.toFixed(2)}%
 
@@ -2672,7 +2759,7 @@ URL: ${article.url || 'N/A'}
 
 CRITICAL INSTRUCTIONS FOR NEWS INTEGRATION:
 
-1. LEAD THE STORY WITH PRICE ACTION: The first paragraph MUST start with the stock's current price move (direction and day of week, e.g., "shares closed up on Thursday" or "shares closed down on Monday"). ${marketStatus === 'premarket' ? 'Use the "Premarket Change" value provided above to determine direction - if it\'s positive, say "are up during premarket trading on [day]"; if it\'s negative, say "are down during premarket trading on [day]". You MUST include the phrase "during premarket trading" in the first sentence. Example: "Apple Inc. (NASDAQ:AAPL) shares are down during premarket trading on Friday".' : 'Use the "Daily Change (REGULAR SESSION ONLY)" value provided above to determine direction - if it\'s positive, say "closed up" or "were up"; if it\'s negative, say "closed down" or "were down".'} When mentioning the day, use ONLY the day name (e.g., "on Thursday", "on Monday") - DO NOT include the date (e.g., do NOT use "on Thursday, December 18, 2025" or any date format). ${marketStatus === 'open' || marketStatus === 'premarket' ? 'Use present tense (e.g., "shares are tumbling", "shares are surging", "shares are up", "shares are down") since markets are currently open or in premarket.' : 'Use past tense (e.g., "shares closed up", "shares closed down", "shares were up", "shares were down") since markets are closed.'} DO NOT include the percentage in the first paragraph - it's already in the price action section. Then reference the news article to explain what's going on - either the news is contributing to the move, OR the stock is moving despite positive/negative news (suggesting larger market elements may be at play). The angle should answer "What's Going On" by connecting the price action to the news context.
+1. LEAD THE STORY WITH PRICE ACTION: The first paragraph MUST start with the stock's current price move (direction and day of week, e.g., "shares closed up on Thursday" or "shares closed down on Monday"). ${marketStatus === 'premarket' ? 'Use the "Premarket Change" value provided above to determine direction - if it\'s positive, say "are up during premarket trading on [day]"; if it\'s negative, say "are down during premarket trading on [day]". You MUST include the phrase "during premarket trading" in the first sentence. Example: "Apple Inc. (NASDAQ:AAPL) shares are down during premarket trading on Friday".' : 'Use the "Daily Change (REGULAR SESSION ONLY)" value provided above to determine direction - if it\'s positive, say "closed up" or "were up"; if it\'s negative, say "closed down" or "were down".'} ${marketStatus === 'afterhours' ? 'CRITICAL: During after-hours, DO NOT include a specific closing price amount (e.g., do NOT write "closing at $22.18"). The "Current Price" shown above is the after-hours price, not the regular session closing price. Only mention the direction (up/down) and day - do NOT include any dollar amount or percentage. Example: "ZIM Integrated Shipping Services Ltd. (NYSE:ZIM) shares surged on Monday during regular trading" NOT "closing at $22.18" or "closing up 3.33%".' : ''} When mentioning the day, use ONLY the day name (e.g., "on Thursday", "on Monday") - DO NOT include the date (e.g., do NOT use "on Thursday, December 18, 2025" or any date format). ${marketStatus === 'open' || marketStatus === 'premarket' ? 'Use present tense (e.g., "shares are tumbling", "shares are surging", "shares are up", "shares are down") since markets are currently open or in premarket.' : 'Use past tense (e.g., "shares closed up", "shares closed down", "shares were up", "shares were down") since markets are closed.'} DO NOT include the percentage in the first paragraph - it's already in the price action section. Then reference the news article to explain what's going on - either the news is contributing to the move, OR the stock is moving despite positive/negative news (suggesting larger market elements may be at play). The angle should answer "What's Going On" by connecting the price action to the news context.
 
 2. HYPERLINK FORMATTING (MANDATORY - MUST BE IN FIRST PARAGRAPH):
    ${isBenzinga ? `- This is a Benzinga article. You MUST include a hyperlink in the first paragraph by choosing ANY THREE CONSECUTIVE WORDS from your first paragraph and wrapping them in a hyperlink with format: <a href="${primaryUrl}">[three consecutive words]</a>
