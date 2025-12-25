@@ -241,7 +241,7 @@ async function generatePriceAction(ticker: string): Promise<string> {
       const lastTrade = typeof quote.lastTradePrice === 'number' ? quote.lastTradePrice : parseFloat(quote.lastTradePrice);
       if (!isNaN(lastTrade) && lastTrade !== regularSessionClose) {
         afterHoursChange = ((lastTrade - regularSessionClose) / regularSessionClose) * 100;
-        hasAfterHoursData = true;
+      hasAfterHoursData = true;
         console.log(`[PRICE ACTION] After-hours change: ${afterHoursChange.toFixed(2)}% (lastTrade: ${lastTrade}, close: ${regularSessionClose})`);
       }
     }
@@ -295,8 +295,8 @@ async function generatePriceAction(ticker: string): Promise<string> {
       console.log(`[PRICE ACTION] Fallback to changePercent: ${changePercent.toFixed(2)}%`);
       if (marketStatus === 'open') {
         priceActionText = `<strong>${symbol} Price Action:</strong> ${companyName} shares were ${upDown} ${absChange}% at $${lastPrice} at the time of publication on ${dayOfWeek}`;
-      } else {
-        priceActionText = `<strong>${symbol} Price Action:</strong> ${companyName} shares were ${upDown} ${absChange}% at $${lastPrice}${marketStatusPhrase} on ${dayOfWeek}`;
+    } else {
+      priceActionText = `<strong>${symbol} Price Action:</strong> ${companyName} shares were ${upDown} ${absChange}% at $${lastPrice}${marketStatusPhrase} on ${dayOfWeek}`;
       }
     }
     
@@ -2502,7 +2502,7 @@ async function generateTechnicalAnalysis(data: TechnicalAnalysisData, provider?:
     const today = new Date();
 
     const dayOfWeek = dayNames[today.getDay()];
-    
+
     // Get market status to adjust language appropriately
     const marketStatus = getMarketStatusTimeBased();
     
@@ -2520,6 +2520,10 @@ async function generateTechnicalAnalysis(data: TechnicalAnalysisData, provider?:
       } catch (e) {
         // Invalid URL, skip outlet name extraction
       }
+      // Debug logging
+      console.log('[HYPERLINK DEBUG] primaryUrl:', primaryUrl);
+      console.log('[HYPERLINK DEBUG] isBenzinga:', isBenzinga);
+      console.log('[HYPERLINK DEBUG] outletName:', outletName);
     }
     
     // Get stock sector performance for comparison line
@@ -2922,16 +2926,18 @@ CRITICAL INSTRUCTIONS FOR NEWS INTEGRATION:
 1. LEAD THE STORY WITH PRICE ACTION: The first paragraph MUST start with the stock's current price move (direction and day of week, e.g., "shares closed up on Thursday" or "shares closed down on Monday"). ${marketStatus === 'premarket' ? `CRITICAL: Use the "Premarket Change" value provided above (${data.changePercent.toFixed(2)}%) to determine direction. If it's positive (>= 0), say "are up during premarket trading on [day]"; if it's negative (< 0), say "are down during premarket trading on [day]". You MUST include the phrase "during premarket trading" in the first sentence. The direction MUST match the sign of ${data.changePercent.toFixed(2)}% - ${data.changePercent >= 0 ? 'POSITIVE means UP' : 'NEGATIVE means DOWN'}. Example: "Apple Inc. (NASDAQ:AAPL) shares are ${data.changePercent >= 0 ? 'up' : 'down'} during premarket trading on Friday".` : `CRITICAL: Use the "Daily Change (REGULAR SESSION ONLY)" value provided above (${data.changePercent.toFixed(2)}%) to determine direction. If it's positive (>= 0), say "closed up" or "were up"; if it's negative (< 0), say "closed down" or "were down". The direction MUST match the sign of ${data.changePercent.toFixed(2)}% - ${data.changePercent >= 0 ? 'POSITIVE means UP' : 'NEGATIVE means DOWN'}. DO NOT make up your own direction - use ONLY the value provided.`} ${marketStatus === 'afterhours' ? 'CRITICAL: During after-hours, DO NOT include a specific closing price amount (e.g., do NOT write "closing at $22.18"). The "Current Price" shown above is the after-hours price, not the regular session closing price. Only mention the direction (up/down) and day - do NOT include any dollar amount or percentage. Example: "ZIM Integrated Shipping Services Ltd. (NYSE:ZIM) shares surged on Monday during regular trading" NOT "closing at $22.18" or "closing up 3.33%".' : ''} When mentioning the day, use ONLY the day name (e.g., "on Thursday", "on Monday") - DO NOT include the date (e.g., do NOT use "on Thursday, December 18, 2025" or any date format). ${marketStatus === 'open' || marketStatus === 'premarket' ? 'Use present tense (e.g., "shares are tumbling", "shares are surging", "shares are up", "shares are down") since markets are currently open or in premarket.' : 'Use past tense (e.g., "shares closed up", "shares closed down", "shares were up", "shares were down") since markets are closed.'} DO NOT include the percentage in the first paragraph - it's already in the price action section. Then reference the news article to explain what's going on - either the news is contributing to the move, OR the stock is moving despite positive/negative news (suggesting larger market elements may be at play). The angle should answer "What's Going On" by connecting the price action to the news context.
 
 2. HYPERLINK FORMATTING (MANDATORY - MUST BE IN FIRST PARAGRAPH):
-   ${isBenzinga ? `- This is a Benzinga article. You MUST include a hyperlink in the first paragraph by choosing ANY THREE CONSECUTIVE WORDS from your first paragraph and wrapping them in a hyperlink with format: <a href="${primaryUrl}">[three consecutive words]</a>
+   ${primaryUrl ? (isBenzinga ? `- This is a Benzinga article. You MUST include a hyperlink in the first paragraph by choosing ANY THREE CONSECUTIVE WORDS from your first paragraph and wrapping them in a hyperlink with format: <a href="${primaryUrl}">[three consecutive words]</a>
    - The hyperlink should be embedded naturally within the sentence flow - do NOT use phrases like "as detailed in a recent article" or "according to reports" to introduce it
    - Simply select three consecutive words that are part of the natural sentence structure and hyperlink them
    - Example: "Apple Inc. (AAPL) shares closed up on Thursday as the company is <a href="${primaryUrl}">reportedly deepening its</a> India strategy" or "The stock moved higher amid <a href="${primaryUrl}">signs of resilient</a> iPhone demand"
    - The three words should flow naturally - they don't need to explicitly mention "article" or "report"
-   - CRITICAL: The hyperlink MUST appear in the first paragraph - this is mandatory, not optional` : `- This is NOT a Benzinga article (${outletName || 'external source'}). You MUST include a ONE-WORD hyperlink with outlet credit in the first paragraph.
+   - CRITICAL: The hyperlink MUST appear in the first paragraph - this is mandatory, not optional
+   - THE URL TO USE IS: ${primaryUrl}` : `- This is NOT a Benzinga article (${outletName || 'external source'}). You MUST include a ONE-WORD hyperlink with outlet credit in the first paragraph.
    - Format: <a href="${primaryUrl}">${outletName || 'Source'}</a> reports
    - Example: <a href="${primaryUrl}">CNBC</a> reports or <a href="${primaryUrl}">Reuters</a> reports
    - Extract the outlet name from the URL domain and capitalize it properly (e.g., "cnbc.com" → "CNBC", "reuters.com" → "Reuters", "bloomberg.com" → "Bloomberg")
-   - CRITICAL: The hyperlink MUST appear in the first paragraph - this is mandatory, not optional`}
+   - CRITICAL: The hyperlink MUST appear in the first paragraph - this is mandatory, not optional
+   - THE URL TO USE IS: ${primaryUrl}`) : `- CRITICAL: No source URL was provided, so no hyperlink is required in this case.`}
 
 3. The hyperlink MUST appear in the FIRST paragraph of the story, integrated naturally into the text flow without calling attention to the fact that it links to an article. Do NOT use phrases like "as detailed in a recent article", "according to reports", or "as highlighted in" - just hyperlink three consecutive words naturally within the sentence. This is MANDATORY - the first paragraph must contain a hyperlink to the source article.
 
@@ -2954,7 +2960,16 @@ CRITICAL INSTRUCTIONS FOR NEWS INTEGRATION:
 
 6. Maximum 2 sentences per paragraph throughout the story.` : ''}
 
-TASK: ${newsContext && (newsContext.scrapedContent || (newsContext.selectedArticles && newsContext.selectedArticles.length > 0)) ? `Write a conversational WGO article that helps readers understand "What's Going On" with the stock. LEAD with the current price move (direction and day of week, e.g., "shares are tumbling on Monday" or "shares are surging on Tuesday"). Use ONLY the day name (e.g., "on Thursday", "on Monday") - DO NOT include the date (e.g., do NOT use "on Thursday, December 18, 2025" or any date format). DO NOT include the percentage in the first paragraph. Then reference the news article provided above AND broader market context to explain what's going on - either the news is contributing to the move, OR the stock is moving despite positive/negative news (suggesting larger market elements may be at play). ${marketContext ? 'Use the broader market context (indices, sectors, market breadth) to provide additional context - is the stock moving with or against broader market trends? Reference specific sector performance when relevant (e.g., "Technology stocks are broadly lower today, contributing to the decline" or "Despite a strong market day, the stock is down, suggesting company-specific concerns").' : ''} Include the appropriate hyperlink in the first paragraph (three-word for Benzinga, one-word with outlet credit for others). 
+7. COMPANY TICKER FORMATTING: When mentioning OTHER companies (not the primary stock being analyzed), you MUST include their ticker symbol with exchange in parentheses immediately after the company name. Format: "Company Name (EXCHANGE:TICKER)". Examples:
+   - "Snowflake Inc. (NYSE:SNOW)" not just "Snowflake Inc."
+   - "Microsoft Corp. (NASDAQ:MSFT)" not just "Microsoft Corp."
+   - "Apple Inc. (NASDAQ:AAPL)" not just "Apple Inc."
+   - Only the PRIMARY stock (${data.symbol}) should use the format: "**Company Name** (EXCHANGE:TICKER)" with bold formatting
+   - All OTHER companies should use: "Company Name (EXCHANGE:TICKER)" without bold
+   - If you're unsure of a company's ticker, try to infer it from the article content or use the most common ticker for that company
+   - Common examples: Alphabet/Google (NASDAQ:GOOGL), Microsoft (NASDAQ:MSFT), Apple (NASDAQ:AAPL), Amazon (NASDAQ:AMZN), Meta (NASDAQ:META), Tesla (NASDAQ:TSLA), Nvidia (NASDAQ:NVDA), Snowflake (NYSE:SNOW), Oracle (NYSE:ORCL), IBM (NYSE:IBM), Salesforce (NYSE:CRM)
+
+TASK: ${newsContext && (newsContext.scrapedContent || (newsContext.selectedArticles && newsContext.selectedArticles.length > 0)) ? `Write a conversational WGO article that helps readers understand "What's Going On" with the stock. LEAD with the current price move (direction and day of week, e.g., "shares are tumbling on Monday" or "shares are surging on Tuesday"). Use ONLY the day name (e.g., "on Thursday", "on Monday") - DO NOT include the date (e.g., do NOT use "on Thursday, December 18, 2025" or any date format). DO NOT include the percentage in the first paragraph. Then reference the news article provided above AND broader market context to explain what's going on - either the news is contributing to the move, OR the stock is moving despite positive/negative news (suggesting larger market elements may be at play). ${marketContext ? 'Use the broader market context (indices, sectors, market breadth) to provide additional context - is the stock moving with or against broader market trends? Reference specific sector performance when relevant (e.g., "Technology stocks are broadly lower today, contributing to the decline" or "Despite a strong market day, the stock is down, suggesting company-specific concerns").' : ''} Include the appropriate hyperlink in the first paragraph (three-word for Benzinga, one-word with outlet credit for others). When mentioning other companies in the article, always include their ticker symbol with exchange (e.g., "Snowflake Inc. (NYSE:SNOW)").` : ''} 
 
 CRITICAL: The second paragraph (and optionally third paragraph) MUST include detailed, specific information from the news source article. Do NOT just summarize or use vague language. Extract and include:
 - Specific numbers, figures, percentages, dates, or metrics from the article
@@ -2976,13 +2991,19 @@ CRITICAL RULES - PARAGRAPH LENGTH IS MANDATORY:
 
 - TECHNICAL ANALYSIS AND OTHER PARAGRAPHS: Must be 2 sentences or less. If you find yourself writing a third sentence, start a new paragraph instead.
 
+- COMPANY TICKER FORMATTING - MANDATORY: When mentioning OTHER companies (not the primary stock ${data.symbol}), you MUST include their ticker symbol with exchange in parentheses. Format: "Company Name (EXCHANGE:TICKER)". Examples: "Snowflake Inc. (NYSE:SNOW)", "Microsoft Corp. (NASDAQ:MSFT)", "Apple Inc. (NASDAQ:AAPL)". Only the PRIMARY stock uses bold formatting: "**Company Name** (EXCHANGE:TICKER)". All OTHER companies use regular formatting: "Company Name (EXCHANGE:TICKER)".
+
 - Write in a CONVERSATIONAL, DIRECT tone - avoid robotic or overly formal language
 
 - Avoid overly sophisticated or formal words like "robust", "substantial", "notable", "significant", "considerable" - use simpler, more direct words instead
 
 - Use normal, everyday language that's clear and accessible - write like you're talking to someone, not writing a formal report
 
-- FIRST PARAGRAPH (2 sentences max): ${newsContext && (newsContext.scrapedContent || (newsContext.selectedArticles && newsContext.selectedArticles.length > 0)) ? `CRITICAL HYPERLINK REQUIREMENT: You MUST include a hyperlink in the first paragraph. ${isBenzinga ? `Choose ANY THREE CONSECUTIVE WORDS from your first paragraph and wrap them in a hyperlink: <a href="${primaryUrl}">[three consecutive words]</a>. Embed it naturally in the sentence flow - do NOT use phrases like "as detailed in a recent article" or "according to reports". Example: "**Apple Inc.** (NASDAQ:AAPL) shares closed up on Thursday as the company is <a href="${primaryUrl}">reportedly deepening its</a> India strategy".` : `Include a ONE-WORD hyperlink with outlet credit: <a href="${primaryUrl}">${outletName || 'Source'}</a> reports. Example: "<a href="${primaryUrl}">CNBC</a> reports" or "<a href="${primaryUrl}">Reuters</a> reports".`} THIS IS MANDATORY - THE HYPERLINK MUST APPEAR IN THE FIRST PARAGRAPH. Start with the company name in bold (**Company Name**), followed by the ticker with exchange in parentheses (not bold) - e.g., **Microsoft Corp** (NASDAQ:MSFT) or **Apple Inc.** (NASDAQ:AAPL). The format should be **Company Name** (EXCHANGE:TICKER) - always include the exchange prefix (NASDAQ, NYSE, etc.). Use proper company name formatting with periods (Inc., Corp., etc.). Lead with the primary news article and include the hyperlink as specified above. Connect the price action to the news context. When mentioning the day, use ONLY the day name (e.g., "on Thursday", "on Monday") - DO NOT include the date (e.g., do NOT use "on Thursday, December 18, 2025" or any date format).` : `Start with the company name in bold (**Company Name**), followed by the ticker with exchange in parentheses (not bold) - e.g., **Apple Inc.** (NASDAQ:AAPL) or **Applied Digital Corp.** (NASDAQ:APLD). The format should be **Company Name** (EXCHANGE:TICKER) - always include the exchange prefix (NASDAQ, NYSE, etc.). Use proper company name formatting with periods (Inc., Corp., etc.). LEAD with the current price move direction using the Daily Change data provided - note ONLY the direction and day of week (e.g., "shares are tumbling on Monday" if down, "shares are surging on Tuesday" if up). Use ONLY the day name (e.g., "on Thursday", "on Monday") - DO NOT include the date. DO NOT include the percentage in the first paragraph - it's already in the price action section. ${marketContext ? 'Then IMMEDIATELY reference broader market context to explain the move - is the stock moving with or against broader market trends? Reference specific sector performance when relevant (e.g., "The move comes as Technology stocks are broadly lower today, contributing to the decline" or "Despite a strong market day with the S&P 500 up 0.5%, the stock is down, suggesting company-specific concerns" or "The stock is caught in a broader sell-off, with the Nasdaq down 1.2% and Technology sector declining 1.5%").' : 'Then immediately pivot to the technical analysis context - use moving average positioning, support/resistance levels, or key technical signals to explain what traders are seeing on the charts (e.g., "Traders are focused on the technical picture, which shows the stock is currently testing key support levels while facing mixed signals from moving averages" or "The move comes as the stock flashes a \'mixed\' signal—breaking down in the short term while testing a crucial long-term floor").'} Focus on using market context and technical indicators to add context to the move rather than declaring there's no news. STOP AFTER 2 SENTENCES.`}
+- Keep total length to 6-8 short paragraphs (2 sentences each) to provide comprehensive context
+
+- NEVER use ambiguous phrasing like "below its 50-day moving average, which is X% lower"
+
+- FIRST PARAGRAPH (2 sentences max): ${newsContext && (newsContext.scrapedContent || (newsContext.selectedArticles && newsContext.selectedArticles.length > 0)) ? `${primaryUrl ? `ABSOLUTELY CRITICAL HYPERLINK REQUIREMENT - YOU MUST INCLUDE THIS IN YOUR OUTPUT: The first paragraph MUST contain an HTML hyperlink. ${isBenzinga ? `Choose ANY THREE CONSECUTIVE WORDS from your first paragraph and wrap them in this EXACT HTML format: <a href="${primaryUrl}">[three consecutive words]</a>. Embed it naturally in the sentence flow - do NOT use phrases like "as detailed in a recent article" or "according to reports". Example output: "**Apple Inc.** (NASDAQ:AAPL) shares closed up on Thursday as the company is <a href="${primaryUrl}">reportedly deepening its</a> India strategy". THE URL TO USE IS: ${primaryUrl}` : `Include a ONE-WORD hyperlink with outlet credit using this EXACT HTML format: <a href="${primaryUrl}">${outletName || 'Source'}</a> reports. Example output: "<a href="${primaryUrl}">CNBC</a> reports" or "<a href="${primaryUrl}">Reuters</a> reports". THE URL TO USE IS: ${primaryUrl}`} THIS IS NOT OPTIONAL - YOU MUST INCLUDE THE <a href> TAG IN YOUR FIRST PARAGRAPH. IF YOU DO NOT INCLUDE IT, YOUR OUTPUT IS INCORRECT. ` : ''}Start with the company name in bold (**Company Name**), followed by the ticker with exchange in parentheses (not bold) - e.g., **Microsoft Corp** (NASDAQ:MSFT) or **Apple Inc.** (NASDAQ:AAPL). The format should be **Company Name** (EXCHANGE:TICKER) - always include the exchange prefix (NASDAQ, NYSE, etc.). Use proper company name formatting with periods (Inc., Corp., etc.). Lead with the primary news article${primaryUrl ? ' and include the hyperlink as specified above' : ''}. Connect the price action to the news context. When mentioning the day, use ONLY the day name (e.g., "on Thursday", "on Monday") - DO NOT include the date (e.g., do NOT use "on Thursday, December 18, 2025" or any date format).` : `Start with the company name in bold (**Company Name**), followed by the ticker with exchange in parentheses (not bold) - e.g., **Apple Inc.** (NASDAQ:AAPL) or **Applied Digital Corp.** (NASDAQ:APLD). The format should be **Company Name** (EXCHANGE:TICKER) - always include the exchange prefix (NASDAQ, NYSE, etc.). Use proper company name formatting with periods (Inc., Corp., etc.). LEAD with the current price move direction using the Daily Change data provided - note ONLY the direction and day of week (e.g., "shares are tumbling on Monday" if down, "shares are surging on Tuesday" if up). Use ONLY the day name (e.g., "on Thursday", "on Monday") - DO NOT include the date. DO NOT include the percentage in the first paragraph - it's already in the price action section. ${marketContext ? 'Then IMMEDIATELY reference broader market context to explain the move - is the stock moving with or against broader market trends? Reference specific sector performance when relevant (e.g., "The move comes as Technology stocks are broadly lower today, contributing to the decline" or "Despite a strong market day with the S&P 500 up 0.5%, the stock is down, suggesting company-specific concerns" or "The stock is caught in a broader sell-off, with the Nasdaq down 1.2% and Technology sector declining 1.5%").' : 'Then immediately pivot to the technical analysis context - use moving average positioning, support/resistance levels, or key technical signals to explain what traders are seeing on the charts (e.g., "Traders are focused on the technical picture, which shows the stock is currently testing key support levels while facing mixed signals from moving averages" or "The move comes as the stock flashes a \'mixed\' signal—breaking down in the short term while testing a crucial long-term floor").'} Focus on using market context and technical indicators to add context to the move rather than declaring there's no news. STOP AFTER 2 SENTENCES.`}
 
 - SECOND PARAGRAPH (2 sentences, SUBSTANTIVE NEWS DETAILS - PART 1): ${newsContext && (newsContext.scrapedContent || (newsContext.selectedArticles && newsContext.selectedArticles.length > 0)) ? `MANDATORY: Provide detailed, specific information from the news source article. Focus on the first set of key details such as:
   * Analyst ratings, price targets, or specific analyst commentary if mentioned (e.g., "Analyst Samik Chatterjee from JPMorgan has maintained an Overweight rating on Apple")
@@ -3087,7 +3108,7 @@ ${marketContext ? `- MANDATORY: You MUST reference broader market context in the
 
 - Keep total length to 6-8 short paragraphs (2 sentences each) to provide comprehensive context
 
-- Use plain text only - no special formatting or markup
+- Use plain text only - no special formatting or markup EXCEPT for hyperlinks in the first paragraph, which MUST be in HTML format: <a href="URL">text</a>
 
 - NEVER use ambiguous phrasing like "below its 50-day moving average, which is X% lower"
 
@@ -3097,8 +3118,8 @@ ${marketContext ? `- MANDATORY: You MUST reference broader market context in the
 
 - Write like you're having a conversation, not writing a formal report
 
-${newsContext && (newsContext.scrapedContent || (newsContext.selectedArticles && newsContext.selectedArticles.length > 0)) ? `
-FINAL REMINDER - HYPERLINK REQUIREMENT: Your first paragraph MUST include a hyperlink. ${isBenzinga ? `Choose ANY THREE CONSECUTIVE WORDS from your first paragraph and wrap them: <a href="${primaryUrl}">[three words]</a>. Embed it naturally - do NOT use phrases like "as detailed in" or "according to reports".` : `Include a ONE-WORD hyperlink with outlet credit: <a href="${primaryUrl}">${outletName || 'Source'}</a> reports.`} THIS IS MANDATORY - DO NOT FORGET THE HYPERLINK IN THE FIRST PARAGRAPH.` : ''}`;
+${newsContext && (newsContext.scrapedContent || (newsContext.selectedArticles && newsContext.selectedArticles.length > 0)) && primaryUrl ? `
+FINAL CRITICAL REMINDER - HYPERLINK REQUIREMENT (THIS IS NOT OPTIONAL): Your first paragraph MUST include an HTML hyperlink tag in your output. ${isBenzinga ? `Use this EXACT format: <a href="${primaryUrl}">[three consecutive words]</a>. The URL is: ${primaryUrl}. Embed it naturally within your first paragraph - do NOT use phrases like "as detailed in" or "according to reports". Example of what your output should look like: "**Apple Inc.** (NASDAQ:AAPL) shares closed up on Thursday as the company is <a href="${primaryUrl}">reportedly deepening its</a> India strategy".` : `Use this EXACT format: <a href="${primaryUrl}">${outletName || 'Source'}</a> reports. The URL is: ${primaryUrl}. Example: "<a href="${primaryUrl}">CNBC</a> reports".`} IF YOU DO NOT INCLUDE THE <a href> TAG IN YOUR FIRST PARAGRAPH OUTPUT, YOUR RESPONSE IS INCOMPLETE AND INCORRECT.` : ''}`;
 
 
 
@@ -3166,7 +3187,20 @@ FINAL REMINDER - HYPERLINK REQUIREMENT: Your first paragraph MUST include a hype
 
 
 
-    return response.content.trim();
+    let generatedContent = response.content.trim();
+    
+    // Post-processing check: verify hyperlink is present if URL was provided
+    if (primaryUrl && newsContext) {
+      const hasHyperlink = generatedContent.includes(`<a href="${primaryUrl}">`) || generatedContent.includes(`<a href='${primaryUrl}'>`);
+      if (!hasHyperlink) {
+        console.warn('[HYPERLINK WARNING] Generated content does not include hyperlink for URL:', primaryUrl);
+        console.warn('[HYPERLINK WARNING] First 500 chars of generated content:', generatedContent.substring(0, 500));
+      } else {
+        console.log('[HYPERLINK SUCCESS] Hyperlink found in generated content for URL:', primaryUrl);
+      }
+    }
+    
+    return generatedContent;
 
   } catch (error) {
 
@@ -3247,7 +3281,7 @@ export async function POST(request: Request) {
         let analysisWithPriceAction = priceAction 
           ? `${analysis}\n\n${priceAction}`
           : analysis;
-        
+
         // Fetch related articles and add "Also Read" and "Read Next" sections
         const excludeUrl = newsContext?.newsUrl || (newsContext?.selectedArticles && newsContext.selectedArticles[0]?.url) || undefined;
         const relatedArticles = await fetchRelatedArticles(ticker, excludeUrl);
