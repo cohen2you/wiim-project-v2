@@ -180,9 +180,13 @@ async function generatePriceAction(ticker: string): Promise<string> {
     
     const marketStatus = getMarketStatusTimeBased();
     
-    const date = quote.closeDate ? new Date(quote.closeDate) : new Date();
-    const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-    const dayOfWeek = dayNames[date.getDay()];
+    // Get current day name in Eastern Time (not the close date, which might be previous day)
+    const now = new Date();
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/New_York',
+      weekday: 'long',
+    });
+    const dayOfWeek = formatter.format(now);
     
     let marketStatusPhrase = '';
     if (marketStatus === 'premarket') {
@@ -207,10 +211,21 @@ async function generatePriceAction(ticker: string): Promise<string> {
                                (quote.previousClosePrice ? parseFloat(quote.previousClosePrice) : 
                                (quote.previousClose ? parseFloat(quote.previousClose) : null)));
     
-    if (quoteClose && quotePreviousClose && quotePreviousClose > 0 && !isNaN(quoteClose) && !isNaN(quotePreviousClose)) {
-      regularSessionClose = quoteClose;
-      regularSessionChange = ((quoteClose - quotePreviousClose) / quotePreviousClose) * 100;
-      console.log(`[PRICE ACTION] Regular session change: ${regularSessionChange.toFixed(2)}% (close: ${quoteClose}, previousClose: ${quotePreviousClose})`);
+    // When markets are closed (holiday), use lastTradePrice as the close if it's more recent/relevant
+    let effectiveClose = quoteClose;
+    if (marketStatus === 'closed' && quote.lastTradePrice) {
+      const lastTrade = typeof quote.lastTradePrice === 'number' ? quote.lastTradePrice : parseFloat(quote.lastTradePrice);
+      if (!isNaN(lastTrade) && lastTrade > 0) {
+        // Use lastTradePrice as the close when markets are closed (it should be the most recent trading day's close)
+        effectiveClose = lastTrade;
+        console.log(`[PRICE ACTION] Markets closed - using lastTradePrice as close: ${effectiveClose}`);
+      }
+    }
+    
+    if (effectiveClose && quotePreviousClose && quotePreviousClose > 0 && !isNaN(effectiveClose) && !isNaN(quotePreviousClose)) {
+      regularSessionClose = effectiveClose;
+      regularSessionChange = ((effectiveClose - quotePreviousClose) / quotePreviousClose) * 100;
+      console.log(`[PRICE ACTION] Regular session change: ${regularSessionChange.toFixed(2)}% (close: ${effectiveClose}, previousClose: ${quotePreviousClose})`);
     } else if (quote.change && quotePreviousClose && quotePreviousClose > 0) {
       // Fallback: calculate from change amount
       const quoteChange = typeof quote.change === 'number' ? quote.change : parseFloat(quote.change);
@@ -243,7 +258,15 @@ async function generatePriceAction(ticker: string): Promise<string> {
     
     let priceActionText = '';
     
-    if (marketStatus === 'premarket' && premarketChange !== 0) {
+    // When markets are closed (holiday/weekend), use previous trading day's regular session data
+    if (marketStatus === 'closed' && regularSessionChange !== 0) {
+      // Markets are closed: show previous trading day's regular session close
+      const regularUpDown = regularSessionChange > 0 ? 'up' : regularSessionChange < 0 ? 'down' : 'unchanged';
+      const absRegularChange = Math.abs(regularSessionChange).toFixed(2);
+      // Use the regular session close price, not the current lastTradePrice
+      const closePrice = formatPriceValue(regularSessionClose || quoteClose || quote.lastTradePrice);
+      priceActionText = `<strong>${symbol} Price Action:</strong> ${companyName} shares were ${regularUpDown} ${absRegularChange}% at $${closePrice}${marketStatusPhrase} on ${dayOfWeek}`;
+    } else if (marketStatus === 'premarket' && premarketChange !== 0) {
       // Premarket: use premarket change
       const premarketUpDown = premarketChange > 0 ? 'up' : premarketChange < 0 ? 'down' : 'unchanged';
       const absPremarketChange = Math.abs(premarketChange).toFixed(2);
@@ -256,7 +279,7 @@ async function generatePriceAction(ticker: string): Promise<string> {
       const absAfterHoursChange = Math.abs(afterHoursChange).toFixed(2);
       priceActionText = `<strong>${symbol} Price Action:</strong> ${companyName} shares were ${regularUpDown} ${absRegularChange}% during regular trading and ${afterHoursUpDown} ${absAfterHoursChange}% in after-hours trading on ${dayOfWeek}, last trading at $${lastPrice}`;
     } else if (regularSessionChange !== 0) {
-      // Regular trading (closed or open): use regular session change
+      // Regular trading (open): use regular session change
       const regularUpDown = regularSessionChange > 0 ? 'up' : regularSessionChange < 0 ? 'down' : 'unchanged';
       const absRegularChange = Math.abs(regularSessionChange).toFixed(2);
       if (marketStatus === 'open') {
@@ -3231,60 +3254,91 @@ export async function POST(request: Request) {
         
         // Ensure "Also Read" and "Read Next" sections are included if related articles are available
         if (relatedArticles && relatedArticles.length > 0) {
-          // Check if "Also Read" section exists and is in the correct position
-          const alsoReadPattern = /<p>Also Read:.*?<\/p>/i;
+          // Check if "Also Read" section exists
+          const alsoReadPattern = /(?:<p>)?Also Read:.*?(?:<\/p>)?/i;
           const alsoReadMatch = analysisWithPriceAction.match(alsoReadPattern);
           const alsoReadExists = !!alsoReadMatch;
           
-          // Find where "Also Read" currently is
-          const paragraphs = analysisWithPriceAction.split('</p>').filter(p => p.trim().length > 0);
-          const alsoReadIndex = alsoReadMatch ? paragraphs.findIndex(p => p.includes('Also Read:')) : -1;
-          
-          // Target position: after the second paragraph (index 2, which is the 3rd element: lead, para1, Also Read)
-          const targetIndex = 2;
-          
-          if (alsoReadExists && alsoReadIndex === targetIndex) {
-            console.log('"Also Read" section already exists in correct position');
-          } else {
-            // Remove existing "Also Read" if it's in the wrong place
-            if (alsoReadExists && alsoReadIndex !== -1) {
-              console.log(`Moving "Also Read" from position ${alsoReadIndex} to position ${targetIndex}`);
-              paragraphs.splice(alsoReadIndex, 1);
-            } else if (!alsoReadExists) {
-              console.log('Adding "Also Read" section');
+          if (!alsoReadExists) {
+            console.log('Adding "Also Read" section');
+            // Split content by double newlines (paragraph breaks) or </p> tags
+            // Handle both HTML and plain text formats
+            const hasHTMLTags = analysisWithPriceAction.includes('</p>');
+            let paragraphs: string[];
+            
+            if (hasHTMLTags) {
+              // HTML format: split by </p> tags
+              paragraphs = analysisWithPriceAction.split('</p>').filter(p => p.trim().length > 0);
+            } else {
+              // Plain text format: split by double newlines
+              paragraphs = analysisWithPriceAction.split(/\n\s*\n/).filter(p => p.trim().length > 0);
             }
             
-            // Insert "Also Read" at the correct position (after second paragraph)
+            // Insert "Also Read" after the second paragraph (index 2)
             if (paragraphs.length >= 2) {
-              const alsoReadSection = `<p>Also Read: <a href="${relatedArticles[0].url}">${relatedArticles[0].headline}</a></p>`;
-              paragraphs.splice(targetIndex, 0, alsoReadSection);
-              // When we split by '</p>', each element doesn't have the closing tag
-              // But alsoReadSection already has '</p>', so we need to handle it differently
-              analysisWithPriceAction = paragraphs.map(p => {
-                // If it already has '</p>' (like alsoReadSection), return as-is
-                if (p.trim().endsWith('</p>')) return p;
-                // Otherwise, add '</p>' back
-                return p + '</p>';
-              }).join('');
+              // Always use HTML link format even if content is plain text (for clickable links)
+              const alsoReadSection = `Also Read: <a href="${relatedArticles[0].url}">${relatedArticles[0].headline}</a>`;
+              
+              // Insert at index 2 (after second paragraph)
+              paragraphs.splice(2, 0, alsoReadSection);
+              
+              // Rejoin content
+              if (hasHTMLTags) {
+                analysisWithPriceAction = paragraphs.map(p => {
+                  // If it already ends with </p>, return as-is
+                  if (p.trim().endsWith('</p>')) return p;
+                  // If it's the alsoReadSection, wrap in <p> tags
+                  if (p.includes('Also Read:')) return `<p>${p}</p>`;
+                  // Otherwise, add </p> back
+                  return p + '</p>';
+                }).join('');
+              } else {
+                analysisWithPriceAction = paragraphs.join('\n\n');
+              }
+              
               console.log('✅ "Also Read" section placed after second paragraph');
+            } else {
+              console.log('⚠️ Not enough paragraphs to insert "Also Read" (need at least 2)');
             }
+          } else {
+            console.log('"Also Read" section already exists');
           }
           
           // Check if "Read Next" section exists, if not add it after context but before price action
           if (!analysisWithPriceAction.includes('Read Next:')) {
             console.log('Adding "Read Next" section');
-            const readNextSection = `<p>Read Next: <a href="${relatedArticles[1]?.url || relatedArticles[0].url}">${relatedArticles[1]?.headline || relatedArticles[0].headline}</a></p>`;
+            // Always use HTML link format (for clickable links)
+            const readNextSection = `Read Next: <a href="${relatedArticles[1]?.url || relatedArticles[0].url}">${relatedArticles[1]?.headline || relatedArticles[0].headline}</a>`;
             
-            // Find the price action section to insert before it
-            const priceActionIndex = analysisWithPriceAction.indexOf('Price Action:');
-            if (priceActionIndex !== -1) {
-              // Insert before price action
-              const beforePriceAction = analysisWithPriceAction.substring(0, priceActionIndex);
-              const priceActionAndAfter = analysisWithPriceAction.substring(priceActionIndex);
+            // Find the price action section - look for the <strong> tag that contains "Price Action:"
+            const priceActionRegex = /<strong>.*?Price Action:<\/strong>/i;
+            const priceActionMatch = analysisWithPriceAction.match(priceActionRegex);
+            if (priceActionMatch && priceActionMatch.index !== undefined) {
+              // Insert before the <strong> tag
+              const beforePriceAction = analysisWithPriceAction.substring(0, priceActionMatch.index).trim();
+              const priceActionAndAfter = analysisWithPriceAction.substring(priceActionMatch.index);
               analysisWithPriceAction = `${beforePriceAction}\n\n${readNextSection}\n\n${priceActionAndAfter}`;
             } else {
-              // If no price action found, add to the end
-              analysisWithPriceAction += readNextSection;
+              // Fallback: look for just "Price Action:" if the regex doesn't match
+              const priceActionIndex = analysisWithPriceAction.indexOf('Price Action:');
+              if (priceActionIndex !== -1) {
+                // Find the start of the <strong> tag by looking backwards
+                const beforePriceAction = analysisWithPriceAction.substring(0, priceActionIndex);
+                const strongTagStart = beforePriceAction.lastIndexOf('<strong>');
+                if (strongTagStart !== -1) {
+                  const beforeStrong = analysisWithPriceAction.substring(0, strongTagStart).trim();
+                  const strongAndAfter = analysisWithPriceAction.substring(strongTagStart);
+                  analysisWithPriceAction = `${beforeStrong}\n\n${readNextSection}\n\n${strongAndAfter}`;
+                } else {
+                  // If no <strong> tag found, insert before "Price Action:"
+                  const beforeText = analysisWithPriceAction.substring(0, priceActionIndex).trim();
+                  const priceActionAndAfter = analysisWithPriceAction.substring(priceActionIndex);
+                  analysisWithPriceAction = `${beforeText}\n\n${readNextSection}\n\n${priceActionAndAfter}`;
+                }
+              } else {
+                // If no price action found, add to the end
+                analysisWithPriceAction = `${analysisWithPriceAction.trim()}\n\n${readNextSection}`;
+              }
             }
           } else {
             console.log('"Read Next" section already exists');
