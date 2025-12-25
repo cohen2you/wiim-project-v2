@@ -2866,8 +2866,6 @@ ${data.turningPoints?.supportBreakDate ? `- Price broke below support on ${data.
 ${!data.turningPoints || Object.keys(data.turningPoints).length === 0 ? '- No significant turning points identified in the past year' : ''}
 
 ${newsContext && (newsContext.scrapedContent || (newsContext.selectedArticles && newsContext.selectedArticles.length > 0)) ? `
-  
-  return `
 PRIMARY NEWS ARTICLE (LEAD WITH THIS):
 
 ${newsContext.scrapedContent ? `
