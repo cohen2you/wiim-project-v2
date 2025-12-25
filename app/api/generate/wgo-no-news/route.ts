@@ -3,6 +3,7 @@ import OpenAI from 'openai';
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const BENZINGA_API_KEY = process.env.BENZINGA_API_KEY!;
+const BZ_NEWS_URL = 'https://api.benzinga.com/api/v2/news';
 
 function getMarketStatus(): 'open' | 'premarket' | 'afterhours' | 'closed' {
   // Get current time in New York timezone
@@ -26,6 +27,70 @@ function getCurrentDayName(): string {
   const nyTime = new Date(now.toLocaleString("en-US", {timeZone: "America/New_York"}));
   const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
   return days[nyTime.getDay()];
+}
+
+// Function to fetch related articles from Benzinga
+async function fetchRelatedArticles(ticker: string, excludeUrl?: string): Promise<any[]> {
+  try {
+    const dateFrom = new Date();
+    dateFrom.setDate(dateFrom.getDate() - 7);
+    const dateFromStr = dateFrom.toISOString().slice(0, 10);
+    
+    let url: string;
+    
+    if (ticker && ticker.trim() !== '') {
+      // Fetch ticker-specific articles
+      url = `${BZ_NEWS_URL}?token=${BENZINGA_API_KEY}&tickers=${encodeURIComponent(ticker)}&items=20&fields=headline,title,created,url,channels&accept=application/json&displayOutput=full&dateFrom=${dateFromStr}`;
+    } else {
+      // Fetch general market news when no ticker is provided
+      url = `${BZ_NEWS_URL}?token=${BENZINGA_API_KEY}&items=20&fields=headline,title,created,url,channels&accept=application/json&displayOutput=full&dateFrom=${dateFromStr}`;
+    }
+    
+    const res = await fetch(url, {
+      headers: { Accept: 'application/json' },
+    });
+    
+    if (!res.ok) {
+      console.error('Benzinga API error:', await res.text());
+      return [];
+    }
+    
+    const data = await res.json();
+    if (!Array.isArray(data)) return [];
+    
+    // Filter out press releases and the current article URL
+    const prChannelNames = ['press releases', 'press-releases', 'pressrelease', 'pr'];
+    const normalize = (str: string) => str.toLowerCase().replace(/[-_]/g, ' ');
+    
+    const filteredArticles = data.filter(item => {
+      // Exclude press releases
+      if (Array.isArray(item.channels) && item.channels.some((ch: any) => 
+        typeof ch.name === 'string' && prChannelNames.includes(normalize(ch.name))
+      )) {
+        return false;
+      }
+      
+      // Exclude the current article URL if provided
+      if (excludeUrl && item.url === excludeUrl) {
+        return false;
+      }
+      
+      return true;
+    });
+    
+    const relatedArticles = filteredArticles
+      .map((item: any) => ({
+        headline: item.headline || item.title || '[No Headline]',
+        url: item.url,
+        created: item.created,
+      }))
+      .slice(0, 5);
+    
+    return relatedArticles;
+  } catch (error) {
+    console.error('Error fetching related articles:', error);
+    return [];
+  }
 }
 
 // Helper function to map sector name to sector ETF ticker
@@ -531,7 +596,7 @@ Generate the basic technical story now.`;
       temperature: 0.7,
     });
 
-    const story = completion.choices[0].message?.content?.trim() || '';
+    let story = completion.choices[0].message?.content?.trim() || '';
 
     if (!story) {
       return NextResponse.json({ error: 'Failed to generate WGO No News story.' }, { status: 500 });
@@ -539,6 +604,73 @@ Generate the basic technical story now.`;
 
     // Log story generation completion
     console.log(`Generated WGO No News story for ${ticker} focusing on technical data`);
+
+    // Fetch related articles and add "Also Read" and "Read Next" sections
+    const relatedArticles = await fetchRelatedArticles(ticker);
+    
+    // Ensure "Also Read" and "Read Next" sections are included if related articles are available
+    if (relatedArticles && relatedArticles.length > 0) {
+      // Check if "Also Read" section exists and is in the correct position
+      const alsoReadPattern = /<p>Also Read:.*?<\/p>/i;
+      const alsoReadMatch = story.match(alsoReadPattern);
+      const alsoReadExists = !!alsoReadMatch;
+      
+      // Find where "Also Read" currently is
+      const paragraphs = story.split('</p>').filter(p => p.trim().length > 0);
+      const alsoReadIndex = alsoReadMatch ? paragraphs.findIndex(p => p.includes('Also Read:')) : -1;
+      
+      // Target position: after the second paragraph (index 2, which is the 3rd element: lead, para1, Also Read)
+      const targetIndex = 2;
+      
+      if (alsoReadExists && alsoReadIndex === targetIndex) {
+        console.log('"Also Read" section already exists in correct position');
+      } else {
+        // Remove existing "Also Read" if it's in the wrong place
+        if (alsoReadExists && alsoReadIndex !== -1) {
+          console.log(`Moving "Also Read" from position ${alsoReadIndex} to position ${targetIndex}`);
+          paragraphs.splice(alsoReadIndex, 1);
+        } else if (!alsoReadExists) {
+          console.log('Adding "Also Read" section');
+        }
+        
+        // Insert "Also Read" at the correct position (after second paragraph)
+        if (paragraphs.length >= 2) {
+          const alsoReadSection = `<p>Also Read: <a href="${relatedArticles[0].url}">${relatedArticles[0].headline}</a></p>`;
+          paragraphs.splice(targetIndex, 0, alsoReadSection);
+          // When we split by '</p>', each element doesn't have the closing tag
+          // But alsoReadSection already has '</p>', so we need to handle it differently
+          story = paragraphs.map(p => {
+            // If it already has '</p>' (like alsoReadSection), return as-is
+            if (p.trim().endsWith('</p>')) return p;
+            // Otherwise, add '</p>' back
+            return p + '</p>';
+          }).join('');
+          console.log('✅ "Also Read" section placed after second paragraph');
+        }
+      }
+      
+      // Check if "Read Next" section exists, if not add it after context but before price action
+      if (!story.includes('Read Next:')) {
+        console.log('Adding "Read Next" section');
+        const readNextSection = `<p>Read Next: <a href="${relatedArticles[1]?.url || relatedArticles[0].url}">${relatedArticles[1]?.headline || relatedArticles[0].headline}</a></p>`;
+        
+        // Find the price action section to insert before it
+        const priceActionIndex = story.indexOf('Price Action:');
+        if (priceActionIndex !== -1) {
+          // Insert before price action
+          const beforePriceAction = story.substring(0, priceActionIndex);
+          const priceActionAndAfter = story.substring(priceActionIndex);
+          story = `${beforePriceAction}\n\n${readNextSection}\n\n${priceActionAndAfter}`;
+        } else {
+          // If no price action found, add to the end
+          story += readNextSection;
+        }
+      } else {
+        console.log('"Read Next" section already exists');
+      }
+    } else {
+      console.log('No related articles available');
+    }
 
     return NextResponse.json({ 
       story,

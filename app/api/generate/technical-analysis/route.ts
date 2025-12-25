@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 
 import { aiProvider, AIProvider } from '@/lib/aiProvider';
 
+const BZ_NEWS_URL = 'https://api.benzinga.com/api/v2/news';
+
 
 
 function formatPrice(price: number | null | undefined): string {
@@ -83,6 +85,70 @@ function formatPriceValue(val: number | string | undefined): string {
   return truncated.toFixed(2);
 }
 
+// Function to fetch related articles from Benzinga
+async function fetchRelatedArticles(ticker: string, excludeUrl?: string): Promise<any[]> {
+  try {
+    const dateFrom = new Date();
+    dateFrom.setDate(dateFrom.getDate() - 7);
+    const dateFromStr = dateFrom.toISOString().slice(0, 10);
+    
+    let url: string;
+    
+    if (ticker && ticker.trim() !== '') {
+      // Fetch ticker-specific articles
+      url = `${BZ_NEWS_URL}?token=${process.env.BENZINGA_API_KEY}&tickers=${encodeURIComponent(ticker)}&items=20&fields=headline,title,created,url,channels&accept=application/json&displayOutput=full&dateFrom=${dateFromStr}`;
+    } else {
+      // Fetch general market news when no ticker is provided
+      url = `${BZ_NEWS_URL}?token=${process.env.BENZINGA_API_KEY}&items=20&fields=headline,title,created,url,channels&accept=application/json&displayOutput=full&dateFrom=${dateFromStr}`;
+    }
+    
+    const res = await fetch(url, {
+      headers: { Accept: 'application/json' },
+    });
+    
+    if (!res.ok) {
+      console.error('Benzinga API error:', await res.text());
+      return [];
+    }
+    
+    const data = await res.json();
+    if (!Array.isArray(data)) return [];
+    
+    // Filter out press releases and the current article URL
+    const prChannelNames = ['press releases', 'press-releases', 'pressrelease', 'pr'];
+    const normalize = (str: string) => str.toLowerCase().replace(/[-_]/g, ' ');
+    
+    const filteredArticles = data.filter(item => {
+      // Exclude press releases
+      if (Array.isArray(item.channels) && item.channels.some((ch: any) => 
+        typeof ch.name === 'string' && prChannelNames.includes(normalize(ch.name))
+      )) {
+        return false;
+      }
+      
+      // Exclude the current article URL if provided
+      if (excludeUrl && item.url === excludeUrl) {
+        return false;
+      }
+      
+      return true;
+    });
+    
+    const relatedArticles = filteredArticles
+      .map((item: any) => ({
+        headline: item.headline || item.title || '[No Headline]',
+        url: item.url,
+        created: item.created,
+      }))
+      .slice(0, 5);
+    
+    return relatedArticles;
+  } catch (error) {
+    console.error('Error fetching related articles:', error);
+    return [];
+  }
+}
+
 // Generate price action using Benzinga API (Price Action Only mode)
 async function generatePriceAction(ticker: string): Promise<string> {
   try {
@@ -106,7 +172,6 @@ async function generatePriceAction(ticker: string): Promise<string> {
     
     const symbol = quote.symbol ?? ticker.toUpperCase();
     const companyName = normalizeCompanyName(quote.name ?? symbol);
-    const changePercent = typeof quote.changePercent === 'number' ? quote.changePercent : 0;
     const lastPrice = formatPriceValue(quote.lastTradePrice);
     
     if (!symbol || !quote.lastTradePrice) {
@@ -114,8 +179,6 @@ async function generatePriceAction(ticker: string): Promise<string> {
     }
     
     const marketStatus = getMarketStatusTimeBased();
-    const upDown = changePercent > 0 ? 'up' : changePercent < 0 ? 'down' : 'unchanged';
-    const absChange = Math.abs(changePercent).toFixed(2);
     
     const date = quote.closeDate ? new Date(quote.closeDate) : new Date();
     const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -130,29 +193,88 @@ async function generatePriceAction(ticker: string): Promise<string> {
       marketStatusPhrase = ' while the market was closed';
     }
     
-    // Calculate separate changes for regular session and after-hours
+    // ALWAYS calculate regular session change from close vs previousClosePrice (matches main article calculation)
+    // This ensures consistency - the price action line uses the same calculation as the article lede
     let regularSessionChange = 0;
     let afterHoursChange = 0;
     let hasAfterHoursData = false;
+    let regularSessionClose = 0;
     
-    if (marketStatus === 'afterhours' && quote.close && quote.lastTradePrice && quote.previousClosePrice) {
-      regularSessionChange = ((quote.close - quote.previousClosePrice) / quote.previousClosePrice) * 100;
-      afterHoursChange = ((quote.lastTradePrice - quote.close) / quote.close) * 100;
-      hasAfterHoursData = true;
+    // Calculate regular session change (close vs previousClosePrice)
+    const quoteClose = typeof quote.close === 'number' ? quote.close : (quote.close ? parseFloat(quote.close) : null);
+    const quotePreviousClose = typeof quote.previousClosePrice === 'number' ? quote.previousClosePrice : 
+                               (typeof quote.previousClose === 'number' ? quote.previousClose : 
+                               (quote.previousClosePrice ? parseFloat(quote.previousClosePrice) : 
+                               (quote.previousClose ? parseFloat(quote.previousClose) : null)));
+    
+    if (quoteClose && quotePreviousClose && quotePreviousClose > 0 && !isNaN(quoteClose) && !isNaN(quotePreviousClose)) {
+      regularSessionClose = quoteClose;
+      regularSessionChange = ((quoteClose - quotePreviousClose) / quotePreviousClose) * 100;
+      console.log(`[PRICE ACTION] Regular session change: ${regularSessionChange.toFixed(2)}% (close: ${quoteClose}, previousClose: ${quotePreviousClose})`);
+    } else if (quote.change && quotePreviousClose && quotePreviousClose > 0) {
+      // Fallback: calculate from change amount
+      const quoteChange = typeof quote.change === 'number' ? quote.change : parseFloat(quote.change);
+      if (!isNaN(quoteChange)) {
+        regularSessionClose = quotePreviousClose + quoteChange;
+        regularSessionChange = (quoteChange / quotePreviousClose) * 100;
+        console.log(`[PRICE ACTION] Regular session change from change amount: ${regularSessionChange.toFixed(2)}%`);
+      }
+    }
+    
+    // Calculate after-hours change if we have after-hours data
+    if (marketStatus === 'afterhours' && regularSessionClose > 0 && quote.lastTradePrice) {
+      const lastTrade = typeof quote.lastTradePrice === 'number' ? quote.lastTradePrice : parseFloat(quote.lastTradePrice);
+      if (!isNaN(lastTrade) && lastTrade !== regularSessionClose) {
+        afterHoursChange = ((lastTrade - regularSessionClose) / regularSessionClose) * 100;
+        hasAfterHoursData = true;
+        console.log(`[PRICE ACTION] After-hours change: ${afterHoursChange.toFixed(2)}% (lastTrade: ${lastTrade}, close: ${regularSessionClose})`);
+      }
+    }
+    
+    // For premarket, calculate premarket change (current price vs previous close)
+    let premarketChange = 0;
+    if (marketStatus === 'premarket' && quotePreviousClose && quotePreviousClose > 0 && quote.lastTradePrice) {
+      const premarketPrice = typeof quote.lastTradePrice === 'number' ? quote.lastTradePrice : parseFloat(quote.lastTradePrice);
+      if (!isNaN(premarketPrice)) {
+        premarketChange = ((premarketPrice - quotePreviousClose) / quotePreviousClose) * 100;
+        console.log(`[PRICE ACTION] Premarket change: ${premarketChange.toFixed(2)}% (premarketPrice: ${premarketPrice}, previousClose: ${quotePreviousClose})`);
+      }
     }
     
     let priceActionText = '';
     
-    if (marketStatus === 'open') {
-      priceActionText = `<strong>${symbol} Price Action:</strong> ${companyName} shares were ${upDown} ${absChange}% at $${lastPrice} at the time of publication on ${dayOfWeek}`;
-    } else if (marketStatus === 'afterhours' && hasAfterHoursData) {
+    if (marketStatus === 'premarket' && premarketChange !== 0) {
+      // Premarket: use premarket change
+      const premarketUpDown = premarketChange > 0 ? 'up' : premarketChange < 0 ? 'down' : 'unchanged';
+      const absPremarketChange = Math.abs(premarketChange).toFixed(2);
+      priceActionText = `<strong>${symbol} Price Action:</strong> ${companyName} shares were ${premarketUpDown} ${absPremarketChange}% at $${lastPrice}${marketStatusPhrase} on ${dayOfWeek}`;
+    } else if (marketStatus === 'afterhours' && hasAfterHoursData && regularSessionChange !== 0) {
+      // After-hours: show both regular session and after-hours changes
       const regularUpDown = regularSessionChange > 0 ? 'up' : regularSessionChange < 0 ? 'down' : 'unchanged';
       const afterHoursUpDown = afterHoursChange > 0 ? 'up' : afterHoursChange < 0 ? 'down' : 'unchanged';
       const absRegularChange = Math.abs(regularSessionChange).toFixed(2);
       const absAfterHoursChange = Math.abs(afterHoursChange).toFixed(2);
       priceActionText = `<strong>${symbol} Price Action:</strong> ${companyName} shares were ${regularUpDown} ${absRegularChange}% during regular trading and ${afterHoursUpDown} ${absAfterHoursChange}% in after-hours trading on ${dayOfWeek}, last trading at $${lastPrice}`;
+    } else if (regularSessionChange !== 0) {
+      // Regular trading (closed or open): use regular session change
+      const regularUpDown = regularSessionChange > 0 ? 'up' : regularSessionChange < 0 ? 'down' : 'unchanged';
+      const absRegularChange = Math.abs(regularSessionChange).toFixed(2);
+      if (marketStatus === 'open') {
+        priceActionText = `<strong>${symbol} Price Action:</strong> ${companyName} shares were ${regularUpDown} ${absRegularChange}% at $${lastPrice} at the time of publication on ${dayOfWeek}`;
+      } else {
+        priceActionText = `<strong>${symbol} Price Action:</strong> ${companyName} shares were ${regularUpDown} ${absRegularChange}% at $${lastPrice}${marketStatusPhrase} on ${dayOfWeek}`;
+      }
     } else {
-      priceActionText = `<strong>${symbol} Price Action:</strong> ${companyName} shares were ${upDown} ${absChange}% at $${lastPrice}${marketStatusPhrase} on ${dayOfWeek}`;
+      // Fallback: use changePercent if regular session calculation failed
+      const changePercent = typeof quote.changePercent === 'number' ? quote.changePercent : 0;
+      const upDown = changePercent > 0 ? 'up' : changePercent < 0 ? 'down' : 'unchanged';
+      const absChange = Math.abs(changePercent).toFixed(2);
+      console.log(`[PRICE ACTION] Fallback to changePercent: ${changePercent.toFixed(2)}%`);
+      if (marketStatus === 'open') {
+        priceActionText = `<strong>${symbol} Price Action:</strong> ${companyName} shares were ${upDown} ${absChange}% at $${lastPrice} at the time of publication on ${dayOfWeek}`;
+      } else {
+        priceActionText = `<strong>${symbol} Price Action:</strong> ${companyName} shares were ${upDown} ${absChange}% at $${lastPrice}${marketStatusPhrase} on ${dayOfWeek}`;
+      }
     }
     
     // Add 52-week range context if available
@@ -2361,6 +2483,22 @@ async function generateTechnicalAnalysis(data: TechnicalAnalysisData, provider?:
     // Get market status to adjust language appropriately
     const marketStatus = getMarketStatusTimeBased();
     
+    // Define URL and outlet variables for use throughout the prompt
+    let primaryUrl = '';
+    let isBenzinga = false;
+    let outletName = '';
+    
+    if (newsContext && (newsContext.scrapedContent || (newsContext.selectedArticles && newsContext.selectedArticles.length > 0))) {
+      primaryUrl = newsContext.newsUrl || (newsContext.selectedArticles && newsContext.selectedArticles[0]?.url) || '';
+      isBenzinga = primaryUrl.includes('benzinga.com');
+      try {
+        const urlDomain = primaryUrl ? new URL(primaryUrl).hostname.replace('www.', '') : '';
+        outletName = urlDomain ? urlDomain.split('.')[0].charAt(0).toUpperCase() + urlDomain.split('.')[0].slice(1) : '';
+      } catch (e) {
+        // Invalid URL, skip outlet name extraction
+      }
+    }
+    
     // Get stock sector performance for comparison line
     const sectorPerformance = await getStockSectorPerformance(data.symbol, marketContext || null);
     const sp500Change = marketContext?.indices.find(idx => idx.ticker === 'SPY')?.change || null;
@@ -2483,7 +2621,12 @@ ${sectorPerformance && sp500Change !== null ? `
 COMPARISON LINE (USE THIS EXACT FORMAT AT THE START OF THE ARTICLE, IMMEDIATELY AFTER THE HEADLINE):
 ${data.companyNameWithExchange || data.companyName} stock is ${data.changePercent >= 0 ? 'up' : 'down'} approximately ${Math.abs(data.changePercent).toFixed(1)}% on ${dayOfWeek} versus a ${sectorPerformance.sectorChange.toFixed(1)}% ${sectorPerformance.sectorChange >= 0 ? 'gain' : 'loss'} in the ${sectorPerformance.sectorName} sector and a ${Math.abs(sp500Change).toFixed(1)}% ${sp500Change >= 0 ? 'gain' : 'loss'} in the S&P 500.
 
-CRITICAL: This comparison line should appear immediately after the headline and before the main story content. Use this exact format.
+CRITICAL: This comparison line should appear immediately after the headline and before the main story content. Use this EXACT format with these EXACT numbers:
+- Stock direction: ${data.changePercent >= 0 ? 'up' : 'down'}
+- Stock percentage: ${Math.abs(data.changePercent).toFixed(1)}%
+- Sector change: ${sectorPerformance.sectorChange.toFixed(1)}% ${sectorPerformance.sectorChange >= 0 ? 'gain' : 'loss'}
+- S&P 500 change: ${Math.abs(sp500Change).toFixed(1)}% ${sp500Change >= 0 ? 'gain' : 'loss'}
+DO NOT make up your own numbers - use ONLY the values provided above.
 ` : ''}
 
 ${marketContext ? `
@@ -2722,11 +2865,7 @@ ${data.turningPoints?.supportBreakDate ? `- Price broke below support on ${data.
 
 ${!data.turningPoints || Object.keys(data.turningPoints).length === 0 ? '- No significant turning points identified in the past year' : ''}
 
-${newsContext && (newsContext.scrapedContent || (newsContext.selectedArticles && newsContext.selectedArticles.length > 0)) ? (() => {
-  const primaryUrl = newsContext.newsUrl || (newsContext.selectedArticles && newsContext.selectedArticles[0]?.url) || '';
-  const isBenzinga = primaryUrl.includes('benzinga.com');
-  const urlDomain = primaryUrl ? new URL(primaryUrl).hostname.replace('www.', '') : '';
-  const outletName = urlDomain ? urlDomain.split('.')[0].charAt(0).toUpperCase() + urlDomain.split('.')[0].slice(1) : '';
+${newsContext && (newsContext.scrapedContent || (newsContext.selectedArticles && newsContext.selectedArticles.length > 0)) ? `
   
   return `
 PRIMARY NEWS ARTICLE (LEAD WITH THIS):
@@ -2759,7 +2898,7 @@ URL: ${article.url || 'N/A'}
 
 CRITICAL INSTRUCTIONS FOR NEWS INTEGRATION:
 
-1. LEAD THE STORY WITH PRICE ACTION: The first paragraph MUST start with the stock's current price move (direction and day of week, e.g., "shares closed up on Thursday" or "shares closed down on Monday"). ${marketStatus === 'premarket' ? 'Use the "Premarket Change" value provided above to determine direction - if it\'s positive, say "are up during premarket trading on [day]"; if it\'s negative, say "are down during premarket trading on [day]". You MUST include the phrase "during premarket trading" in the first sentence. Example: "Apple Inc. (NASDAQ:AAPL) shares are down during premarket trading on Friday".' : 'Use the "Daily Change (REGULAR SESSION ONLY)" value provided above to determine direction - if it\'s positive, say "closed up" or "were up"; if it\'s negative, say "closed down" or "were down".'} ${marketStatus === 'afterhours' ? 'CRITICAL: During after-hours, DO NOT include a specific closing price amount (e.g., do NOT write "closing at $22.18"). The "Current Price" shown above is the after-hours price, not the regular session closing price. Only mention the direction (up/down) and day - do NOT include any dollar amount or percentage. Example: "ZIM Integrated Shipping Services Ltd. (NYSE:ZIM) shares surged on Monday during regular trading" NOT "closing at $22.18" or "closing up 3.33%".' : ''} When mentioning the day, use ONLY the day name (e.g., "on Thursday", "on Monday") - DO NOT include the date (e.g., do NOT use "on Thursday, December 18, 2025" or any date format). ${marketStatus === 'open' || marketStatus === 'premarket' ? 'Use present tense (e.g., "shares are tumbling", "shares are surging", "shares are up", "shares are down") since markets are currently open or in premarket.' : 'Use past tense (e.g., "shares closed up", "shares closed down", "shares were up", "shares were down") since markets are closed.'} DO NOT include the percentage in the first paragraph - it's already in the price action section. Then reference the news article to explain what's going on - either the news is contributing to the move, OR the stock is moving despite positive/negative news (suggesting larger market elements may be at play). The angle should answer "What's Going On" by connecting the price action to the news context.
+1. LEAD THE STORY WITH PRICE ACTION: The first paragraph MUST start with the stock's current price move (direction and day of week, e.g., "shares closed up on Thursday" or "shares closed down on Monday"). ${marketStatus === 'premarket' ? `CRITICAL: Use the "Premarket Change" value provided above (${data.changePercent.toFixed(2)}%) to determine direction. If it's positive (>= 0), say "are up during premarket trading on [day]"; if it's negative (< 0), say "are down during premarket trading on [day]". You MUST include the phrase "during premarket trading" in the first sentence. The direction MUST match the sign of ${data.changePercent.toFixed(2)}% - ${data.changePercent >= 0 ? 'POSITIVE means UP' : 'NEGATIVE means DOWN'}. Example: "Apple Inc. (NASDAQ:AAPL) shares are ${data.changePercent >= 0 ? 'up' : 'down'} during premarket trading on Friday".` : `CRITICAL: Use the "Daily Change (REGULAR SESSION ONLY)" value provided above (${data.changePercent.toFixed(2)}%) to determine direction. If it's positive (>= 0), say "closed up" or "were up"; if it's negative (< 0), say "closed down" or "were down". The direction MUST match the sign of ${data.changePercent.toFixed(2)}% - ${data.changePercent >= 0 ? 'POSITIVE means UP' : 'NEGATIVE means DOWN'}. DO NOT make up your own direction - use ONLY the value provided.`} ${marketStatus === 'afterhours' ? 'CRITICAL: During after-hours, DO NOT include a specific closing price amount (e.g., do NOT write "closing at $22.18"). The "Current Price" shown above is the after-hours price, not the regular session closing price. Only mention the direction (up/down) and day - do NOT include any dollar amount or percentage. Example: "ZIM Integrated Shipping Services Ltd. (NYSE:ZIM) shares surged on Monday during regular trading" NOT "closing at $22.18" or "closing up 3.33%".' : ''} When mentioning the day, use ONLY the day name (e.g., "on Thursday", "on Monday") - DO NOT include the date (e.g., do NOT use "on Thursday, December 18, 2025" or any date format). ${marketStatus === 'open' || marketStatus === 'premarket' ? 'Use present tense (e.g., "shares are tumbling", "shares are surging", "shares are up", "shares are down") since markets are currently open or in premarket.' : 'Use past tense (e.g., "shares closed up", "shares closed down", "shares were up", "shares were down") since markets are closed.'} DO NOT include the percentage in the first paragraph - it's already in the price action section. Then reference the news article to explain what's going on - either the news is contributing to the move, OR the stock is moving despite positive/negative news (suggesting larger market elements may be at play). The angle should answer "What's Going On" by connecting the price action to the news context.
 
 2. HYPERLINK FORMATTING (MANDATORY - MUST BE IN FIRST PARAGRAPH):
    ${isBenzinga ? `- This is a Benzinga article. You MUST include a hyperlink in the first paragraph by choosing ANY THREE CONSECUTIVE WORDS from your first paragraph and wrapping them in a hyperlink with format: <a href="${primaryUrl}">[three consecutive words]</a>
@@ -2792,8 +2931,7 @@ CRITICAL INSTRUCTIONS FOR NEWS INTEGRATION:
 
 6. After the lead paragraph, two news content paragraphs (paragraphs 2 and 3), and the broader market/sector paragraph (paragraph 4, if applicable), naturally transition to the technical analysis data provided above.
 
-6. Maximum 2 sentences per paragraph throughout the story.`;
-})() : ''}
+6. Maximum 2 sentences per paragraph throughout the story.` : ''}
 
 TASK: ${newsContext && (newsContext.scrapedContent || (newsContext.selectedArticles && newsContext.selectedArticles.length > 0)) ? `Write a conversational WGO article that helps readers understand "What's Going On" with the stock. LEAD with the current price move (direction and day of week, e.g., "shares are tumbling on Monday" or "shares are surging on Tuesday"). Use ONLY the day name (e.g., "on Thursday", "on Monday") - DO NOT include the date (e.g., do NOT use "on Thursday, December 18, 2025" or any date format). DO NOT include the percentage in the first paragraph. Then reference the news article provided above AND broader market context to explain what's going on - either the news is contributing to the move, OR the stock is moving despite positive/negative news (suggesting larger market elements may be at play). ${marketContext ? 'Use the broader market context (indices, sectors, market breadth) to provide additional context - is the stock moving with or against broader market trends? Reference specific sector performance when relevant (e.g., "Technology stocks are broadly lower today, contributing to the decline" or "Despite a strong market day, the stock is down, suggesting company-specific concerns").' : ''} Include the appropriate hyperlink in the first paragraph (three-word for Benzinga, one-word with outlet credit for others). 
 
@@ -2823,7 +2961,7 @@ CRITICAL RULES - PARAGRAPH LENGTH IS MANDATORY:
 
 - Use normal, everyday language that's clear and accessible - write like you're talking to someone, not writing a formal report
 
-- FIRST PARAGRAPH (2 sentences max): ${newsContext && (newsContext.scrapedContent || (newsContext.selectedArticles && newsContext.selectedArticles.length > 0)) ? `Start with the company name in bold (**Company Name**), followed by the ticker with exchange in parentheses (not bold) - e.g., **Microsoft Corp** (NASDAQ:MSFT) or **Apple Inc.** (NASDAQ:AAPL). The format should be **Company Name** (EXCHANGE:TICKER) - always include the exchange prefix (NASDAQ, NYSE, etc.). Use proper company name formatting with periods (Inc., Corp., etc.). Lead with the primary news article and include the hyperlink by selecting any three consecutive words from your natural sentence flow and hyperlinking them - do NOT use phrases like "as detailed in a recent article" or "according to reports". Connect the price action to the news context. When mentioning the day, use ONLY the day name (e.g., "on Thursday", "on Monday") - DO NOT include the date (e.g., do NOT use "on Thursday, December 18, 2025" or any date format).` : `Start with the company name in bold (**Company Name**), followed by the ticker with exchange in parentheses (not bold) - e.g., **Apple Inc.** (NASDAQ:AAPL) or **Applied Digital Corp.** (NASDAQ:APLD). The format should be **Company Name** (EXCHANGE:TICKER) - always include the exchange prefix (NASDAQ, NYSE, etc.). Use proper company name formatting with periods (Inc., Corp., etc.). LEAD with the current price move direction using the Daily Change data provided - note ONLY the direction and day of week (e.g., "shares are tumbling on Monday" if down, "shares are surging on Tuesday" if up). Use ONLY the day name (e.g., "on Thursday", "on Monday") - DO NOT include the date. DO NOT include the percentage in the first paragraph - it's already in the price action section. ${marketContext ? 'Then IMMEDIATELY reference broader market context to explain the move - is the stock moving with or against broader market trends? Reference specific sector performance when relevant (e.g., "The move comes as Technology stocks are broadly lower today, contributing to the decline" or "Despite a strong market day with the S&P 500 up 0.5%, the stock is down, suggesting company-specific concerns" or "The stock is caught in a broader sell-off, with the Nasdaq down 1.2% and Technology sector declining 1.5%").' : 'Then immediately pivot to the technical analysis context - use moving average positioning, support/resistance levels, or key technical signals to explain what traders are seeing on the charts (e.g., "Traders are focused on the technical picture, which shows the stock is currently testing key support levels while facing mixed signals from moving averages" or "The move comes as the stock flashes a \'mixed\' signal—breaking down in the short term while testing a crucial long-term floor").'} Focus on using market context and technical indicators to add context to the move rather than declaring there's no news. STOP AFTER 2 SENTENCES.`}
+- FIRST PARAGRAPH (2 sentences max): ${newsContext && (newsContext.scrapedContent || (newsContext.selectedArticles && newsContext.selectedArticles.length > 0)) ? `CRITICAL HYPERLINK REQUIREMENT: You MUST include a hyperlink in the first paragraph. ${isBenzinga ? `Choose ANY THREE CONSECUTIVE WORDS from your first paragraph and wrap them in a hyperlink: <a href="${primaryUrl}">[three consecutive words]</a>. Embed it naturally in the sentence flow - do NOT use phrases like "as detailed in a recent article" or "according to reports". Example: "**Apple Inc.** (NASDAQ:AAPL) shares closed up on Thursday as the company is <a href="${primaryUrl}">reportedly deepening its</a> India strategy".` : `Include a ONE-WORD hyperlink with outlet credit: <a href="${primaryUrl}">${outletName || 'Source'}</a> reports. Example: "<a href="${primaryUrl}">CNBC</a> reports" or "<a href="${primaryUrl}">Reuters</a> reports".`} THIS IS MANDATORY - THE HYPERLINK MUST APPEAR IN THE FIRST PARAGRAPH. Start with the company name in bold (**Company Name**), followed by the ticker with exchange in parentheses (not bold) - e.g., **Microsoft Corp** (NASDAQ:MSFT) or **Apple Inc.** (NASDAQ:AAPL). The format should be **Company Name** (EXCHANGE:TICKER) - always include the exchange prefix (NASDAQ, NYSE, etc.). Use proper company name formatting with periods (Inc., Corp., etc.). Lead with the primary news article and include the hyperlink as specified above. Connect the price action to the news context. When mentioning the day, use ONLY the day name (e.g., "on Thursday", "on Monday") - DO NOT include the date (e.g., do NOT use "on Thursday, December 18, 2025" or any date format).` : `Start with the company name in bold (**Company Name**), followed by the ticker with exchange in parentheses (not bold) - e.g., **Apple Inc.** (NASDAQ:AAPL) or **Applied Digital Corp.** (NASDAQ:APLD). The format should be **Company Name** (EXCHANGE:TICKER) - always include the exchange prefix (NASDAQ, NYSE, etc.). Use proper company name formatting with periods (Inc., Corp., etc.). LEAD with the current price move direction using the Daily Change data provided - note ONLY the direction and day of week (e.g., "shares are tumbling on Monday" if down, "shares are surging on Tuesday" if up). Use ONLY the day name (e.g., "on Thursday", "on Monday") - DO NOT include the date. DO NOT include the percentage in the first paragraph - it's already in the price action section. ${marketContext ? 'Then IMMEDIATELY reference broader market context to explain the move - is the stock moving with or against broader market trends? Reference specific sector performance when relevant (e.g., "The move comes as Technology stocks are broadly lower today, contributing to the decline" or "Despite a strong market day with the S&P 500 up 0.5%, the stock is down, suggesting company-specific concerns" or "The stock is caught in a broader sell-off, with the Nasdaq down 1.2% and Technology sector declining 1.5%").' : 'Then immediately pivot to the technical analysis context - use moving average positioning, support/resistance levels, or key technical signals to explain what traders are seeing on the charts (e.g., "Traders are focused on the technical picture, which shows the stock is currently testing key support levels while facing mixed signals from moving averages" or "The move comes as the stock flashes a \'mixed\' signal—breaking down in the short term while testing a crucial long-term floor").'} Focus on using market context and technical indicators to add context to the move rather than declaring there's no news. STOP AFTER 2 SENTENCES.`}
 
 - SECOND PARAGRAPH (2 sentences, SUBSTANTIVE NEWS DETAILS - PART 1): ${newsContext && (newsContext.scrapedContent || (newsContext.selectedArticles && newsContext.selectedArticles.length > 0)) ? `MANDATORY: Provide detailed, specific information from the news source article. Focus on the first set of key details such as:
   * Analyst ratings, price targets, or specific analyst commentary if mentioned (e.g., "Analyst Samik Chatterjee from JPMorgan has maintained an Overweight rating on Apple")
@@ -2936,7 +3074,10 @@ ${marketContext ? `- MANDATORY: You MUST reference broader market context in the
 
 - The percentage always refers to how far the STOCK is from the moving average, not the other way around
 
-- Write like you're having a conversation, not writing a formal report`;
+- Write like you're having a conversation, not writing a formal report
+
+${newsContext && (newsContext.scrapedContent || (newsContext.selectedArticles && newsContext.selectedArticles.length > 0)) ? `
+FINAL REMINDER - HYPERLINK REQUIREMENT: Your first paragraph MUST include a hyperlink. ${isBenzinga ? `Choose ANY THREE CONSECUTIVE WORDS from your first paragraph and wrap them: <a href="${primaryUrl}">[three words]</a>. Embed it naturally - do NOT use phrases like "as detailed in" or "according to reports".` : `Include a ONE-WORD hyperlink with outlet credit: <a href="${primaryUrl}">${outletName || 'Source'}</a> reports.`} THIS IS MANDATORY - DO NOT FORGET THE HYPERLINK IN THE FIRST PARAGRAPH.` : ''}`;
 
 
 
@@ -2972,7 +3113,7 @@ ${marketContext ? `- MANDATORY: You MUST reference broader market context in the
 
       : 'gpt-4o-mini';
 
-    const maxTokens = currentProvider === 'gemini' ? 8192 : 800;
+    const maxTokens = currentProvider === 'gemini' ? 8192 : 2500;
 
 
 
@@ -3082,11 +3223,77 @@ export async function POST(request: Request) {
         
         // Generate price action and append to analysis
         const priceAction = await generatePriceAction(ticker);
-        const analysisWithPriceAction = priceAction 
+        let analysisWithPriceAction = priceAction 
           ? `${analysis}\n\n${priceAction}`
           : analysis;
-
         
+        // Fetch related articles and add "Also Read" and "Read Next" sections
+        const excludeUrl = newsContext?.newsUrl || (newsContext?.selectedArticles && newsContext.selectedArticles[0]?.url) || undefined;
+        const relatedArticles = await fetchRelatedArticles(ticker, excludeUrl);
+        
+        // Ensure "Also Read" and "Read Next" sections are included if related articles are available
+        if (relatedArticles && relatedArticles.length > 0) {
+          // Check if "Also Read" section exists and is in the correct position
+          const alsoReadPattern = /<p>Also Read:.*?<\/p>/i;
+          const alsoReadMatch = analysisWithPriceAction.match(alsoReadPattern);
+          const alsoReadExists = !!alsoReadMatch;
+          
+          // Find where "Also Read" currently is
+          const paragraphs = analysisWithPriceAction.split('</p>').filter(p => p.trim().length > 0);
+          const alsoReadIndex = alsoReadMatch ? paragraphs.findIndex(p => p.includes('Also Read:')) : -1;
+          
+          // Target position: after the second paragraph (index 2, which is the 3rd element: lead, para1, Also Read)
+          const targetIndex = 2;
+          
+          if (alsoReadExists && alsoReadIndex === targetIndex) {
+            console.log('"Also Read" section already exists in correct position');
+          } else {
+            // Remove existing "Also Read" if it's in the wrong place
+            if (alsoReadExists && alsoReadIndex !== -1) {
+              console.log(`Moving "Also Read" from position ${alsoReadIndex} to position ${targetIndex}`);
+              paragraphs.splice(alsoReadIndex, 1);
+            } else if (!alsoReadExists) {
+              console.log('Adding "Also Read" section');
+            }
+            
+            // Insert "Also Read" at the correct position (after second paragraph)
+            if (paragraphs.length >= 2) {
+              const alsoReadSection = `<p>Also Read: <a href="${relatedArticles[0].url}">${relatedArticles[0].headline}</a></p>`;
+              paragraphs.splice(targetIndex, 0, alsoReadSection);
+              // When we split by '</p>', each element doesn't have the closing tag
+              // But alsoReadSection already has '</p>', so we need to handle it differently
+              analysisWithPriceAction = paragraphs.map(p => {
+                // If it already has '</p>' (like alsoReadSection), return as-is
+                if (p.trim().endsWith('</p>')) return p;
+                // Otherwise, add '</p>' back
+                return p + '</p>';
+              }).join('');
+              console.log('✅ "Also Read" section placed after second paragraph');
+            }
+          }
+          
+          // Check if "Read Next" section exists, if not add it after context but before price action
+          if (!analysisWithPriceAction.includes('Read Next:')) {
+            console.log('Adding "Read Next" section');
+            const readNextSection = `<p>Read Next: <a href="${relatedArticles[1]?.url || relatedArticles[0].url}">${relatedArticles[1]?.headline || relatedArticles[0].headline}</a></p>`;
+            
+            // Find the price action section to insert before it
+            const priceActionIndex = analysisWithPriceAction.indexOf('Price Action:');
+            if (priceActionIndex !== -1) {
+              // Insert before price action
+              const beforePriceAction = analysisWithPriceAction.substring(0, priceActionIndex);
+              const priceActionAndAfter = analysisWithPriceAction.substring(priceActionIndex);
+              analysisWithPriceAction = `${beforePriceAction}\n\n${readNextSection}\n\n${priceActionAndAfter}`;
+            } else {
+              // If no price action found, add to the end
+              analysisWithPriceAction += readNextSection;
+            }
+          } else {
+            console.log('"Read Next" section already exists');
+          }
+        } else {
+          console.log('No related articles available');
+        }
 
         return {
 

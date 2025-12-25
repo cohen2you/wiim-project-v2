@@ -95,16 +95,40 @@ async function fetchRelatedArticles(ticker: string, excludeUrl?: string): Promis
 
 function buildPrompt({ ticker, sourceText, analystSummary, priceSummary, priceActionDay, sourceUrl, sourceDateFormatted, relatedArticles, includeCTA, ctaText, includeSubheads, subheadTexts }: { ticker: string; sourceText: string; analystSummary: string; priceSummary: string; priceActionDay?: string; sourceUrl?: string; sourceDateFormatted?: string; relatedArticles?: any[]; includeCTA?: boolean; ctaText?: string; includeSubheads?: boolean; subheadTexts?: string[] }) {
   
-  // Check if this is an analyst note - make detection more specific
-  const isAnalystNote = (sourceText.includes('Samik Chatterjee') && sourceText.includes('J P M O R G A N')) || 
-                       (sourceText.includes('analyst') && sourceText.includes('J.P. Morgan') && sourceText.includes('Overweight'));
+  // Check if this is an analyst note - look for common patterns
+  const isAnalystNote = 
+    (sourceText.match(/analyst.*note|analyst.*report|analyst.*research/i) && 
+     (sourceText.match(/price target|rating|overweight|buy|hold|sell|underweight/i))) ||
+    (sourceText.match(/[A-Z][a-z]+ [A-Z][a-z]+.*(?:CFA|analyst)/) && 
+     sourceText.match(/(?:J\.P\. Morgan|JPMorgan|JP Morgan|Morgan Stanley|Goldman Sachs|Bank of America|Wells Fargo|Citigroup|Barclays|Deutsche Bank|UBS|Credit Suisse)/i) &&
+     sourceText.match(/(?:price target|rating|overweight|buy|hold|sell|underweight)/i));
   
   // Extract key analyst information if this is an analyst note
   let analystInfo = '';
   if (isAnalystNote) {
-    const analystMatch = sourceText.match(/Samik Chatterjee, CFA/);
-    const firmMatch = sourceText.match(/J\.P\. Morgan|J P M O R G A N/);
-    const ratingMatch = sourceText.match(/Overweight/);
+    // Try to extract analyst name - look for patterns like "Name, Title" or "Name from Firm"
+    let analystName = '';
+    const analystPatterns = [
+      /([A-Z][a-z]+ [A-Z][a-z]+),?\s*(?:CFA|analyst|Analyst)/,  // "Samik Chatterjee, CFA" or "John Smith, analyst"
+      /([A-Z][a-z]+ [A-Z][a-z]+)\s+from\s+[A-Z]/,  // "John Smith from JPMorgan"
+      /analyst\s+([A-Z][a-z]+ [A-Z][a-z]+)/i,  // "analyst John Smith"
+    ];
+    
+    for (const pattern of analystPatterns) {
+      const match = sourceText.match(pattern);
+      if (match && match[1]) {
+        analystName = match[1];
+        break;
+      }
+    }
+    
+    // Fallback to specific known analyst if pattern matching fails
+    if (!analystName && sourceText.includes('Samik Chatterjee')) {
+      analystName = 'Samik Chatterjee';
+    }
+    
+    const firmMatch = sourceText.match(/J\.P\. Morgan|J P M O R G A N|JPMorgan|JP Morgan/i);
+    const ratingMatch = sourceText.match(/(Overweight|Buy|Hold|Sell|Underweight|Neutral|Positive|Negative)/i);
     
     // Extract price targets - look for patterns like "raised to $200 from $185" or "to $200"
     const priceTargetPatterns = [
@@ -137,45 +161,55 @@ function buildPrompt({ ticker, sourceText, analystSummary, priceSummary, priceAc
     
          analystInfo = `
 EXTRACTED ANALYST INFORMATION:
-- Firm: ${firmMatch ? 'J.P. Morgan' : 'Not found'}
-- Rating: ${ratingMatch ? 'Overweight' : 'Not found'}
+- Firm: ${firmMatch ? firmMatch[0] : 'Not found'}
+- Analyst: ${analystName || 'Not found'}
+- Rating: ${ratingMatch ? ratingMatch[1] : 'Not found'}
 - Current Price Target: ${currentPriceTarget || 'Not found'}
 - Previous Price Target: ${previousPriceTarget || 'Not found'}
 - Date: ${dateMatch ? `${dateMatch[2]} ${dateMatch[1]}, ${dateMatch[3]}` : 'Not found'}
 
-CRITICAL: ONLY use the firm name. NEVER mention individual analyst names.
-YOU MUST USE THIS INFORMATION IN YOUR ARTICLE.
+YOU MUST USE THIS INFORMATION IN YOUR ARTICLE. Include both firm name and analyst name when available.
 `;
   }
   
      return `You are a professional financial news writer for Benzinga.
 
-CRITICAL RULE: NEVER mention individual analyst names in any part of the article. Only use firm names when referencing analyst ratings or commentary.
-
 Write a concise, fact-based news article (about 350 words) about the stock with ticker: ${ticker}. Use the provided press release, news article, or analyst note text as your main source, but focus only on information relevant to ${ticker}. Ignore other tickers or companies mentioned in the source text.
 
-IMPORTANT: If the source text appears to be an analyst note (contains analyst names, firm names, ratings, price targets, or financial analysis), prioritize extracting and using the specific analyst insights, forecasts, and reasoning from the note rather than generic analyst summary data. 
+${isAnalystNote ? `
+CRITICAL: THIS IS AN ANALYST NOTE. You MUST create a narrative-driven article with a compelling investment thesis story. The article should flow like a story, not a list of facts.
 
-CRITICAL FOR ANALYST NOTES: Extract and include ONLY the firm name, specific analysis points, financial forecasts, investment thesis, and key reasoning directly from the source text. NEVER mention individual analyst names. Do not rely on the analyst summary data if the source text contains detailed analyst information.
+NARRATIVE STRUCTURE FOR ANALYST NOTES:
+1. Opening: Start with a bold, thematic statement that captures the investment thesis (similar to "Amazon's investment case heading into 2026 is no longer about e-commerce dominance"). This should set up the main narrative arc. Include the firm name and analyst name when available, along with key data points (rating, price target) woven naturally into the narrative.
 
-IMPORTANT: The source text below contains the full analyst note. Extract all relevant analyst information, including ratings, price targets, analysis, and reasoning directly from this source text. NEVER mention individual analyst names - only use firm names. Do not use any external analyst summary data.
+2. Thematic Subheads: Organize content into 2-4 thematic subheads that tell a story (e.g., "AWS Re-Acceleration", "AI Beyond The Cloud", "Margin Expansion Back In Focus"). Each subhead should represent a major theme or pillar of the investment thesis.
 
-${isAnalystNote ? 'CRITICAL: THIS IS AN ANALYST NOTE. You MUST extract and include ONLY the firm name (J.P. Morgan), rating (Overweight), price target ($200), and specific analysis from the source text below. NEVER mention individual analyst names. Do not write generic content.' : ''}
+3. Narrative Flow: Write in a conversational, story-driven style. Each section should build on the previous one, creating a cohesive narrative arc. Use transitions that connect ideas naturally. Paragraphs can be longer (3-4 sentences) when needed to maintain narrative flow, but keep them focused and readable.
+
+4. Data Integration: Weave in key data points (ratings, price targets, financial forecasts) naturally within the narrative. Don't just list them - integrate them into the story. Always include both firm name and analyst name when available (e.g., "JPMorgan's Samik Chatterjee says..." or "According to JPMorgan analyst Samik Chatterjee...").
+
+5. Closing: End with a strong, memorable closing line that ties back to the opening thesis (e.g., "Retail built Amazon. AI and margin discipline may define its next decade.").
+
+TONE: Write with authority and insight, like you're explaining a compelling investment story to a sophisticated reader. Be conversational but professional. Use active voice. Make it engaging and readable.
+` : ''}
 
 ${analystInfo}
 
 CRITICAL FORMATTING RULES:
-- NO paragraph should be longer than 2 sentences
+${isAnalystNote ? `- For ANALYST NOTES: Paragraphs can be 3-4 sentences when needed to maintain narrative flow, but keep them focused and readable
+- Use thematic subheads to organize content (format as standalone lines with proper spacing)
+- The hyperlink MUST appear in the lead paragraph
+- Use HTML tags for formatting, not markdown` : `- NO paragraph should be longer than 2 sentences
 - Break up any long paragraphs into multiple shorter ones
 - The hyperlink MUST appear in the lead paragraph
-- Use HTML tags for formatting, not markdown
+- Use HTML tags for formatting, not markdown`}
 
 Structure your article as follows:
 - Headline: Write a clear, engaging headline in the style of these examples (do not use bold, asterisks, or markdown headings such as # or ##; the headline should be plain text only):
   - C3 AI Stock Is Tumbling Thursday: What's Going On?
   - What's Going On With Oklo Stock?
 
-- Lead paragraph: Start with a sentence describing the ACTUAL price movement of the stock based on the price data provided. Use the exact movement from the price summary (e.g., if price summary shows "down 1.61%", say "traded lower" or "declined"; if it shows "up 2.5%", say "rose" or "traded higher"). Use the full company name and ticker in this format: <strong>Company Name</strong> (NYSE: TICKER). The company name should be bolded using HTML <strong> tags. Do not use markdown bold (**) or asterisks elsewhere. Do not include the specific price or percentage in the lead; reserve that for the price action line at the bottom. Then state what happened and why it matters for ${ticker}. CRITICAL: Do NOT include analyst names (like "Samik Chatterjee" or "J.P. Morgan analyst") in the lead paragraph. The lead should focus on the stock movement and the general news event, not specific analyst details. IMPORTANT: Do NOT use the word "today" in the lead paragraph. Use the exact time reference provided in priceActionDay. CRITICAL: The lead MUST mention the actual price movement (up, down, unchanged) but NOT the specific percentage - reserve the percentage for the price action line at the bottom. 
+- Lead paragraph: ${isAnalystNote ? `For ANALYST NOTES: Start with a bold, thematic opening that captures the investment thesis (e.g., "Amazon's investment case heading into 2026 is no longer about e-commerce dominance. JPMorgan says the real upside sits in AWS acceleration, AI-led share gains, and a margin story that's finally beginning to show discipline."). Include the firm name and analyst name when available, along with key data points (rating, price target) woven naturally. Use the full company name and ticker in this format: <strong>Company Name</strong> (NYSE: TICKER). The company name should be bolded using HTML <strong> tags. Do not use markdown bold (**) or asterisks elsewhere. The lead should set up the narrative arc, not just state price movement. IMPORTANT: Do NOT use the word "today" in the lead paragraph. Use the exact time reference provided in priceActionDay if relevant.` : `Start with a sentence describing the ACTUAL price movement of the stock based on the price data provided. Use the exact movement from the price summary (e.g., if price summary shows "down 1.61%", say "traded lower" or "declined"; if it shows "up 2.5%", say "rose" or "traded higher"). Use the full company name and ticker in this format: <strong>Company Name</strong> (NYSE: TICKER). The company name should be bolded using HTML <strong> tags. Do not use markdown bold (**) or asterisks elsewhere. Do not include the specific price or percentage in the lead; reserve that for the price action line at the bottom. Then state what happened and why it matters for ${ticker}. IMPORTANT: Do NOT use the word "today" in the lead paragraph. Use the exact time reference provided in priceActionDay. CRITICAL: The lead MUST mention the actual price movement (up, down, unchanged) but NOT the specific percentage - reserve the percentage for the price action line at the bottom.`} 
 
 CRITICAL HYPERLINK REQUIREMENT: You MUST include exactly one hyperlink in the lead paragraph. ${relatedArticles && relatedArticles.length > 0 ? `Use this specific article: "${relatedArticles[0].headline}" at URL: ${relatedArticles[0].url}. Choose any three consecutive words from your lead paragraph and wrap them in <a href="${relatedArticles[0].url}"> and </a> tags. EXAMPLE: "Apple Inc (NASDAQ: AAPL) traded lower ${priceActionDay || 'this morning'} following <a href="${relatedArticles[0].url}">reports that JPMorgan</a> Chase & Co. is in advanced discussions"` : 'If no related articles are available, choose any three consecutive words and link to a Benzinga topic page using <a href="https://www.benzinga.com/markets"> and </a> tags.'} The hyperlink CANNOT link to the source URL. THIS IS MANDATORY - YOUR LEAD PARAGRAPH MUST CONTAIN ONE HYPERLINK. DO NOT FORGET TO INCLUDE THE HYPERLINK IN THE LEAD PARAGRAPH.
 
@@ -186,7 +220,7 @@ EXAMPLE LEAD PARAGRAPH FORMAT:
 
 - IMPORTANT: In your lead, use this exact phrase to reference the timing of the price movement: "${priceActionDay || '[Day not provided]'}". Do not use or infer any other day or date, even if the source text or PR/article date mentions a different day. DO NOT use the word "today" - use the exact time reference provided in priceActionDay.
 
-- Additional paragraphs: Provide factual details, context, and any relevant quotes about ${ticker}. When referencing the source material, mention the actual date: "${sourceDateFormatted || '[Date not provided]'}" (e.g., "In a press release dated ${sourceDateFormatted}" or "According to the ${sourceDateFormatted} announcement"). If the source is an analyst note, include specific details about earnings forecasts, financial estimates, market analysis, and investment reasoning from the note. CRITICAL: Each paragraph must be no longer than 2 sentences. If you have more information, create additional paragraphs.
+- Additional paragraphs: ${isAnalystNote ? `For ANALYST NOTES: Build a narrative story with thematic sections. Organize content into 2-4 thematic subheads that tell a cohesive story (e.g., "AWS Re-Acceleration", "AI Beyond The Cloud", "Margin Expansion Back In Focus"). Each section should build on the previous one. Paragraphs can be 3-4 sentences when needed to maintain narrative flow, but keep them focused. Weave in key data points (ratings, price targets, financial forecasts) naturally within the narrative. Always include both firm name and analyst name when available. Use transitions that connect ideas naturally. End with a strong closing line that ties back to the opening thesis.` : `Provide factual details, context, and any relevant quotes about ${ticker}. When referencing the source material, mention the actual date: "${sourceDateFormatted || '[Date not provided]'}" (e.g., "In a press release dated ${sourceDateFormatted}" or "According to the ${sourceDateFormatted} announcement"). CRITICAL: Each paragraph must be no longer than 2 sentences. If you have more information, create additional paragraphs.`}
 
 SOURCE URL HYPERLINK: If sourceUrl is provided, the first sentence of the additional content (after the lead paragraph) must include a three-word anchor linking to the source URL. Use the format "according to <a href="${sourceUrl}">Benzinga</a>" or similar attribution. EXAMPLE: "According to <a href="${sourceUrl}">Benzinga Pro</a>, the company announced..."
 
@@ -200,6 +234,8 @@ ${includeSubheads && subheadTexts && subheadTexts.length > 0 ? `
   ${subheadTexts.map((subhead, index) => `${index + 1}. ${subhead}`).join('\n  ')}
   
   Format each subhead as a standalone line with proper spacing before and after.
+` : isAnalystNote ? `
+- Thematic Subheads: Create 2-4 thematic subheads that organize the narrative (e.g., "AWS Re-Acceleration", "AI Beyond The Cloud", "Margin Expansion Back In Focus"). Each subhead should represent a major theme or pillar of the investment thesis. Format each subhead as a standalone line with proper spacing before and after. Do not use HTML heading tags - just plain text with spacing.
 ` : ''}
 
 ${relatedArticles && relatedArticles.length > 1 ? `
@@ -207,20 +243,28 @@ ${relatedArticles && relatedArticles.length > 1 ? `
   Also Read: <a href="${relatedArticles[1].url}">${relatedArticles[1].headline}</a>
 ` : ''}
 
-${isAnalystNote ? '- FOR ANALYST NOTES: Do NOT mention analyst names in the lead paragraph. Start your additional paragraphs (after the lead) with "According to J.P. Morgan..." (emphasize the firm name first) and include specific details about the F3Q25 earnings preview, diversification strategy, Apple revenue loss impact, and investment thesis from the source text. When mentioning price targets, include the previous target if available (e.g., "raised the price target to $200 from $185"). Do not write generic content about the semiconductor industry.' : ''}
-
-- For analyst notes specifically: Extract and include ONLY the firm name - NEVER mention individual analyst names (e.g., "J.P. Morgan maintains..." - do NOT mention "Samik Chatterjee" or any other analyst names). Include specific analysis points, financial forecasts, investment thesis, and key reasoning directly from the source text. Include details about earnings previews, price targets (use whole numbers like $200, not $200.00), ratings, and market insights mentioned in the note. When a price target is raised or lowered, always include both the current and previous targets in the format "raised the price target to [current] from [previous]" or "lowered the price target to [current] from [previous]".
-
-${isAnalystNote ? '- MANDATORY FOR ANALYST NOTES: Do NOT include analyst names in the lead paragraph. You MUST emphasize the firm name "J.P. Morgan" first in your additional paragraphs (after the lead). You MUST mention the "Overweight" rating and price target information. If a previous price target is available, format it as "raised the price target to [current] from [previous]" (e.g., "raised the price target to $200 from $185"). If no previous target is available, use "raised the price target to [current]" or "set a price target of [current]". You MUST include specific details about the F3Q25 earnings preview, diversification strategy, and investment thesis from the source text.' : ''}
-
-- Analyst Ratings: Extract and include analyst information directly from the source text. Include:
-  * ONLY the firm name - NEVER mention individual analyst names, rating, and price target changes (use whole numbers like $200, not $200.00)
+${isAnalystNote ? `
+- FOR ANALYST NOTES - NARRATIVE REQUIREMENTS:
+  * Include both firm name AND analyst name when available (e.g., "JPMorgan's Samik Chatterjee says..." or "According to JPMorgan analyst Samik Chatterjee...")
+  * Organize content into 2-4 thematic subheads that tell a cohesive story
+  * Each thematic section should build on the previous one, creating a narrative arc
+  * Weave in key data points naturally: rating, price targets (use whole numbers like $200, not $200.00), financial forecasts
+  * When a price target was raised or lowered, include both current and previous: "raised the price target to [current] from [previous]" (e.g., "raised the price target to $200 from $185")
+  * Include specific analysis points, investment thesis, and key reasoning from the source text
+  * Use transitions that connect ideas naturally ("That shift...", "Importantly...", "Despite...")
+  * End with a strong closing line that ties back to the opening thesis
+  * Paragraphs can be 3-4 sentences when needed for narrative flow, but keep them focused
+` : `
+- Analyst Ratings (for non-analyst-note articles): Extract and include analyst information directly from the source text. Include:
+  * Firm name and analyst name when available
+  * Rating and price target changes (use whole numbers like $200, not $200.00)
   * If a price target was raised or lowered, include both the current and previous targets (e.g., "raised the price target to $200 from $185")
   * Key analysis points and investment thesis from the note
   * Specific financial forecasts or estimates mentioned
   * Important reasoning and market insights
   * Any notable risks or catalysts discussed
   Each paragraph must be no longer than 2 sentences. Focus on extracting specific details from the source text rather than using generic analyst summary data.
+`}
 
 - At the very bottom, include the following price action summary for ${ticker} exactly as provided, but with these modifications:
   - Bold the ticker and "Price Action:" part using HTML <strong> tags (e.g., <strong>AA Price Action:</strong>)
@@ -239,22 +283,24 @@ CRITICAL HTML FORMATTING: You MUST wrap each paragraph in <p> tags. The output s
 <p>Second paragraph content.</p>
 <p>Third paragraph content.</p>
 
-REMEMBER: NO paragraph should exceed 2 sentences. Break up longer content into multiple paragraphs. THE HYPERLINK MUST APPEAR IN THE LEAD PARAGRAPH - THIS IS MANDATORY.
+${isAnalystNote ? `REMEMBER: For ANALYST NOTES, create a narrative-driven story with thematic subheads. Paragraphs can be 3-4 sentences when needed for narrative flow. Include both firm name and analyst name. End with a strong closing line. THE HYPERLINK MUST APPEAR IN THE LEAD PARAGRAPH - THIS IS MANDATORY.` : `REMEMBER: NO paragraph should exceed 2 sentences. Break up longer content into multiple paragraphs. THE HYPERLINK MUST APPEAR IN THE LEAD PARAGRAPH - THIS IS MANDATORY.`}
 
 Source Text:
 ${sourceText}
 
 ${isAnalystNote ? `
-IMPORTANT: The source text above contains a J.P. Morgan analyst note. You MUST include:
-1. ONLY the firm name "J.P. Morgan" - NEVER mention individual analyst names
-2. The "Overweight" rating and price target information (include previous target if available)
-3. Specific details about the F3Q25 earnings preview
-4. Information about the diversification strategy and Apple revenue loss
-5. The investment thesis about long-term re-rating opportunity
-6. Financial forecasts and market insights from the note
+IMPORTANT: The source text above contains an analyst note. You MUST create a narrative-driven article that:
 
-CRITICAL: NEVER mention "Samik Chatterjee" or any other individual analyst names. Only use firm names.
-Do not write generic content about the semiconductor industry. Use the specific analyst insights from the source text.
+1. Opens with a bold, thematic statement capturing the investment thesis
+2. Includes both firm name AND analyst name when available (e.g., "JPMorgan's Samik Chatterjee says..." or "According to JPMorgan analyst Samik Chatterjee...")
+3. Organizes content into 2-4 thematic subheads that tell a cohesive story
+4. Weaves in key data points naturally: rating, price targets (include previous target if available), financial forecasts
+5. Builds a narrative arc where each section connects to the next
+6. Includes specific analysis points, investment thesis, and key reasoning from the source text
+7. Ends with a strong closing line that ties back to the opening thesis
+8. Uses conversational, story-driven language while remaining factual and professional
+
+CRITICAL: Write like you're telling a compelling investment story, not listing facts. Make it engaging and readable while maintaining accuracy.
 ` : ''}
 
 FINAL REMINDER: Your lead paragraph MUST contain exactly one hyperlink. The hyperlink must be in the lead paragraph, not in any other section.
