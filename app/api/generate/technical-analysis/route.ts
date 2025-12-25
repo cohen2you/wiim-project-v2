@@ -3005,7 +3005,7 @@ CRITICAL RULES - PARAGRAPH LENGTH IS MANDATORY:
 
 - NEVER use ambiguous phrasing like "below its 50-day moving average, which is X% lower"
 
-- FIRST PARAGRAPH (2 sentences max): ${newsContext && (newsContext.scrapedContent || (newsContext.selectedArticles && newsContext.selectedArticles.length > 0)) ? `${primaryUrl ? `ABSOLUTELY CRITICAL HYPERLINK REQUIREMENT - YOU MUST INCLUDE THIS IN YOUR OUTPUT: The first paragraph MUST contain an HTML hyperlink. ${isBenzinga ? `Choose ANY THREE CONSECUTIVE WORDS from your first paragraph and wrap them in this EXACT HTML format: <a href="${primaryUrl}">[three consecutive words]</a>. Embed it naturally in the sentence flow - do NOT use phrases like "as detailed in a recent article" or "according to reports". Example output: "**Apple Inc.** (NASDAQ:AAPL) shares closed up on Thursday as the company is <a href="${primaryUrl}">reportedly deepening its</a> India strategy". THE URL TO USE IS: ${primaryUrl}` : `Include a ONE-WORD hyperlink with outlet credit using this EXACT HTML format: <a href="${primaryUrl}">${outletName || 'Source'}</a> reports. Example output: "<a href="${primaryUrl}">CNBC</a> reports" or "<a href="${primaryUrl}">Reuters</a> reports". THE URL TO USE IS: ${primaryUrl}`} THIS IS NOT OPTIONAL - YOU MUST INCLUDE THE <a href> TAG IN YOUR FIRST PARAGRAPH. IF YOU DO NOT INCLUDE IT, YOUR OUTPUT IS INCORRECT. ` : ''}Start with the company name in bold (**Company Name**), followed by the ticker with exchange in parentheses (not bold) - e.g., **Microsoft Corp** (NASDAQ:MSFT) or **Apple Inc.** (NASDAQ:AAPL). The format should be **Company Name** (EXCHANGE:TICKER) - always include the exchange prefix (NASDAQ, NYSE, etc.). Use proper company name formatting with periods (Inc., Corp., etc.). Lead with the primary news article${primaryUrl ? ' and include the hyperlink as specified above' : ''}. Connect the price action to the news context. When mentioning the day, use ONLY the day name (e.g., "on Thursday", "on Monday") - DO NOT include the date (e.g., do NOT use "on Thursday, December 18, 2025" or any date format).` : `Start with the company name in bold (**Company Name**), followed by the ticker with exchange in parentheses (not bold) - e.g., **Apple Inc.** (NASDAQ:AAPL) or **Applied Digital Corp.** (NASDAQ:APLD). The format should be **Company Name** (EXCHANGE:TICKER) - always include the exchange prefix (NASDAQ, NYSE, etc.). Use proper company name formatting with periods (Inc., Corp., etc.). LEAD with the current price move direction using the Daily Change data provided - note ONLY the direction and day of week (e.g., "shares are tumbling on Monday" if down, "shares are surging on Tuesday" if up). Use ONLY the day name (e.g., "on Thursday", "on Monday") - DO NOT include the date. DO NOT include the percentage in the first paragraph - it's already in the price action section. ${marketContext ? 'Then IMMEDIATELY reference broader market context to explain the move - is the stock moving with or against broader market trends? Reference specific sector performance when relevant (e.g., "The move comes as Technology stocks are broadly lower today, contributing to the decline" or "Despite a strong market day with the S&P 500 up 0.5%, the stock is down, suggesting company-specific concerns" or "The stock is caught in a broader sell-off, with the Nasdaq down 1.2% and Technology sector declining 1.5%").' : 'Then immediately pivot to the technical analysis context - use moving average positioning, support/resistance levels, or key technical signals to explain what traders are seeing on the charts (e.g., "Traders are focused on the technical picture, which shows the stock is currently testing key support levels while facing mixed signals from moving averages" or "The move comes as the stock flashes a \'mixed\' signal—breaking down in the short term while testing a crucial long-term floor").'} Focus on using market context and technical indicators to add context to the move rather than declaring there's no news. STOP AFTER 2 SENTENCES.`}
+- FIRST PARAGRAPH (2 sentences max): ${newsContext && (newsContext.scrapedContent || (newsContext.selectedArticles && newsContext.selectedArticles.length > 0)) ? `${primaryUrl ? `ABSOLUTELY CRITICAL HYPERLINK REQUIREMENT - YOU MUST INCLUDE THIS IN YOUR OUTPUT: The first paragraph MUST contain an HTML hyperlink. ${isBenzinga ? `Choose ANY THREE CONSECUTIVE WORDS from your first paragraph and wrap them in this EXACT HTML format: <a href="${primaryUrl}">[three consecutive words]</a>. Embed it naturally in the sentence flow - do NOT use phrases like "as detailed in a recent article" or "according to reports". Example output: "**Apple Inc.** (NASDAQ:AAPL) shares closed up on Thursday as the company is <a href="${primaryUrl}">reportedly deepening its</a> India strategy". THE URL TO USE IS: ${primaryUrl}` : `Include a ONE-WORD hyperlink with outlet credit using this EXACT HTML format: <a href="${primaryUrl}">${outletName || 'Source'}</a> reports. Example output: "<a href="${primaryUrl}">CNBC</a> reports" or "<a href="${primaryUrl}">Reuters</a> reports". THE URL TO USE IS: ${primaryUrl}`} THIS IS NOT OPTIONAL - YOU MUST INCLUDE THE <a href> TAG IN YOUR FIRST PARAGRAPH. IF YOU DO NOT INCLUDE IT, YOUR OUTPUT IS INCORRECT. ` : ''}Start with the company name in bold (**Company Name**), followed by the ticker with exchange in parentheses (not bold) - e.g., **Microsoft Corp** (NASDAQ:MSFT) or **Apple Inc.** (NASDAQ:AAPL). The format should be **Company Name** (EXCHANGE:TICKER) - always include the exchange prefix (NASDAQ, NYSE, etc.). Use proper company name formatting with periods (Inc., Corp., etc.). CRITICAL: This is the ONLY place where the company name should be bolded. All subsequent references to the company throughout the article should be in regular text (not bolded) - e.g., "Amazon Web Services", "the company", "Amazon's", "Amazon is", etc. Lead with the primary news article${primaryUrl ? ' and include the hyperlink as specified above' : ''}. Connect the price action to the news context. When mentioning the day, use ONLY the day name (e.g., "on Thursday", "on Monday") - DO NOT include the date (e.g., do NOT use "on Thursday, December 18, 2025" or any date format).` : `Start with the company name in bold (**Company Name**), followed by the ticker with exchange in parentheses (not bold) - e.g., **Apple Inc.** (NASDAQ:AAPL) or **Applied Digital Corp.** (NASDAQ:APLD). The format should be **Company Name** (EXCHANGE:TICKER) - always include the exchange prefix (NASDAQ, NYSE, etc.). Use proper company name formatting with periods (Inc., Corp., etc.). CRITICAL: This is the ONLY place where the company name should be bolded. All subsequent references to the company throughout the article should be in regular text (not bolded) - e.g., "the company", "Apple's", "Apple is", etc. LEAD with the current price move direction using the Daily Change data provided - note ONLY the direction and day of week (e.g., "shares are tumbling on Monday" if down, "shares are surging on Tuesday" if up). Use ONLY the day name (e.g., "on Thursday", "on Monday") - DO NOT include the date. DO NOT include the percentage in the first paragraph - it's already in the price action section. ${marketContext ? 'Then IMMEDIATELY reference broader market context to explain the move - is the stock moving with or against broader market trends? Reference specific sector performance when relevant (e.g., "The move comes as Technology stocks are broadly lower today, contributing to the decline" or "Despite a strong market day with the S&P 500 up 0.5%, the stock is down, suggesting company-specific concerns" or "The stock is caught in a broader sell-off, with the Nasdaq down 1.2% and Technology sector declining 1.5%").' : 'Then immediately pivot to the technical analysis context - use moving average positioning, support/resistance levels, or key technical signals to explain what traders are seeing on the charts (e.g., "Traders are focused on the technical picture, which shows the stock is currently testing key support levels while facing mixed signals from moving averages" or "The move comes as the stock flashes a \'mixed\' signal—breaking down in the short term while testing a crucial long-term floor").'} Focus on using market context and technical indicators to add context to the move rather than declaring there's no news. STOP AFTER 2 SENTENCES.`}
 
 - SECOND PARAGRAPH (2 sentences, SUBSTANTIVE NEWS DETAILS - PART 1): ${newsContext && (newsContext.scrapedContent || (newsContext.selectedArticles && newsContext.selectedArticles.length > 0)) ? `MANDATORY: Provide detailed, specific information from the news source article. Focus on the first set of key details such as:
   * Analyst ratings, price targets, or specific analyst commentary if mentioned (e.g., "Analyst Samik Chatterjee from JPMorgan has maintained an Overweight rating on Apple")
@@ -3120,6 +3120,8 @@ ${marketContext ? `- MANDATORY: You MUST reference broader market context in the
 
 - Write like you're having a conversation, not writing a formal report
 
+- CRITICAL - COMPANY NAME BOLDING RULE: Only the FIRST reference to the company name WITH the ticker should be bolded (e.g., **Apple Inc.** (NASDAQ:AAPL)). All subsequent references to the company throughout the article must be in regular text WITHOUT bold formatting. Examples of what should NOT be bolded: "Apple's", "Apple is", "the company", "Apple Web Services", "Currently, Apple", "as Apple navigates", etc. Only the very first mention in the format **Company Name** (EXCHANGE:TICKER) should be bolded.
+
 ${newsContext && (newsContext.scrapedContent || (newsContext.selectedArticles && newsContext.selectedArticles.length > 0)) && primaryUrl ? `
 FINAL CRITICAL REMINDER - HYPERLINK REQUIREMENT (THIS IS NOT OPTIONAL): Your first paragraph MUST include an HTML hyperlink tag in your output. ${isBenzinga ? `Use this EXACT format: <a href="${primaryUrl}">[three consecutive words]</a>. The URL is: ${primaryUrl}. Embed it naturally within your first paragraph - do NOT use phrases like "as detailed in" or "according to reports". Example of what your output should look like: "**Apple Inc.** (NASDAQ:AAPL) shares closed up on Thursday as the company is <a href="${primaryUrl}">reportedly deepening its</a> India strategy".` : `Use this EXACT format: <a href="${primaryUrl}">${outletName || 'Source'}</a> reports. The URL is: ${primaryUrl}. Example: "<a href="${primaryUrl}">CNBC</a> reports".`} IF YOU DO NOT INCLUDE THE <a href> TAG IN YOUR FIRST PARAGRAPH OUTPUT, YOUR RESPONSE IS INCOMPLETE AND INCORRECT.` : ''}`;
 
@@ -3191,14 +3193,129 @@ FINAL CRITICAL REMINDER - HYPERLINK REQUIREMENT (THIS IS NOT OPTIONAL): Your fir
 
     let generatedContent = response.content.trim();
     
-    // Post-processing check: verify hyperlink is present if URL was provided
+    // Post-processing: inject hyperlink if missing
     if (primaryUrl && newsContext) {
       const hasHyperlink = generatedContent.includes(`<a href="${primaryUrl}">`) || generatedContent.includes(`<a href='${primaryUrl}'>`);
       if (!hasHyperlink) {
         console.warn('[HYPERLINK WARNING] Generated content does not include hyperlink for URL:', primaryUrl);
-        console.warn('[HYPERLINK WARNING] First 500 chars of generated content:', generatedContent.substring(0, 500));
+        console.log('[HYPERLINK FIX] Injecting hyperlink into first paragraph...');
+        
+        // Split into paragraphs to find the first paragraph
+        const hasHTMLTags = generatedContent.includes('</p>');
+        let paragraphs: string[] = [];
+        
+        if (hasHTMLTags) {
+          paragraphs = generatedContent.split('</p>').filter(p => p.trim().length > 0);
+        } else {
+          paragraphs = generatedContent.split(/\n\s*\n/).filter(p => p.trim().length > 0);
+        }
+        
+        if (paragraphs.length > 0) {
+          let leadParagraph = paragraphs[0].trim();
+          
+          // Remove HTML tags for word processing but keep original for replacement
+          const textOnly = leadParagraph.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+          const words = textOnly.split(/\s+/).filter(w => w.length > 0);
+          
+          if (words.length >= 3) {
+            // Skip first few words (usually company name/ticker), try to find a good phrase
+            const startIdx = Math.min(Math.max(3, Math.floor(words.length / 4)), words.length - 3);
+            let found = false;
+            
+            for (let i = startIdx; i < words.length - 2 && !found; i++) {
+              const phrase = `${words[i]} ${words[i + 1]} ${words[i + 2]}`;
+              
+              // Skip if phrase contains problematic characters
+              if (phrase.match(/[<>()\[\]{}*]/)) continue;
+              
+              // Create regex to find the phrase as whole words (case insensitive)
+              const escapedPhrase = phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+              const phraseRegex = new RegExp(`(\\b|\\*)${escapedPhrase.replace(/\*/g, '\\*')}(\\b|\\*)`, 'i');
+              
+              // Try to find and replace in original paragraph (preserving HTML)
+              const match = leadParagraph.match(new RegExp(`(${escapedPhrase.replace(/\*/g, '\\*')})`, 'i'));
+              if (match) {
+                const originalPhrase = match[1];
+                leadParagraph = leadParagraph.replace(originalPhrase, `<a href="${primaryUrl}">${originalPhrase}</a>`, 1);
+                found = true;
+                console.log(`[HYPERLINK FIX] Successfully injected hyperlink with phrase: "${originalPhrase}"`);
+              }
+            }
+            
+            // Fallback: try linking earlier words if nothing found
+            if (!found && words.length >= 5) {
+              for (let i = 2; i < Math.min(5, words.length - 2) && !found; i++) {
+                const phrase = `${words[i]} ${words[i + 1]} ${words[i + 2]}`;
+                if (!phrase.match(/[<>()\[\]{}*]/)) {
+                  const escapedPhrase = phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                  const match = leadParagraph.match(new RegExp(`(${escapedPhrase.replace(/\*/g, '\\*')})`, 'i'));
+                  if (match) {
+                    const originalPhrase = match[1];
+                    leadParagraph = leadParagraph.replace(originalPhrase, `<a href="${primaryUrl}">${originalPhrase}</a>`, 1);
+                    found = true;
+                    console.log(`[HYPERLINK FIX] Successfully injected hyperlink with fallback phrase: "${originalPhrase}"`);
+                  }
+                }
+              }
+            }
+          }
+          
+          paragraphs[0] = leadParagraph;
+          generatedContent = hasHTMLTags 
+            ? paragraphs.map(p => (p.trim().endsWith('</p>') ? p : p + '</p>')).join('')
+            : paragraphs.join('\n\n');
+        }
       } else {
         console.log('[HYPERLINK SUCCESS] Hyperlink found in generated content for URL:', primaryUrl);
+      }
+    }
+    
+    // Post-processing: Remove bold formatting from company name after first instance
+    if (data.companyName) {
+      // Split into paragraphs to process separately
+      const hasHTMLTags = generatedContent.includes('</p>');
+      let paragraphs: string[] = [];
+      
+      if (hasHTMLTags) {
+        paragraphs = generatedContent.split('</p>').filter(p => p.trim().length > 0);
+      } else {
+        paragraphs = generatedContent.split(/\n\s*\n/).filter(p => p.trim().length > 0);
+      }
+      
+      if (paragraphs.length > 1) {
+        // Keep first paragraph as-is (it should have the bolded company name with ticker)
+        // Process all subsequent paragraphs to remove bold from company name
+        for (let i = 1; i < paragraphs.length; i++) {
+          let para = paragraphs[i];
+          
+          // Find all instances of **CompanyName** or **Company Name** and remove bold
+          // Match various company name formats with optional suffixes
+          const companyNameVariations = [
+            data.companyName,
+            data.companyName.replace(/\s+(Inc\.?|Corp\.?|Ltd\.?|LLC|Co\.?)$/i, ''),
+            data.companyName.replace(/\s+(Inc\.?|Corp\.?|Ltd\.?|LLC|Co\.?)$/i, '').replace(/\./g, '\\.'),
+          ];
+          
+          for (const name of companyNameVariations) {
+            // Escape special regex characters
+            const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            // Match **CompanyName** but not if followed by ticker pattern
+            const boldPattern = new RegExp(`\\*\\*(${escapedName})(?:\\s+(?:Inc\\.?|Corp\\.?|Ltd\\.?|LLC|Co\\.?))?\\*\\*(?!\\s*\\([A-Z]+:[A-Z]+\\))`, 'gi');
+            
+            para = para.replace(boldPattern, (match, companyName) => {
+              // Remove bold formatting
+              const unBolded = companyName;
+              console.log(`[BOLD FIX] Removed bold formatting from "${match}" -> "${unBolded}"`);
+              return unBolded;
+            });
+          }
+          
+          paragraphs[i] = para;
+        }
+        
+        generatedContent = hasHTMLTags 
+          ? paragraphs.map(p => (p.trim().endsWith('</p>') ? p : p + '</p>')).join('')
+          : paragraphs.join('\n\n');
       }
     }
     
