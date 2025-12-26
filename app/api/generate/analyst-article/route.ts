@@ -3,6 +3,9 @@ import { aiProvider, type AIProvider } from '../../../../lib/aiProvider';
 
 export const dynamic = 'force-dynamic';
 
+const BENZINGA_API_KEY = process.env.BENZINGA_API_KEY!;
+const BZ_NEWS_URL = 'https://api.benzinga.com/api/v2/news';
+
 // Helper function to truncate text intelligently - keep beginning and end
 function truncateText(text: string, maxChars: number): string {
   if (text.length <= maxChars) {
@@ -81,6 +84,70 @@ function extractTickerFromText(text: string): string | null {
   
   console.log('No ticker found in text using any pattern');
   return null;
+}
+
+// Helper function to fetch related articles from Benzinga
+async function fetchRelatedArticles(ticker: string, excludeUrl?: string): Promise<any[]> {
+  try {
+    const dateFrom = new Date();
+    dateFrom.setDate(dateFrom.getDate() - 7);
+    const dateFromStr = dateFrom.toISOString().slice(0, 10);
+    
+    let url: string;
+    
+    if (ticker && ticker.trim() !== '') {
+      // Fetch ticker-specific articles
+      url = `${BZ_NEWS_URL}?token=${BENZINGA_API_KEY}&tickers=${encodeURIComponent(ticker)}&items=20&fields=headline,title,created,url,channels&accept=application/json&displayOutput=full&dateFrom=${dateFromStr}`;
+    } else {
+      // Fetch general market news when no ticker is provided
+      url = `${BZ_NEWS_URL}?token=${BENZINGA_API_KEY}&items=20&fields=headline,title,created,url,channels&accept=application/json&displayOutput=full&dateFrom=${dateFromStr}`;
+    }
+    
+    const res = await fetch(url, {
+      headers: { Accept: 'application/json' },
+    });
+    
+    if (!res.ok) {
+      console.error('Benzinga API error:', await res.text());
+      return [];
+    }
+    
+    const data = await res.json();
+    if (!Array.isArray(data)) return [];
+    
+    // Filter out press releases and the current article URL
+    const prChannelNames = ['press releases', 'press-releases', 'pressrelease', 'pr'];
+    const normalize = (str: string) => str.toLowerCase().replace(/[-_]/g, ' ');
+    
+    const filteredArticles = data.filter(item => {
+      // Exclude press releases
+      if (Array.isArray(item.channels) && item.channels.some((ch: any) => 
+        typeof ch.name === 'string' && prChannelNames.includes(normalize(ch.name))
+      )) {
+        return false;
+      }
+      
+      // Exclude the current article URL if provided
+      if (excludeUrl && item.url === excludeUrl) {
+        return false;
+      }
+      
+      return true;
+    });
+    
+    const relatedArticles = filteredArticles
+      .map((item: any) => ({
+        headline: item.headline || item.title || '[No Headline]',
+        url: item.url,
+        created: item.created,
+      }))
+      .slice(0, 5);
+    
+    return relatedArticles;
+  } catch (error) {
+    console.error('Error fetching related articles:', error);
+    return [];
+  }
 }
 
 // Helper function to fetch price data from Benzinga
@@ -321,12 +388,38 @@ export async function POST(req: Request) {
       console.log(`✓ Final ticker for price action: ${finalTicker}`);
     }
     
+    // Fetch related articles for "Also Read" and "Read Next" sections
+    const relatedArticles = finalTicker ? await fetchRelatedArticles(finalTicker) : [];
+    
     // Fetch price data for price action line (if ticker is available)
     let priceActionLine = '';
-    if (finalTicker) {
+    if (finalTicker && finalTicker.trim() !== '' && finalTicker.trim().toUpperCase() !== 'PRICE') {
+      console.log(`Fetching price data for ticker: ${finalTicker}`);
       const priceData = await fetchPriceData(finalTicker);
-      priceActionLine = generatePriceActionLine(finalTicker, priceData);
+      
+      // Validate price data - ensure we have valid price information
+      const hasValidPrice = priceData && 
+                           priceData.last && 
+                           (typeof priceData.last === 'number' ? priceData.last > 0 : parseFloat(priceData.last) > 0);
+      
+      if (hasValidPrice) {
+        priceActionLine = generatePriceActionLine(finalTicker, priceData);
+        console.log(`Generated price action line: ${priceActionLine.substring(0, 100)}...`);
+        
+        // Double-check the generated price action line doesn't have invalid data
+        if (priceActionLine.includes('PRICE shares') || 
+            priceActionLine.includes('$0.00') || 
+            priceActionLine.includes('0.00%') && !priceActionLine.includes('unchanged')) {
+          console.warn(`Generated price action line contains invalid data, using fallback: ${priceActionLine}`);
+          priceActionLine = `Price Action: ${finalTicker} shares closed on ${getCurrentDayName()}.`;
+        }
+      } else {
+        console.warn(`Price data unavailable or invalid for ${finalTicker}, using fallback`);
+        // Use a fallback that doesn't include specific price data
+        priceActionLine = `Price Action: ${finalTicker} shares closed on ${getCurrentDayName()}.`;
+      }
     } else {
+      console.warn(`No valid ticker available for price action line (ticker: ${finalTicker})`);
       // If no ticker found, use a generic price action line
       priceActionLine = 'Price Action: Stock price data unavailable at the time of publication.';
     }
@@ -729,6 +822,78 @@ ${truncatedText}
     // Use the same simple pattern - match ANY letter + "s and replace
     articleBody = articleBody.replace(/([a-zA-Z])"([sS])/g, "$1'$2");
     articleBody = articleBody.replace(/([a-zA-Z]{2,})"([td])/g, "$1'$2");
+    
+    // Add "Also Read" and "Read Next" sections if related articles are available
+    if (relatedArticles && relatedArticles.length > 0) {
+      // Check if "Also Read" section exists
+      const alsoReadPattern = /(?:<p>)?Also Read:.*?(?:<\/p>)?/i;
+      const alsoReadMatch = articleBody.match(alsoReadPattern);
+      const alsoReadExists = !!alsoReadMatch;
+      
+      if (!alsoReadExists) {
+        console.log('Adding "Also Read" section');
+        // Split content by double newlines (paragraph breaks) or </p> tags
+        // Handle both HTML and plain text formats
+        const hasHTMLTags = articleBody.includes('</p>');
+        let paragraphs: string[];
+        
+        if (hasHTMLTags) {
+          // HTML format: split by </p> tags
+          paragraphs = articleBody.split('</p>').filter(p => p.trim().length > 0);
+        } else {
+          // Plain text format: split by double newlines
+          paragraphs = articleBody.split(/\n\s*\n/).filter(p => p.trim().length > 0);
+        }
+        
+        // Insert "Also Read" after the second paragraph (index 2)
+        if (paragraphs.length >= 2) {
+          // Always use HTML link format even if content is plain text (for clickable links)
+          const alsoReadSection = `Also Read: <a href="${relatedArticles[0].url}">${relatedArticles[0].headline}</a>`;
+          
+          // Insert at index 2 (after second paragraph)
+          paragraphs.splice(2, 0, alsoReadSection);
+          
+          // Rejoin content
+          if (hasHTMLTags) {
+            articleBody = paragraphs.map(p => {
+              // If it already ends with </p>, return as-is
+              if (p.trim().endsWith('</p>')) return p;
+              // If it's the alsoReadSection, wrap in <p> tags
+              if (p.includes('Also Read:')) return `<p>${p}</p>`;
+              // Otherwise, add </p> back
+              return p + '</p>';
+            }).join('');
+          } else {
+            articleBody = paragraphs.join('\n\n');
+          }
+          
+          console.log('✅ "Also Read" section placed after second paragraph');
+        } else {
+          console.log('⚠️ Not enough paragraphs to insert "Also Read" (need at least 2)');
+        }
+      } else {
+        console.log('"Also Read" section already exists');
+      }
+      
+      // Check if "Read Next" section exists, if not add it before price action
+      if (!articleBody.includes('Read Next:')) {
+        console.log('Adding "Read Next" section');
+        // Check if article uses HTML format
+        const hasHTMLTags = articleBody.includes('</p>');
+        // Always use HTML link format (for clickable links)
+        const readNextLink = `Read Next: <a href="${relatedArticles[1]?.url || relatedArticles[0].url}">${relatedArticles[1]?.headline || relatedArticles[0].headline}</a>`;
+        const readNextSection = hasHTMLTags ? `<p>${readNextLink}</p>` : readNextLink;
+        
+        // Insert before price action line (which will be added next)
+        // Add it at the end for now, it will be before price action
+        articleBody = articleBody.trim() + '\n\n' + readNextSection;
+        console.log('✅ "Read Next" section added before price action');
+      } else {
+        console.log('"Read Next" section already exists');
+      }
+    } else {
+      console.log('No related articles available for "Also Read" and "Read Next" sections');
+    }
     
     // Bold "Price Action:" in the price action line
     const boldedPriceActionLine = priceActionLine.replace(/^(Price Action:)/i, '<strong>$1</strong>');
