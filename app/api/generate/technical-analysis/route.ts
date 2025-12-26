@@ -3236,7 +3236,7 @@ FINAL CRITICAL REMINDER - HYPERLINK REQUIREMENT (THIS IS NOT OPTIONAL): Your fir
               const match = leadParagraph.match(new RegExp(`(${escapedPhrase.replace(/\*/g, '\\*')})`, 'i'));
               if (match) {
                 const originalPhrase = match[1];
-                leadParagraph = leadParagraph.replace(originalPhrase, `<a href="${primaryUrl}">${originalPhrase}</a>`, 1);
+                leadParagraph = leadParagraph.replace(originalPhrase, `<a href="${primaryUrl}">${originalPhrase}</a>`);
                 found = true;
                 console.log(`[HYPERLINK FIX] Successfully injected hyperlink with phrase: "${originalPhrase}"`);
               }
@@ -3251,7 +3251,7 @@ FINAL CRITICAL REMINDER - HYPERLINK REQUIREMENT (THIS IS NOT OPTIONAL): Your fir
                   const match = leadParagraph.match(new RegExp(`(${escapedPhrase.replace(/\*/g, '\\*')})`, 'i'));
                   if (match) {
                     const originalPhrase = match[1];
-                    leadParagraph = leadParagraph.replace(originalPhrase, `<a href="${primaryUrl}">${originalPhrase}</a>`, 1);
+                    leadParagraph = leadParagraph.replace(originalPhrase, `<a href="${primaryUrl}">${originalPhrase}</a>`);
                     found = true;
                     console.log(`[HYPERLINK FIX] Successfully injected hyperlink with fallback phrase: "${originalPhrase}"`);
                   }
