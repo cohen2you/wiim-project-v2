@@ -3170,12 +3170,12 @@ CRITICAL INSTRUCTIONS FOR NEWS INTEGRATION:
    
    This paragraph should also be 2 sentences and contain substantive details that complement the second paragraph. Together, paragraphs 2 and 3 should provide comprehensive coverage of the article's key details.
 
-6. After the lead paragraph, two news content paragraphs (paragraphs 2 and 3), and the broader market/sector paragraph (paragraph 4, if applicable), naturally transition to the technical analysis data provided above.
+6. After the lead paragraph (teaser), "Also Read" section, section marker, and two news content paragraphs (paragraphs 2 and 3, where paragraph 2 contains the specific details like analyst names and price targets), and the broader market/sector paragraph (paragraph 4, if applicable), naturally transition to the technical analysis data provided above.
 
 6. Maximum 2 sentences per paragraph throughout the story.
 
 7. SECTION MARKERS (MANDATORY): You MUST insert section markers between major logical blocks. Format: "## Section: [Label]" on its own line. Required markers:
-   - "## Section: The Catalyst" - after the "Also Read" section (which appears after the second paragraph), before the detailed news paragraphs
+   - "## Section: The Catalyst" - after the "Also Read" section (which appears after the first paragraph), before the detailed news paragraphs (Paragraph 2 with specific details)
    - "## Section: Technical Analysis" - after news paragraphs, before technical data
    - "## Section: Analyst Ratings" - only if Analyst Overview is included
    - "## Section: Price Action" - before the final price/closing paragraph
@@ -3192,9 +3192,9 @@ CRITICAL INSTRUCTIONS FOR NEWS INTEGRATION:
 
 TASK: ${newsContext && (newsContext.scrapedContent || (newsContext.selectedArticles && newsContext.selectedArticles.length > 0)) ? `Write a conversational WGO article that helps readers understand "What's Going On" with the stock. LEAD with the current price move (direction and day of week, e.g., "shares are tumbling on Monday" or "shares are surging on Tuesday"). Use ONLY the day name (e.g., "on Thursday", "on Monday") - DO NOT include the date (e.g., do NOT use "on Thursday, December 18, 2025" or any date format). DO NOT include the percentage in the first paragraph. Then reference the news article provided above AND broader market context to explain what's going on - either the news is contributing to the move, OR the stock is moving despite positive/negative news (suggesting larger market elements may be at play). ${marketContext ? 'Use the broader market context (indices, sectors, market breadth) to provide additional context - is the stock moving with or against broader market trends? Reference specific sector performance when relevant (e.g., "Technology stocks are broadly lower today, contributing to the decline" or "Despite a strong market day, the stock is down, suggesting company-specific concerns").' : ''} Include the appropriate hyperlink in the first paragraph (three-word for Benzinga, one-word with outlet credit for others). When mentioning other companies in the article, always include their ticker symbol with exchange (e.g., "Snowflake Inc. (NYSE:SNOW)").
 
-MANDATORY: You MUST include section markers in your output. Insert "## Section: The Catalyst" AFTER the "Also Read" section (which comes after the second paragraph), "## Section: Technical Analysis" after news paragraphs, "## Section: Analyst Ratings" if analyst overview is included, and "## Section: Price Action" before the final price paragraph. These are REQUIRED - do not skip them.
+MANDATORY: You MUST include section markers in your output. Insert "## Section: The Catalyst" AFTER the "Also Read" section (which comes after the FIRST paragraph), "## Section: Technical Analysis" after news paragraphs, "## Section: Analyst Ratings" if analyst overview is included, and "## Section: Price Action" before the final price paragraph. These are REQUIRED - do not skip them.
 
-CRITICAL: The second paragraph (and optionally third paragraph) MUST include detailed, specific information from the news source article. Do NOT just summarize or use vague language. Extract and include:
+CRITICAL: The second paragraph (which appears AFTER "## Section: The Catalyst") and optionally third paragraph MUST include detailed, specific information from the news source article. Do NOT just summarize or use vague language. Extract and include:
 - Specific numbers, figures, percentages, dates, or metrics from the article
 - Analyst ratings, price targets, or specific analyst commentary
 - Regional variations or geographic specifics
@@ -3204,7 +3204,21 @@ CRITICAL: The second paragraph (and optionally third paragraph) MUST include det
 
 Use concrete facts and data points from the source article. For example, instead of "delivery times have increased", use "delivery lead times now run around five days, up from three days a year ago" or "In the U.S., lead times reached eight days for the iPhone 17 and four days for the Air." Include as much specific detail as possible while keeping paragraphs concise (2-3 sentences each).
 
-After the lead paragraph, two news content paragraphs (paragraphs 2 and 3), and the broader market/sector paragraph (paragraph 4, if applicable), transition to technical analysis focusing on longer-term trends (12-month). Then include the analyst overview section (if consensus data is available) and P/E ratio section (if P/E data is available) after the technical analysis.` : `Write a conversational WGO article that helps readers understand "What's Going On" with the stock. LEAD with the current price move and note that there's no company-specific news driving the move. ${marketContext ? 'Then use broader market context (indices, sectors, market breadth) to explain the move - is the stock moving with or against broader market trends? Reference specific sector performance when relevant. For example, if the stock is down but the broader market/sector is up, note that the stock is underperforming despite positive market conditions. If the stock is down and the broader market/sector is also down, note that the stock is caught in a broader sell-off (e.g., "Technology stocks are broadly lower today, contributing to the decline").' : ''} Then use technical indicators (moving averages, RSI, MACD, support/resistance) to create a narrative that explains what's happening and why traders are seeing this price action. Focus on using technical data to tell the story - what do the charts reveal about the stock's current situation? After the technical analysis section, include the analyst overview section (if consensus data is available) and P/E ratio section (if P/E data is available).`}
+After the lead paragraph (teaser), "Also Read" section, section marker, and two news content paragraphs (paragraphs 2 and 3, where paragraph 2 contains the specific details like analyst names and price targets), and the broader market/sector paragraph (paragraph 4, if applicable), transition to technical analysis focusing on longer-term trends (12-month). Then include the analyst overview section (if consensus data is available) and P/E ratio section (if P/E data is available) after the technical analysis.` : `Write a conversational WGO article that helps readers understand "What's Going On" with the stock. LEAD with the current price move and note that there's no company-specific news driving the move. ${marketContext ? 'Then use broader market context (indices, sectors, market breadth) to explain the move - is the stock moving with or against broader market trends? Reference specific sector performance when relevant. For example, if the stock is down but the broader market/sector is up, note that the stock is underperforming despite positive market conditions. If the stock is down and the broader market/sector is also down, note that the stock is caught in a broader sell-off (e.g., "Technology stocks are broadly lower today, contributing to the decline").' : ''} Then use technical indicators (moving averages, RSI, MACD, support/resistance) to create a narrative that explains what's happening and why traders are seeing this price action. Focus on using technical data to tell the story - what do the charts reveal about the stock's current situation? After the technical analysis section, include the analyst overview section (if consensus data is available) and P/E ratio section (if P/E data is available).`}
+
+*** CRITICAL STRUCTURAL UPDATE: THE "SPLIT LEDE" ***
+
+You must strictly follow this paragraph order to ensure SEO headers capture the main news:
+
+1. **Paragraph 1 (The Teaser):** State that the stock is moving and briefly mention the *general* reason (e.g., "following a bullish analyst report" or "after Q3 earnings"). Do NOT give the specific numbers (Price Targets, EPS) here. Do NOT mention analyst names or firm names here. Include the Market Context (indices/sector) here if applicable.
+
+2. **The "Also Read" Link:** Insert the provided "Also Read" hyperlink immediately after Paragraph 1.
+
+3. **HEADER MARKER:** Insert `## Section: The Catalyst` right here.
+
+4. **Paragraph 2 (The Meat):** NOW provide the specific high-value details. This is where you write "Needham raised the target to $90" or "Revenue hit $50M." Include analyst names, firm names, price targets, specific numbers, and other key metrics here. This ensures the header sits directly above the key data.
+
+5. **Paragraph 3 (Context):** Additional details (background info, secondary news, context).
 
 *** MANDATORY: SECTION MARKERS (REQUIRED IN ALL ARTICLES) ***
 You MUST insert GENERIC SECTION HEADERS between the major logical blocks of the story. This is MANDATORY - every article must include these section markers.
@@ -3212,7 +3226,7 @@ You MUST insert GENERIC SECTION HEADERS between the major logical blocks of the 
 Rules for Headers:
 1. Format: Use "## Section: [Label]" (markdown H2 format)
 2. Placement (MANDATORY):
-   - Insert "## Section: The Catalyst" AFTER the "Also Read" section (which appears after the second paragraph) and BEFORE the detailed news paragraphs.
+   - Insert "## Section: The Catalyst" AFTER the "Also Read" section (which appears after the first paragraph) and BEFORE the detailed news paragraphs (Paragraph 2 with the specific details).
    - Insert "## Section: Technical Analysis" immediately after the news paragraphs and BEFORE the transition to technical data.
    - Insert "## Section: Analyst Ratings" ONLY IF you have included a specific Analyst Overview section.
    - Insert "## Section: Price Action" BEFORE the final paragraph summarizing the current price/closing data.
@@ -3220,7 +3234,7 @@ Rules for Headers:
 CRITICAL: 
 - Do not try to write creative headers. Use these EXACT generic labels.
 - These section markers are REQUIRED - do not skip them.
-- The logic of your paragraph flow (Lead -> News -> Technicals) remains unchanged; you are simply placing these markers between the blocks.
+- The logic of your paragraph flow (Lead Teaser -> Also Read -> Section Marker -> Detailed News -> Technicals) remains unchanged; you are simply placing these markers between the blocks.
 - Each section marker should be on its own line with proper spacing before and after.
 
 Weave data points naturally into your analysis rather than listing them. Write like you're explaining the stock's technical picture to a colleague - clear, direct, and engaging. When relevant, mention key turning points and when they occurred to provide context for the current technical setup. Think like a trader: prioritize actionable insights and key technical signals over routine price updates.
@@ -3244,14 +3258,32 @@ CRITICAL RULES - PARAGRAPH LENGTH IS MANDATORY:
 
 - NEVER use ambiguous phrasing like "below its 50-day moving average, which is X% lower"
 
-- FIRST PARAGRAPH (2 sentences max): ${newsContext && (newsContext.scrapedContent || (newsContext.selectedArticles && newsContext.selectedArticles.length > 0)) ? `${primaryUrl ? `ABSOLUTELY CRITICAL HYPERLINK REQUIREMENT - YOU MUST INCLUDE THIS IN YOUR OUTPUT: The first paragraph MUST contain an HTML hyperlink. ${isBenzinga ? `Choose ANY THREE CONSECUTIVE WORDS from your first paragraph and wrap them in this EXACT HTML format: <a href="${primaryUrl}">[three consecutive words]</a>. Embed it naturally in the sentence flow - do NOT use phrases like "as detailed in a recent article" or "according to reports". Example output: "**Apple Inc.** (NASDAQ:AAPL) shares closed up on Thursday as the company is <a href="${primaryUrl}">reportedly deepening its</a> India strategy". THE URL TO USE IS: ${primaryUrl}` : `Include a ONE-WORD hyperlink with outlet credit using this EXACT HTML format: <a href="${primaryUrl}">${outletName || 'Source'}</a> reports. Example output: "<a href="${primaryUrl}">CNBC</a> reports" or "<a href="${primaryUrl}">Reuters</a> reports". THE URL TO USE IS: ${primaryUrl}`} THIS IS NOT OPTIONAL - YOU MUST INCLUDE THE <a href> TAG IN YOUR FIRST PARAGRAPH. IF YOU DO NOT INCLUDE IT, YOUR OUTPUT IS INCORRECT. ` : ''}Start with the company name in bold (**Company Name**), followed by the ticker with exchange in parentheses (not bold) - e.g., **Microsoft Corp** (NASDAQ:MSFT) or **Apple Inc.** (NASDAQ:AAPL). The format should be **Company Name** (EXCHANGE:TICKER) - always include the exchange prefix (NASDAQ, NYSE, etc.). Use proper company name formatting with periods (Inc., Corp., etc.). CRITICAL: This is the ONLY place where the company name should be bolded. All subsequent references to the company throughout the article should be in regular text (not bolded) - e.g., "Amazon Web Services", "the company", "Amazon's", "Amazon is", etc. Lead with the primary news article${primaryUrl ? ' and include the hyperlink as specified above' : ''}. Connect the price action to the news context. When mentioning the day, use ONLY the day name (e.g., "on Thursday", "on Monday") - DO NOT include the date (e.g., do NOT use "on Thursday, December 18, 2025" or any date format).` : `Start with the company name in bold (**Company Name**), followed by the ticker with exchange in parentheses (not bold) - e.g., **Apple Inc.** (NASDAQ:AAPL) or **Applied Digital Corp.** (NASDAQ:APLD). The format should be **Company Name** (EXCHANGE:TICKER) - always include the exchange prefix (NASDAQ, NYSE, etc.). Use proper company name formatting with periods (Inc., Corp., etc.). CRITICAL: This is the ONLY place where the company name should be bolded. All subsequent references to the company throughout the article should be in regular text (not bolded) - e.g., "the company", "Apple's", "Apple is", etc. LEAD with the current price move direction using the Daily Change data provided - note ONLY the direction and day of week (e.g., "shares are tumbling on Monday" if down, "shares are surging on Tuesday" if up). Use ONLY the day name (e.g., "on Thursday", "on Monday") - DO NOT include the date. DO NOT include the percentage in the first paragraph - it's already in the price action section. ${marketContext ? 'Then IMMEDIATELY reference broader market context to explain the move - is the stock moving with or against broader market trends? Reference specific sector performance when relevant (e.g., "The move comes as Technology stocks are broadly lower today, contributing to the decline" or "Despite a strong market day with the S&P 500 up 0.5%, the stock is down, suggesting company-specific concerns" or "The stock is caught in a broader sell-off, with the Nasdaq down 1.2% and Technology sector declining 1.5%").' : 'Then immediately pivot to the technical analysis context - use moving average positioning, support/resistance levels, or key technical signals to explain what traders are seeing on the charts (e.g., "Traders are focused on the technical picture, which shows the stock is currently testing key support levels while facing mixed signals from moving averages" or "The move comes as the stock flashes a \'mixed\' signal—breaking down in the short term while testing a crucial long-term floor").'} Focus on using market context and technical indicators to add context to the move rather than declaring there's no news. STOP AFTER 2 SENTENCES.`}
+- FIRST PARAGRAPH (2 sentences max, THE TEASER): ${newsContext && (newsContext.scrapedContent || (newsContext.selectedArticles && newsContext.selectedArticles.length > 0)) ? `${primaryUrl ? `ABSOLUTELY CRITICAL HYPERLINK REQUIREMENT - YOU MUST INCLUDE THIS IN YOUR OUTPUT: The first paragraph MUST contain an HTML hyperlink. ${isBenzinga ? `Choose ANY THREE CONSECUTIVE WORDS from your first paragraph and wrap them in this EXACT HTML format: <a href="${primaryUrl}">[three consecutive words]</a>. Embed it naturally in the sentence flow - do NOT use phrases like "as detailed in a recent article" or "according to reports". Example output: "**Apple Inc.** (NASDAQ:AAPL) shares closed up on Thursday as the company is <a href="${primaryUrl}">reportedly deepening its</a> India strategy". THE URL TO USE IS: ${primaryUrl}` : `Include a ONE-WORD hyperlink with outlet credit using this EXACT HTML format: <a href="${primaryUrl}">${outletName || 'Source'}</a> reports. Example output: "<a href="${primaryUrl}">CNBC</a> reports" or "<a href="${primaryUrl}">Reuters</a> reports". THE URL TO USE IS: ${primaryUrl}`} THIS IS NOT OPTIONAL - YOU MUST INCLUDE THE <a href> TAG IN YOUR FIRST PARAGRAPH. IF YOU DO NOT INCLUDE IT, YOUR OUTPUT IS INCORRECT. ` : ''}CRITICAL - THIS IS THE TEASER PARAGRAPH: Start with the company name in bold (**Company Name**), followed by the ticker with exchange in parentheses (not bold) - e.g., **Microsoft Corp** (NASDAQ:MSFT) or **Apple Inc.** (NASDAQ:AAPL). The format should be **Company Name** (EXCHANGE:TICKER) - always include the exchange prefix (NASDAQ, NYSE, etc.). Use proper company name formatting with periods (Inc., Corp., etc.). CRITICAL: This is the ONLY place where the company name should be bolded. All subsequent references to the company throughout the article should be in regular text (not bolded) - e.g., "Amazon Web Services", "the company", "Amazon's", "Amazon is", etc. 
 
-- SECOND PARAGRAPH (2 sentences, SUBSTANTIVE NEWS DETAILS - PART 1): ${newsContext && (newsContext.scrapedContent || (newsContext.selectedArticles && newsContext.selectedArticles.length > 0)) ? `MANDATORY: Provide detailed, specific information from the news source article. Focus on the first set of key details such as:
-  * Analyst ratings, price targets, or specific analyst commentary if mentioned (e.g., "Analyst Samik Chatterjee from JPMorgan has maintained an Overweight rating on Apple")
-  * Primary metrics, numbers, figures, or percentages (e.g., "iPhone 17 lead times have increased to around five days, up from three days a year ago")
+YOU MUST FOLLOW THIS STRUCTURE FOR THE FIRST PARAGRAPH:
+- State that the stock is moving and mention the *general* reason (e.g., "following a bullish analyst report" or "after the company reported earnings" or "as the company navigates market conditions")
+- DO NOT include specific numbers (price targets, EPS, revenue figures, percentages from the article)
+- DO NOT mention analyst names or firm names (e.g., do NOT say "Needham raised the target" - instead say "following a bullish analyst report")
+- DO NOT include specific metrics or detailed information here
+- Include the Market Context (indices/sector performance) here if applicable
+- When mentioning the day, use ONLY the day name (e.g., "on Thursday", "on Monday") - DO NOT include the date (e.g., do NOT use "on Thursday, December 18, 2025" or any date format)
+- ${primaryUrl ? 'Include the hyperlink as specified above' : ''}
+
+Example of CORRECT first paragraph: "**Rocket Lab Corporation** (NASDAQ:RKLB) shares are up on Tuesday as the company is carving out status as a serious rival to SpaceX. The stock is defying a broader market downturn, with the Nasdaq sliding 0.11%."
+
+Example of INCORRECT first paragraph (DO NOT DO THIS): "**Rocket Lab Corporation** (NASDAQ:RKLB) shares are up on Tuesday as Needham analyst Ryan Koontz reiterated a Buy rating and raised the price target from $63 to $90." This is WRONG because it includes specific analyst name, firm name, and price targets in the first paragraph.` : `Start with the company name in bold (**Company Name**), followed by the ticker with exchange in parentheses (not bold) - e.g., **Apple Inc.** (NASDAQ:AAPL) or **Applied Digital Corp.** (NASDAQ:APLD). The format should be **Company Name** (EXCHANGE:TICKER) - always include the exchange prefix (NASDAQ, NYSE, etc.). Use proper company name formatting with periods (Inc., Corp., etc.). CRITICAL: This is the ONLY place where the company name should be bolded. All subsequent references to the company throughout the article should be in regular text (not bolded) - e.g., "the company", "Apple's", "Apple is", etc. LEAD with the current price move direction using the Daily Change data provided - note ONLY the direction and day of week (e.g., "shares are tumbling on Monday" if down, "shares are surging on Tuesday" if up). Use ONLY the day name (e.g., "on Thursday", "on Monday") - DO NOT include the date. DO NOT include the percentage in the first paragraph - it's already in the price action section. ${marketContext ? 'Then IMMEDIATELY reference broader market context to explain the move - is the stock moving with or against broader market trends? Reference specific sector performance when relevant (e.g., "The move comes as Technology stocks are broadly lower today, contributing to the decline" or "Despite a strong market day with the S&P 500 up 0.5%, the stock is down, suggesting company-specific concerns" or "The stock is caught in a broader sell-off, with the Nasdaq down 1.2% and Technology sector declining 1.5%").' : 'Then immediately pivot to the technical analysis context - use moving average positioning, support/resistance levels, or key technical signals to explain what traders are seeing on the charts (e.g., "Traders are focused on the technical picture, which shows the stock is currently testing key support levels while facing mixed signals from moving averages" or "The move comes as the stock flashes a \'mixed\' signal—breaking down in the short term while testing a crucial long-term floor").'} Focus on using market context and technical indicators to add context to the move rather than declaring there's no news. STOP AFTER 2 SENTENCES.`}
+
+- THE "ALSO READ" SECTION: After the first paragraph, insert the "Also Read" hyperlink section if provided. This comes BEFORE the section marker.
+
+- SECTION MARKER: Immediately after the "Also Read" section, insert `## Section: The Catalyst` on its own line.
+
+- SECOND PARAGRAPH (2 sentences, THE MEAT - SPECIFIC DETAILS): ${newsContext && (newsContext.scrapedContent || (newsContext.selectedArticles && newsContext.selectedArticles.length > 0)) ? `CRITICAL - THIS IS WHERE THE SPECIFIC DETAILS GO: This paragraph appears AFTER "## Section: The Catalyst" and contains the high-value, specific information. MANDATORY: Provide detailed, specific information from the news source article. This is where you include:
+  * Analyst names, firm names, price targets (e.g., "Needham analyst Ryan Koontz reiterated a Buy rating and raised the price target from $63 to $90")
+  * Specific numbers, figures, percentages, dates, or metrics from the article (e.g., "Revenue hit $50M" or "iPhone 17 lead times have increased to around five days, up from three days a year ago")
+  * Primary metrics, numbers, figures, or percentages
   * Key comparative data or timeframes
   
-  Do NOT use vague phrases like "reports suggest" or "according to analysts" - use the specific data points, numbers, and details from the article. Extract concrete facts that weren't in the lead paragraph. This paragraph should be exactly 2 sentences with specific information. Do NOT try to pack everything here - save additional details for the third paragraph.` : ''}
+  Do NOT use vague phrases like "reports suggest" or "according to analysts" - use the specific data points, numbers, and details from the article. Extract concrete facts. This paragraph should be exactly 2 sentences with specific information. This ensures the section header sits directly above the key data that SEO agents will use to generate headlines.` : ''}
 
 - THIRD PARAGRAPH (2 sentences, SUBSTANTIVE NEWS DETAILS - PART 2): ${newsContext && (newsContext.scrapedContent || (newsContext.selectedArticles && newsContext.selectedArticles.length > 0)) ? `MANDATORY: Continue extracting detailed, specific information from the news source article. Include additional specifics such as:
   * Regional variations or geographic specifics (e.g., "In the U.S., lead times for the iPhone 17 have reached eight days")
@@ -3367,7 +3399,7 @@ ${newsContext && (newsContext.scrapedContent || (newsContext.selectedArticles &&
 FINAL CRITICAL REMINDER - HYPERLINK REQUIREMENT (THIS IS NOT OPTIONAL): Your first paragraph MUST include an HTML hyperlink tag in your output. ${isBenzinga ? `Use this EXACT format: <a href="${primaryUrl}">[three consecutive words]</a>. The URL is: ${primaryUrl}. Embed it naturally within your first paragraph - do NOT use phrases like "as detailed in" or "according to reports". Example of what your output should look like: "**Apple Inc.** (NASDAQ:AAPL) shares closed up on Thursday as the company is <a href="${primaryUrl}">reportedly deepening its</a> India strategy".` : `Use this EXACT format: <a href="${primaryUrl}">${outletName || 'Source'}</a> reports. The URL is: ${primaryUrl}. Example: "<a href="${primaryUrl}">CNBC</a> reports".`} IF YOU DO NOT INCLUDE THE <a href> TAG IN YOUR FIRST PARAGRAPH OUTPUT, YOUR RESPONSE IS INCOMPLETE AND INCORRECT.` : ''}
 
 FINAL CRITICAL REMINDER - SECTION MARKERS (THIS IS NOT OPTIONAL): Your article output MUST include section markers in markdown H2 format. You MUST include:
-- "## Section: The Catalyst" AFTER the "Also Read" section (which appears after the second paragraph)
+- "## Section: The Catalyst" AFTER the "Also Read" section (which appears after the first paragraph)
 - "## Section: Technical Analysis" after the news paragraphs  
 - "## Section: Analyst Ratings" if analyst overview is included
 - "## Section: Price Action" before the final price paragraph
@@ -3675,13 +3707,13 @@ export async function POST(request: Request) {
               paragraphs = analysisWithPriceAction.split(/\n\s*\n/).filter(p => p.trim().length > 0);
             }
             
-            // Insert "Also Read" after the second paragraph (index 2)
-            if (paragraphs.length >= 2) {
+            // Insert "Also Read" after the first paragraph (index 1)
+            if (paragraphs.length >= 1) {
               // Always use HTML link format even if content is plain text (for clickable links)
               const alsoReadSection = `Also Read: <a href="${relatedArticles[0].url}">${relatedArticles[0].headline}</a>`;
               
-              // Insert at index 2 (after second paragraph)
-              paragraphs.splice(2, 0, alsoReadSection);
+              // Insert at index 1 (after first paragraph)
+              paragraphs.splice(1, 0, alsoReadSection);
               
               // Rejoin content
               if (hasHTMLTags) {
@@ -3697,7 +3729,7 @@ export async function POST(request: Request) {
                 analysisWithPriceAction = paragraphs.join('\n\n');
               }
               
-              console.log('✅ "Also Read" section placed after second paragraph');
+              console.log('✅ "Also Read" section placed after first paragraph');
               
               // Ensure "## Section: The Catalyst" comes AFTER "Also Read"
               // Check if section marker exists and is before "Also Read"
@@ -3727,7 +3759,7 @@ export async function POST(request: Request) {
                 }
               }
             } else {
-              console.log('⚠️ Not enough paragraphs to insert "Also Read" (need at least 2)');
+              console.log('⚠️ Not enough paragraphs to insert "Also Read" (need at least 1)');
             }
           } else {
             console.log('"Also Read" section already exists');
