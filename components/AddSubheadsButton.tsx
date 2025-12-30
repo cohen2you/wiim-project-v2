@@ -23,6 +23,9 @@ export default function AddSubheadsButton({
     setError(null);
 
     try {
+      console.log('AddSubheadsButton: Calling API at', `${backendUrl}/api/seo/generate`);
+      console.log('AddSubheadsButton: Article text length:', articleText.length);
+      
       // Call the News-Agent-Project API
       const response = await fetch(`${backendUrl}/api/seo/generate`, {
         method: 'POST',
@@ -32,20 +35,35 @@ export default function AddSubheadsButton({
         body: JSON.stringify({ articleText }),
       });
 
+      console.log('AddSubheadsButton: Response status:', response.status);
+      console.log('AddSubheadsButton: Response ok:', response.ok);
+
       if (!response.ok) {
-        throw new Error(`Error: ${response.statusText}`);
+        const errorText = await response.text();
+        console.error('AddSubheadsButton: Error response:', errorText);
+        throw new Error(`HTTP ${response.status}: ${response.statusText}. ${errorText.substring(0, 100)}`);
       }
 
       const data = await response.json();
+      console.log('AddSubheadsButton: Response data received:', data);
       
       // Update the parent state with the new optimized text
       if (data.optimizedText) {
+        console.log('AddSubheadsButton: Updating article with optimized text, length:', data.optimizedText.length);
         onArticleUpdate(data.optimizedText);
+      } else {
+        console.warn('AddSubheadsButton: No optimizedText in response:', data);
+        throw new Error('No optimizedText in response');
       }
       
     } catch (err) {
-      setError('Failed to generate subheads. Please try again.');
-      console.error(err);
+      console.error('AddSubheadsButton error:', err);
+      if (err instanceof Error) {
+        console.error('Error message:', err.message);
+        setError(`Failed to generate subheads: ${err.message}`);
+      } else {
+        setError('Failed to generate subheads. Please try again.');
+      }
     } finally {
       setIsLoading(false);
     }
