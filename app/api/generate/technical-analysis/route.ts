@@ -3828,39 +3828,15 @@ export async function POST(request: Request) {
             console.log('"## Section: Price Action" marker already exists');
           }
           
-          // Now insert "Read Next" after the section marker (if it exists) but before price action line
+          // Now insert "Read Next" at the very end, after the price action line
           if (!analysisWithPriceAction.includes('Read Next:')) {
-            console.log('Adding "Read Next" section');
+            console.log('Adding "Read Next" section at the end');
             // Always use HTML link format (for clickable links)
-            const readNextSection = `Read Next: <a href="${relatedArticles[1]?.url || relatedArticles[0].url}">${relatedArticles[1]?.headline || relatedArticles[0].headline}</a>`;
+            const readNextSection = `<p>Read Next: <a href="${relatedArticles[1]?.url || relatedArticles[0].url}">${relatedArticles[1]?.headline || relatedArticles[0].headline}</a></p>`;
             
-            // Find where to insert - after section marker if it exists, otherwise before price action
-            const sectionMarkerIndex = analysisWithPriceAction.indexOf('## Section: Price Action');
-            if (sectionMarkerIndex !== -1) {
-              // Find the end of the section marker line (after the newline)
-              const afterMarker = analysisWithPriceAction.substring(sectionMarkerIndex);
-              const markerLineEnd = afterMarker.indexOf('\n\n');
-              if (markerLineEnd !== -1) {
-                const beforeMarker = analysisWithPriceAction.substring(0, sectionMarkerIndex);
-                const markerLine = analysisWithPriceAction.substring(sectionMarkerIndex, sectionMarkerIndex + markerLineEnd + 2);
-                const afterMarkerLine = analysisWithPriceAction.substring(sectionMarkerIndex + markerLineEnd + 2);
-                analysisWithPriceAction = `${beforeMarker}${markerLine}${readNextSection}\n\n${afterMarkerLine}`;
-              } else {
-                // Fallback: insert right after marker
-                const beforeMarker = analysisWithPriceAction.substring(0, sectionMarkerIndex);
-                const markerAndAfter = analysisWithPriceAction.substring(sectionMarkerIndex);
-                analysisWithPriceAction = `${beforeMarker}${markerAndAfter.replace('## Section: Price Action', `## Section: Price Action\n\n${readNextSection}`)}`;
-              }
-            } else if (priceActionIndex !== -1) {
-              // No section marker, insert before price action line
-              const beforePriceAction = analysisWithPriceAction.substring(0, priceActionIndex).trim();
-              const priceActionAndAfter = analysisWithPriceAction.substring(priceActionIndex);
-              analysisWithPriceAction = `${beforePriceAction}\n\n${readNextSection}\n\n${priceActionAndAfter}`;
-            } else {
-              // If no price action found, add to the end
-              analysisWithPriceAction = `${analysisWithPriceAction.trim()}\n\n${readNextSection}`;
-            }
-            console.log('✅ Added "Read Next" section after section marker');
+            // Append to the end of the content
+            analysisWithPriceAction = `${analysisWithPriceAction.trim()}\n\n${readNextSection}`;
+            console.log('✅ Added "Read Next" section at the end');
           } else {
             console.log('"Read Next" section already exists');
           }
