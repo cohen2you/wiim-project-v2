@@ -3,6 +3,7 @@
 
 
 import React, { useState, useRef, forwardRef, useImperativeHandle, useEffect } from 'react';
+import AddSubheadsButton from './AddSubheadsButton';
 
 
 
@@ -81,6 +82,16 @@ const TechnicalAnalysisGenerator = forwardRef<TechnicalAnalysisGeneratorRef>((pr
   const [fetchingNews, setFetchingNews] = useState(false);
 
   const analysisRefs = useRef<(HTMLDivElement | null)[]>([]);
+
+  // Get backend URL from environment variable
+  const NEWS_AGENT_URL = process.env.NEXT_PUBLIC_NEWS_AGENT_URL || 'http://localhost:3000';
+
+  // Function to update a specific analysis text
+  const updateAnalysisText = (index: number, newText: string) => {
+    setAnalyses(prev => prev.map((analysis, i) => 
+      i === index ? { ...analysis, analysis: newText } : analysis
+    ));
+  };
 
 
 
@@ -941,7 +952,13 @@ const TechnicalAnalysisGenerator = forwardRef<TechnicalAnalysisGeneratorRef>((pr
 
                 
 
-                <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'flex-start', marginBottom: '16px' }}>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'flex-start', gap: '8px', marginBottom: '16px' }}>
+
+                  <AddSubheadsButton
+                    articleText={analysis.analysis}
+                    onArticleUpdate={(newText) => updateAnalysisText(i, newText)}
+                    backendUrl={NEWS_AGENT_URL}
+                  />
 
                   <button
 
