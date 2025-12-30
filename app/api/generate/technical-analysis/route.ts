@@ -3692,7 +3692,20 @@ export async function POST(request: Request) {
           const alsoReadMatch = analysisWithPriceAction.match(alsoReadPattern);
           const alsoReadExists = !!alsoReadMatch;
           
-          if (!alsoReadExists) {
+          // Check if it has an HTML link tag - if not, we need to replace it
+          const alsoReadSectionText = alsoReadMatch ? alsoReadMatch[0] : '';
+          const hasHTMLLink = alsoReadExists && alsoReadSectionText.includes('<a href=');
+          
+          if (!alsoReadExists || !hasHTMLLink) {
+            // If it exists but doesn't have HTML link, remove it first
+            if (alsoReadExists && !hasHTMLLink) {
+              console.log('Removing incorrectly formatted "Also Read" section (no HTML link)');
+              if (alsoReadMatch && alsoReadMatch.index !== undefined) {
+                const beforeAlsoRead = analysisWithPriceAction.substring(0, alsoReadMatch.index);
+                const afterAlsoRead = analysisWithPriceAction.substring(alsoReadMatch.index + alsoReadMatch[0].length);
+                analysisWithPriceAction = (beforeAlsoRead + afterAlsoRead).replace(/\n\n\n+/g, '\n\n');
+              }
+            }
             console.log('Adding "Also Read" section');
             // Split content by double newlines (paragraph breaks) or </p> tags
             // Handle both HTML and plain text formats
