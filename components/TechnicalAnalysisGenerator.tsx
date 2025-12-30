@@ -85,6 +85,11 @@ const TechnicalAnalysisGenerator = forwardRef<TechnicalAnalysisGeneratorRef>((pr
 
   // Get backend URL from environment variable
   const NEWS_AGENT_URL = process.env.NEXT_PUBLIC_NEWS_AGENT_URL || 'http://localhost:3000';
+  
+  // Debug log to verify URL is set correctly
+  useEffect(() => {
+    console.log('🔵 TechnicalAnalysisGenerator: NEWS_AGENT_URL =', NEWS_AGENT_URL);
+  }, []);
 
   // Function to update a specific analysis text
   const updateAnalysisText = (index: number, newText: string) => {
