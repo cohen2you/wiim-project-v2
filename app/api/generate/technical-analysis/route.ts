@@ -3275,7 +3275,7 @@ Example of INCORRECT first paragraph (DO NOT DO THIS): "**Rocket Lab Corporation
 
 - THE "ALSO READ" SECTION: After the first paragraph, insert the "Also Read" hyperlink section if provided. This comes BEFORE the section marker.
 
-- SECTION MARKER: Immediately after the "Also Read" section, insert `## Section: The Catalyst` on its own line.
+- SECTION MARKER: Immediately after the "Also Read" section, insert ## Section: The Catalyst on its own line.
 
 - SECOND PARAGRAPH (2 sentences, THE MEAT - SPECIFIC DETAILS): ${newsContext && (newsContext.scrapedContent || (newsContext.selectedArticles && newsContext.selectedArticles.length > 0)) ? `CRITICAL - THIS IS WHERE THE SPECIFIC DETAILS GO: This paragraph appears AFTER "## Section: The Catalyst" and contains the high-value, specific information. MANDATORY: Provide detailed, specific information from the news source article. This is where you include:
   * Analyst names, firm names, price targets (e.g., "Needham analyst Ryan Koontz reiterated a Buy rating and raised the price target from $63 to $90")
