@@ -2616,14 +2616,22 @@ async function fetchNextEarningsDate(ticker: string) {
           || []);
       
       // Find the earliest upcoming earnings date
+      interface EarningsItem {
+        date?: string;
+        earnings_date?: string;
+        earningsDate?: string;
+        [key: string]: unknown;
+      }
+      
       const upcomingEarnings = results
-        .filter((item: any) => {
-          const earningsDate = item.date || item.earnings_date || item.earningsDate;
+        .filter((item: unknown): item is EarningsItem => {
+          const earningsItem = item as EarningsItem;
+          const earningsDate = earningsItem.date || earningsItem.earnings_date || earningsItem.earningsDate;
           if (!earningsDate) return false;
           const date = new Date(earningsDate);
           return date >= today;
         })
-        .sort((a: any, b: any) => {
+        .sort((a: EarningsItem, b: EarningsItem) => {
           const dateA = new Date(a.date || a.earnings_date || a.earningsDate || 0);
           const dateB = new Date(b.date || b.earnings_date || b.earningsDate || 0);
           return dateA.getTime() - dateB.getTime();
