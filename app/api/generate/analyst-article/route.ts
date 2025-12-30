@@ -783,9 +783,12 @@ ${truncatedText}
     
     // Remove bold tags from company name after first mention
     // Extract company name from first mention (e.g., <strong>Broadcom Inc.</strong>)
+    // Also extract it to use in price action line (to ensure consistency with article)
+    let extractedCompanyName = null;
     const firstMentionMatch = articleBody.match(/<strong>([^<]+(?:Inc\.?|Corp\.?|LLC|Ltd\.?)?)<\/strong>\s*\([A-Z]+:[A-Z]+\)/i);
     if (firstMentionMatch) {
-      const companyName = firstMentionMatch[1];
+      extractedCompanyName = firstMentionMatch[1];
+      const companyName = extractedCompanyName;
       // Remove "Inc.", "Corp.", etc. for matching (just use base name)
       const baseCompanyName = companyName.replace(/\s+(Inc\.?|Corp\.?|LLC|Ltd\.?)$/i, '').trim();
       
@@ -893,6 +896,24 @@ ${truncatedText}
       }
     } else {
       console.log('No related articles available for "Also Read" and "Read Next" sections');
+    }
+    
+    // Replace company name in price action line with the one from the article (if extracted)
+    // This ensures consistency - the price action uses the same company name as the article
+    if (extractedCompanyName && priceActionLine) {
+      // Extract the current company name from price action (everything between "Price Action: " and " shares")
+      // This pattern handles various formats: "Price Action: CompanyName shares" or "Price Action: Company Name shares"
+      const priceActionMatch = priceActionLine.match(/^Price Action:\s+(.+?)\s+shares/i);
+      if (priceActionMatch) {
+        const currentCompanyName = priceActionMatch[1].trim();
+        // Replace the first occurrence (the company name) with the one from the article
+        priceActionLine = priceActionLine.replace(currentCompanyName, extractedCompanyName);
+        console.log(`✅ Replaced company name in price action: "${currentCompanyName}" -> "${extractedCompanyName}"`);
+      } else {
+        console.warn(`⚠️ Could not extract company name from price action line for replacement. Line: ${priceActionLine.substring(0, 100)}`);
+      }
+    } else if (!extractedCompanyName && priceActionLine) {
+      console.warn(`⚠️ No company name extracted from article body, using API company name in price action`);
     }
     
     // Bold "Price Action:" in the price action line

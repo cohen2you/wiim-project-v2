@@ -2491,6 +2491,163 @@ async function fetchMarketContext(usePreviousDay: boolean = false): Promise<Mark
   }
 }
 
+// Fetch consensus ratings from Benzinga
+async function fetchConsensusRatings(ticker: string) {
+  try {
+    const BENZINGA_API_KEY = process.env.BENZINGA_API_KEY;
+    if (!BENZINGA_API_KEY) {
+      console.error('Error: BENZINGA_API_KEY is missing from environment variables.');
+      return null;
+    }
+
+    const params = new URLSearchParams();
+    params.append('token', BENZINGA_API_KEY);
+    params.append('parameters[tickers]', ticker);
+    
+    const consensusUrl = `https://api.benzinga.com/api/v2/consensus-ratings?${params.toString()}`;
+    
+    const consensusRes = await fetch(consensusUrl, {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json'
+      },
+    });
+      
+    if (consensusRes.ok) {
+      const consensusData = await consensusRes.json();
+      
+      // Handle different response structures
+      let extractedConsensus = null;
+      
+      if (Array.isArray(consensusData)) {
+        extractedConsensus = consensusData.find((item: any) => 
+          item.ticker?.toUpperCase() === ticker.toUpperCase() || 
+          item.symbol?.toUpperCase() === ticker.toUpperCase()
+        ) || consensusData[0];
+      } else if (consensusData.consensus) {
+        extractedConsensus = consensusData.consensus;
+      } else if (consensusData[ticker.toUpperCase()]) {
+        extractedConsensus = consensusData[ticker.toUpperCase()];
+      } else if (consensusData.ratings && Array.isArray(consensusData.ratings)) {
+        extractedConsensus = consensusData.ratings.find((item: any) => 
+          item.ticker?.toUpperCase() === ticker.toUpperCase() || 
+          item.symbol?.toUpperCase() === ticker.toUpperCase()
+        ) || consensusData.ratings[0];
+      } else {
+        extractedConsensus = consensusData;
+      }
+      
+      if (extractedConsensus) {
+        const consensusPriceTarget = 
+          extractedConsensus.consensus_price_target ?? 
+          extractedConsensus.consensusPriceTarget ??
+          extractedConsensus.price_target ??
+          extractedConsensus.priceTarget ??
+          extractedConsensus.target ??
+          extractedConsensus.pt ??
+          extractedConsensus.consensus_target ??
+          null;
+        
+        const consensus = {
+          consensus_rating: extractedConsensus.consensus_rating || extractedConsensus.consensusRating || extractedConsensus.rating || null,
+          consensus_price_target: consensusPriceTarget,
+        };
+        
+        if (consensus.consensus_price_target || consensus.consensus_rating) {
+          return consensus;
+        }
+      }
+    }
+    
+    return null;
+  } catch (error) {
+    console.error('Error fetching consensus ratings:', error);
+    return null;
+  }
+}
+
+// Fetch next earnings date from Benzinga calendar
+async function fetchNextEarningsDate(ticker: string) {
+  try {
+    const BENZINGA_API_KEY = process.env.BENZINGA_API_KEY;
+    if (!BENZINGA_API_KEY) {
+      return null;
+    }
+
+    const today = new Date();
+    const dateFrom = today.toISOString().split('T')[0];
+    // Look ahead 180 days (6 months) for earnings dates
+    const dateTo = new Date(Date.now() + 180 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    
+    // Use the v2 calendar/earnings endpoint with proper parameters
+    const url = 'https://api.benzinga.com/api/v2/calendar/earnings' +
+      `?token=${BENZINGA_API_KEY}` +
+      `&parameters[tickers]=${encodeURIComponent(ticker)}` +
+      `&parameters[date_from]=${dateFrom}` +
+      `&parameters[date_to]=${dateTo}` +
+      `&pagesize=20`;
+    
+    const earningsRes = await fetch(url, {
+      headers: { accept: 'application/json' }
+    });
+      
+    if (earningsRes.ok) {
+      const raw = await earningsRes.text();
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(raw.trim());
+      } catch {
+        console.log('Earnings calendar: Invalid JSON response');
+        return null;
+      }
+      
+      // Handle different response structures (array or wrapped in object)
+      interface EarningsResponse {
+        earnings?: unknown[];
+        results?: unknown[];
+        data?: unknown[];
+      }
+      
+      const results: unknown[] = Array.isArray(parsed)
+        ? parsed
+        : ((parsed as EarningsResponse).earnings 
+          || (parsed as EarningsResponse).results 
+          || (parsed as EarningsResponse).data 
+          || []);
+      
+      // Find the earliest upcoming earnings date
+      const upcomingEarnings = results
+        .filter((item: any) => {
+          const earningsDate = item.date || item.earnings_date || item.earningsDate;
+          if (!earningsDate) return false;
+          const date = new Date(earningsDate);
+          return date >= today;
+        })
+        .sort((a: any, b: any) => {
+          const dateA = new Date(a.date || a.earnings_date || a.earningsDate || 0);
+          const dateB = new Date(b.date || b.earnings_date || b.earningsDate || 0);
+          return dateA.getTime() - dateB.getTime();
+        });
+      
+      if (upcomingEarnings.length > 0) {
+        const nextEarnings = upcomingEarnings[0];
+        const earningsDate = nextEarnings.date || nextEarnings.earnings_date || nextEarnings.earningsDate;
+        if (earningsDate) {
+          return earningsDate;
+        }
+      }
+    } else {
+      const errorText = await earningsRes.text().catch(() => '');
+      console.log('Earnings calendar error:', errorText.substring(0, 300));
+    }
+    
+    return null;
+  } catch (error) {
+    console.error('Error fetching next earnings date:', error);
+    return null;
+  }
+}
+
 // Generate comprehensive technical analysis using AI provider
 
 async function generateTechnicalAnalysis(data: TechnicalAnalysisData, provider?: AIProvider, newsContext?: { scrapedContent?: string; selectedArticles?: any[]; newsUrl?: string; primaryArticle?: any }, marketContext?: MarketContext | null): Promise<string> {
@@ -2529,6 +2686,30 @@ async function generateTechnicalAnalysis(data: TechnicalAnalysisData, provider?:
     // Get stock sector performance for comparison line
     const sectorPerformance = await getStockSectorPerformance(data.symbol, marketContext || null);
     const sp500Change = marketContext?.indices.find(idx => idx.ticker === 'SPY')?.change || null;
+
+    // Fetch consensus ratings and earnings date for analyst overview and P/E sections
+    const [consensusRatings, nextEarningsDate] = await Promise.all([
+      fetchConsensusRatings(data.symbol),
+      fetchNextEarningsDate(data.symbol)
+    ]);
+
+    // Fetch P/E ratio from Benzinga quote API
+    let peRatio: number | null = null;
+    try {
+      const BENZINGA_API_KEY = process.env.BENZINGA_API_KEY;
+      if (BENZINGA_API_KEY) {
+        const benzingaRes = await fetch(`https://api.benzinga.com/api/v2/quoteDelayed?token=${BENZINGA_API_KEY}&symbols=${data.symbol}`);
+        if (benzingaRes.ok) {
+          const benzingaData = await benzingaRes.json();
+          if (benzingaData && benzingaData[data.symbol]) {
+            const quote = benzingaData[data.symbol];
+            peRatio = quote.pe || quote.priceEarnings || quote.pe_ratio || null;
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching P/E ratio:', error);
+    }
 
     
 
@@ -2892,6 +3073,31 @@ ${data.turningPoints?.supportBreakDate ? `- Price broke below support on ${data.
 
 ${!data.turningPoints || Object.keys(data.turningPoints).length === 0 ? '- No significant turning points identified in the past year' : ''}
 
+${consensusRatings && (consensusRatings.consensus_rating || consensusRatings.consensus_price_target) ? `
+ANALYST OVERVIEW:
+
+- Consensus Rating: ${consensusRatings.consensus_rating ? consensusRatings.consensus_rating.charAt(0) + consensusRatings.consensus_rating.slice(1).toLowerCase() : 'N/A'}
+- Consensus Price Target: ${consensusRatings.consensus_price_target ? '$' + parseFloat(consensusRatings.consensus_price_target.toString()).toFixed(2) : 'N/A'}
+
+CRITICAL: After the technical analysis section, include a one-line analyst overview statement. Format: "${data.companyName || data.symbol} has a consensus ${consensusRatings.consensus_rating ? consensusRatings.consensus_rating.charAt(0) + consensusRatings.consensus_rating.slice(1).toLowerCase() : 'N/A'} rating among analysts${consensusRatings.consensus_price_target ? ` with an average price target of $${parseFloat(consensusRatings.consensus_price_target.toString()).toFixed(2)}` : ''}."
+` : ''}
+
+${peRatio !== null ? `
+P/E RATIO AND EARNINGS:
+
+- Current P/E Ratio: ${peRatio.toFixed(1)}
+- Next Earnings Date: ${nextEarningsDate ? new Date(nextEarningsDate).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : 'Not available'}
+
+CRITICAL: After the analyst overview section (if present), include P/E ratio information. State the P/E ratio and add a comparison to the sector. Format: "At current levels, the P/E ratio of ${peRatio.toFixed(1)} suggests the stock is ${peRatio > 25 ? 'overvalued' : peRatio < 15 ? 'undervalued' : 'fairly valued'} relative to peers." If next earnings date is available, include it at the end of this section: "The company is scheduled to report earnings on ${nextEarningsDate ? new Date(nextEarningsDate).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : 'a date to be announced'}."
+` : nextEarningsDate ? `
+P/E RATIO AND EARNINGS:
+
+- Current P/E Ratio: Not available
+- Next Earnings Date: ${new Date(nextEarningsDate).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
+
+CRITICAL: After the analyst overview section (if present), include earnings information if available. Include the next earnings date: "The company is scheduled to report earnings on ${new Date(nextEarningsDate).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}."
+` : ''}
+
 ${newsContext && (newsContext.scrapedContent || (newsContext.selectedArticles && newsContext.selectedArticles.length > 0)) ? `
 PRIMARY NEWS ARTICLE (LEAD WITH THIS):
 
@@ -2981,10 +3187,23 @@ CRITICAL: The second paragraph (and optionally third paragraph) MUST include det
 
 Use concrete facts and data points from the source article. For example, instead of "delivery times have increased", use "delivery lead times now run around five days, up from three days a year ago" or "In the U.S., lead times reached eight days for the iPhone 17 and four days for the Air." Include as much specific detail as possible while keeping paragraphs concise (2-3 sentences each).
 
-After the lead paragraph, two news content paragraphs (paragraphs 2 and 3), and the broader market/sector paragraph (paragraph 4, if applicable), transition to technical analysis focusing on longer-term trends (12-month).` : `Write a conversational WGO article that helps readers understand "What's Going On" with the stock. LEAD with the current price move and note that there's no company-specific news driving the move. ${marketContext ? 'Then use broader market context (indices, sectors, market breadth) to explain the move - is the stock moving with or against broader market trends? Reference specific sector performance when relevant. For example, if the stock is down but the broader market/sector is up, note that the stock is underperforming despite positive market conditions. If the stock is down and the broader market/sector is also down, note that the stock is caught in a broader sell-off (e.g., "Technology stocks are broadly lower today, contributing to the decline").' : ''} Then use technical indicators (moving averages, RSI, MACD, support/resistance) to create a narrative that explains what's happening and why traders are seeing this price action. Focus on using technical data to tell the story - what do the charts reveal about the stock's current situation?`}
+After the lead paragraph, two news content paragraphs (paragraphs 2 and 3), and the broader market/sector paragraph (paragraph 4, if applicable), transition to technical analysis focusing on longer-term trends (12-month). Then include the analyst overview section (if consensus data is available) and P/E ratio section (if P/E data is available) after the technical analysis.` : `Write a conversational WGO article that helps readers understand "What's Going On" with the stock. LEAD with the current price move and note that there's no company-specific news driving the move. ${marketContext ? 'Then use broader market context (indices, sectors, market breadth) to explain the move - is the stock moving with or against broader market trends? Reference specific sector performance when relevant. For example, if the stock is down but the broader market/sector is up, note that the stock is underperforming despite positive market conditions. If the stock is down and the broader market/sector is also down, note that the stock is caught in a broader sell-off (e.g., "Technology stocks are broadly lower today, contributing to the decline").' : ''} Then use technical indicators (moving averages, RSI, MACD, support/resistance) to create a narrative that explains what's happening and why traders are seeing this price action. Focus on using technical data to tell the story - what do the charts reveal about the stock's current situation? After the technical analysis section, include the analyst overview section (if consensus data is available) and P/E ratio section (if P/E data is available).`}
 
 Weave data points naturally into your analysis rather than listing them. Write like you're explaining the stock's technical picture to a colleague - clear, direct, and engaging. When relevant, mention key turning points and when they occurred to provide context for the current technical setup. Think like a trader: prioritize actionable insights and key technical signals over routine price updates.
 
+
+*** NEW INSTRUCTION: SECTION MARKERS ***
+To organize the article for final publishing, you must insert GENERIC SECTION HEADERS between the major logical blocks of the story.
+
+Rules for Headers:
+1. Format: Use "## Section: [Label]"
+2. Placement:
+   - Insert "## Section: The Catalyst" immediately after the opening context paragraph (the "Lede") and BEFORE the detailed news paragraphs.
+   - Insert "## Section: Technical Analysis" immediately after the news paragraphs and BEFORE the transition to technical data.
+   - Insert "## Section: Analyst Ratings" ONLY IF you have included a specific Analyst Overview section.
+   - Insert "## Section: Price Action" BEFORE the final paragraph summarizing the current price/closing data.
+
+CRITICAL: Do not try to write creative headers. Use these exact generic labels. The logic of your paragraph flow (Lead -> News -> Technicals) remains unchanged; you are simply placing these markers between the blocks.
 
 
 CRITICAL RULES - PARAGRAPH LENGTH IS MANDATORY:
