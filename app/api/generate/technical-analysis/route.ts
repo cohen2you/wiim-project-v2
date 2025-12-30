@@ -3214,7 +3214,7 @@ You must strictly follow this paragraph order to ensure SEO headers capture the 
 
 2. **The "Also Read" Link:** Insert the provided "Also Read" hyperlink immediately after Paragraph 1.
 
-3. **HEADER MARKER:** Insert `## Section: The Catalyst` right here.
+3. **HEADER MARKER:** Insert ## Section: The Catalyst right here.
 
 4. **Paragraph 2 (The Meat):** NOW provide the specific high-value details. This is where you write "Needham raised the target to $90" or "Revenue hit $50M." Include analyst names, firm names, price targets, specific numbers, and other key metrics here. This ensures the header sits directly above the key data.
 
