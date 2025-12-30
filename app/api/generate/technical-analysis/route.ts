@@ -3828,8 +3828,66 @@ export async function POST(request: Request) {
           } else {
             console.log('"Read Next" section already exists');
           }
+          
+          // Ensure "## Section: Price Action" marker exists before "Read Next" or price action line
+          const priceActionSectionMarker = /##\s*Section:\s*Price Action/i;
+          if (!analysisWithPriceAction.match(priceActionSectionMarker)) {
+            console.log('Adding "## Section: Price Action" marker');
+            // Look for "Read Next:" first, then price action line
+            const readNextIndex = analysisWithPriceAction.indexOf('Read Next:');
+            const priceActionIndex = analysisWithPriceAction.indexOf('Price Action:');
+            
+            if (readNextIndex !== -1) {
+              // Insert before "Read Next"
+              const beforeReadNext = analysisWithPriceAction.substring(0, readNextIndex).trim();
+              const readNextAndAfter = analysisWithPriceAction.substring(readNextIndex);
+              analysisWithPriceAction = `${beforeReadNext}\n\n## Section: Price Action\n\n${readNextAndAfter}`;
+              console.log('✅ Added "## Section: Price Action" marker before "Read Next"');
+            } else if (priceActionIndex !== -1) {
+              // No "Read Next", insert before price action line
+              // Find the start of the <strong> tag or the beginning of the line
+              const beforePriceAction = analysisWithPriceAction.substring(0, priceActionIndex);
+              const strongTagStart = beforePriceAction.lastIndexOf('<strong>');
+              if (strongTagStart !== -1) {
+                const beforeStrong = analysisWithPriceAction.substring(0, strongTagStart).trim();
+                const strongAndAfter = analysisWithPriceAction.substring(strongTagStart);
+                analysisWithPriceAction = `${beforeStrong}\n\n## Section: Price Action\n\n${strongAndAfter}`;
+              } else {
+                // Insert before "Price Action:"
+                const beforeText = analysisWithPriceAction.substring(0, priceActionIndex).trim();
+                const priceActionAndAfter = analysisWithPriceAction.substring(priceActionIndex);
+                analysisWithPriceAction = `${beforeText}\n\n## Section: Price Action\n\n${priceActionAndAfter}`;
+              }
+              console.log('✅ Added "## Section: Price Action" marker before price action line');
+            }
+          } else {
+            console.log('"## Section: Price Action" marker already exists');
+          }
         } else {
           console.log('No related articles available');
+          
+          // Still need to add "## Section: Price Action" marker even without related articles
+          const priceActionSectionMarker = /##\s*Section:\s*Price Action/i;
+          if (!analysisWithPriceAction.match(priceActionSectionMarker)) {
+            console.log('Adding "## Section: Price Action" marker (no related articles)');
+            const priceActionIndex = analysisWithPriceAction.indexOf('Price Action:');
+            if (priceActionIndex !== -1) {
+              // Find the start of the <strong> tag or the beginning of the line
+              const beforePriceAction = analysisWithPriceAction.substring(0, priceActionIndex);
+              const strongTagStart = beforePriceAction.lastIndexOf('<strong>');
+              if (strongTagStart !== -1) {
+                const beforeStrong = analysisWithPriceAction.substring(0, strongTagStart).trim();
+                const strongAndAfter = analysisWithPriceAction.substring(strongTagStart);
+                analysisWithPriceAction = `${beforeStrong}\n\n## Section: Price Action\n\n${strongAndAfter}`;
+              } else {
+                // Insert before "Price Action:"
+                const beforeText = analysisWithPriceAction.substring(0, priceActionIndex).trim();
+                const priceActionAndAfter = analysisWithPriceAction.substring(priceActionIndex);
+                analysisWithPriceAction = `${beforeText}\n\n## Section: Price Action\n\n${priceActionAndAfter}`;
+              }
+              console.log('✅ Added "## Section: Price Action" marker before price action line');
+            }
+          }
         }
 
         return {
