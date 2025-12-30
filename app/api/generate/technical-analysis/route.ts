@@ -3175,7 +3175,7 @@ CRITICAL INSTRUCTIONS FOR NEWS INTEGRATION:
 6. Maximum 2 sentences per paragraph throughout the story.
 
 7. SECTION MARKERS (MANDATORY): You MUST insert section markers between major logical blocks. Format: "## Section: [Label]" on its own line. Required markers:
-   - "## Section: The Catalyst" - after the Lede paragraph, before news paragraphs
+   - "## Section: The Catalyst" - after the "Also Read" section (which appears after the second paragraph), before the detailed news paragraphs
    - "## Section: Technical Analysis" - after news paragraphs, before technical data
    - "## Section: Analyst Ratings" - only if Analyst Overview is included
    - "## Section: Price Action" - before the final price/closing paragraph
@@ -3192,7 +3192,7 @@ CRITICAL INSTRUCTIONS FOR NEWS INTEGRATION:
 
 TASK: ${newsContext && (newsContext.scrapedContent || (newsContext.selectedArticles && newsContext.selectedArticles.length > 0)) ? `Write a conversational WGO article that helps readers understand "What's Going On" with the stock. LEAD with the current price move (direction and day of week, e.g., "shares are tumbling on Monday" or "shares are surging on Tuesday"). Use ONLY the day name (e.g., "on Thursday", "on Monday") - DO NOT include the date (e.g., do NOT use "on Thursday, December 18, 2025" or any date format). DO NOT include the percentage in the first paragraph. Then reference the news article provided above AND broader market context to explain what's going on - either the news is contributing to the move, OR the stock is moving despite positive/negative news (suggesting larger market elements may be at play). ${marketContext ? 'Use the broader market context (indices, sectors, market breadth) to provide additional context - is the stock moving with or against broader market trends? Reference specific sector performance when relevant (e.g., "Technology stocks are broadly lower today, contributing to the decline" or "Despite a strong market day, the stock is down, suggesting company-specific concerns").' : ''} Include the appropriate hyperlink in the first paragraph (three-word for Benzinga, one-word with outlet credit for others). When mentioning other companies in the article, always include their ticker symbol with exchange (e.g., "Snowflake Inc. (NYSE:SNOW)").
 
-MANDATORY: You MUST include section markers in your output. Insert "## Section: The Catalyst" after the Lede, "## Section: Technical Analysis" after news paragraphs, "## Section: Analyst Ratings" if analyst overview is included, and "## Section: Price Action" before the final price paragraph. These are REQUIRED - do not skip them.
+MANDATORY: You MUST include section markers in your output. Insert "## Section: The Catalyst" AFTER the "Also Read" section (which comes after the second paragraph), "## Section: Technical Analysis" after news paragraphs, "## Section: Analyst Ratings" if analyst overview is included, and "## Section: Price Action" before the final price paragraph. These are REQUIRED - do not skip them.
 
 CRITICAL: The second paragraph (and optionally third paragraph) MUST include detailed, specific information from the news source article. Do NOT just summarize or use vague language. Extract and include:
 - Specific numbers, figures, percentages, dates, or metrics from the article
@@ -3212,7 +3212,7 @@ You MUST insert GENERIC SECTION HEADERS between the major logical blocks of the 
 Rules for Headers:
 1. Format: Use "## Section: [Label]" (markdown H2 format)
 2. Placement (MANDATORY):
-   - Insert "## Section: The Catalyst" immediately after the opening context paragraph (the "Lede") and BEFORE the detailed news paragraphs.
+   - Insert "## Section: The Catalyst" AFTER the "Also Read" section (which appears after the second paragraph) and BEFORE the detailed news paragraphs.
    - Insert "## Section: Technical Analysis" immediately after the news paragraphs and BEFORE the transition to technical data.
    - Insert "## Section: Analyst Ratings" ONLY IF you have included a specific Analyst Overview section.
    - Insert "## Section: Price Action" BEFORE the final paragraph summarizing the current price/closing data.
@@ -3367,7 +3367,7 @@ ${newsContext && (newsContext.scrapedContent || (newsContext.selectedArticles &&
 FINAL CRITICAL REMINDER - HYPERLINK REQUIREMENT (THIS IS NOT OPTIONAL): Your first paragraph MUST include an HTML hyperlink tag in your output. ${isBenzinga ? `Use this EXACT format: <a href="${primaryUrl}">[three consecutive words]</a>. The URL is: ${primaryUrl}. Embed it naturally within your first paragraph - do NOT use phrases like "as detailed in" or "according to reports". Example of what your output should look like: "**Apple Inc.** (NASDAQ:AAPL) shares closed up on Thursday as the company is <a href="${primaryUrl}">reportedly deepening its</a> India strategy".` : `Use this EXACT format: <a href="${primaryUrl}">${outletName || 'Source'}</a> reports. The URL is: ${primaryUrl}. Example: "<a href="${primaryUrl}">CNBC</a> reports".`} IF YOU DO NOT INCLUDE THE <a href> TAG IN YOUR FIRST PARAGRAPH OUTPUT, YOUR RESPONSE IS INCOMPLETE AND INCORRECT.` : ''}
 
 FINAL CRITICAL REMINDER - SECTION MARKERS (THIS IS NOT OPTIONAL): Your article output MUST include section markers in markdown H2 format. You MUST include:
-- "## Section: The Catalyst" after the Lede paragraph
+- "## Section: The Catalyst" AFTER the "Also Read" section (which appears after the second paragraph)
 - "## Section: Technical Analysis" after the news paragraphs  
 - "## Section: Analyst Ratings" if analyst overview is included
 - "## Section: Price Action" before the final price paragraph
@@ -3698,11 +3698,63 @@ export async function POST(request: Request) {
               }
               
               console.log('✅ "Also Read" section placed after second paragraph');
+              
+              // Ensure "## Section: The Catalyst" comes AFTER "Also Read"
+              // Check if section marker exists and is before "Also Read"
+              const sectionMarkerPattern = /## Section: The Catalyst/i;
+              const sectionMarkerMatch = analysisWithPriceAction.match(sectionMarkerPattern);
+              if (sectionMarkerMatch) {
+                const markerIndex = analysisWithPriceAction.indexOf(sectionMarkerMatch[0]);
+                const alsoReadIndex = analysisWithPriceAction.indexOf('Also Read:');
+                
+                // If section marker is before "Also Read", move it after
+                if (markerIndex !== -1 && alsoReadIndex !== -1 && markerIndex < alsoReadIndex) {
+                  console.log('Moving "## Section: The Catalyst" to after "Also Read"');
+                  // Remove the section marker from its current location
+                  const beforeMarker = analysisWithPriceAction.substring(0, markerIndex);
+                  const afterMarker = analysisWithPriceAction.substring(markerIndex + sectionMarkerMatch[0].length);
+                  const withoutMarker = (beforeMarker + afterMarker).replace(/\n\n\n+/g, '\n\n');
+                  
+                  // Find "Also Read" and insert section marker after it
+                  const alsoReadEndIndex = analysisWithPriceAction.indexOf('</a>', alsoReadIndex);
+                  if (alsoReadEndIndex !== -1) {
+                    const beforeAlsoRead = withoutMarker.substring(0, alsoReadEndIndex + 4);
+                    const afterAlsoRead = withoutMarker.substring(alsoReadEndIndex + 4);
+                    // Insert section marker after "Also Read" with proper spacing
+                    analysisWithPriceAction = `${beforeAlsoRead}\n\n## Section: The Catalyst\n\n${afterAlsoRead.trim()}`;
+                    console.log('✅ Moved "## Section: The Catalyst" to after "Also Read"');
+                  }
+                }
+              }
             } else {
               console.log('⚠️ Not enough paragraphs to insert "Also Read" (need at least 2)');
             }
           } else {
             console.log('"Also Read" section already exists');
+            
+            // Even if "Also Read" already exists, ensure section marker is after it
+            const sectionMarkerPattern = /## Section: The Catalyst/i;
+            const sectionMarkerMatch = analysisWithPriceAction.match(sectionMarkerPattern);
+            if (sectionMarkerMatch) {
+              const markerIndex = analysisWithPriceAction.indexOf(sectionMarkerMatch[0]);
+              const alsoReadIndex = analysisWithPriceAction.indexOf('Also Read:');
+              
+              // If section marker is before "Also Read", move it after
+              if (markerIndex !== -1 && alsoReadIndex !== -1 && markerIndex < alsoReadIndex) {
+                console.log('Moving "## Section: The Catalyst" to after "Also Read"');
+                const beforeMarker = analysisWithPriceAction.substring(0, markerIndex);
+                const afterMarker = analysisWithPriceAction.substring(markerIndex + sectionMarkerMatch[0].length);
+                const withoutMarker = (beforeMarker + afterMarker).replace(/\n\n\n+/g, '\n\n');
+                
+                const alsoReadEndIndex = analysisWithPriceAction.indexOf('</a>', alsoReadIndex);
+                if (alsoReadEndIndex !== -1) {
+                  const beforeAlsoRead = withoutMarker.substring(0, alsoReadEndIndex + 4);
+                  const afterAlsoRead = withoutMarker.substring(alsoReadEndIndex + 4);
+                  analysisWithPriceAction = `${beforeAlsoRead}\n\n## Section: The Catalyst\n\n${afterAlsoRead.trim()}`;
+                  console.log('✅ Moved "## Section: The Catalyst" to after "Also Read"');
+                }
+              }
+            }
           }
           
           // Check if "Read Next" section exists, if not add it after context but before price action
