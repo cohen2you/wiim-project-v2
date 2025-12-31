@@ -3649,22 +3649,81 @@ IF YOU DO NOT INCLUDE THESE SECTION MARKERS IN YOUR OUTPUT, YOUR RESPONSE IS INC
 
     let generatedContent = response.content.trim();
     
-    // Post-processing: inject hyperlink if missing
+    // Post-processing: inject hyperlink if missing AND ensure it's only in the first paragraph
     if (primaryUrl && newsContext) {
+      // Check if hyperlink exists anywhere in the content
       const hasHyperlink = generatedContent.includes(`<a href="${primaryUrl}">`) || generatedContent.includes(`<a href='${primaryUrl}'>`);
-      if (!hasHyperlink) {
+      
+      // Split into paragraphs to check where hyperlink is
+      const hasHTMLTags = generatedContent.includes('</p>');
+      let paragraphs: string[] = [];
+      
+      if (hasHTMLTags) {
+        paragraphs = generatedContent.split('</p>').filter(p => p.trim().length > 0);
+      } else {
+        paragraphs = generatedContent.split(/\n\s*\n/).filter(p => p.trim().length > 0);
+      }
+      
+      // Check if hyperlink is in first paragraph
+      const firstParaHasHyperlink = paragraphs.length > 0 && (paragraphs[0].includes(`<a href="${primaryUrl}">`) || paragraphs[0].includes(`<a href='${primaryUrl}'>`));
+      
+      // If hyperlink exists but NOT in first paragraph, remove it from other paragraphs and add to first
+      if (hasHyperlink && !firstParaHasHyperlink && paragraphs.length > 0) {
+        console.warn('[HYPERLINK WARNING] Hyperlink found but NOT in first paragraph. Moving to first paragraph...');
+        
+        // Remove hyperlink from all paragraphs except first
+        for (let i = 1; i < paragraphs.length; i++) {
+          paragraphs[i] = paragraphs[i].replace(new RegExp(`<a href=["']${primaryUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}["']>([^<]+)</a>`, 'gi'), '$1');
+        }
+        
+        // Now inject into first paragraph
+        let leadParagraph = paragraphs[0].trim();
+        const textOnly = leadParagraph.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+        const words = textOnly.split(/\s+/).filter(w => w.length > 0);
+        
+        if (words.length >= 3) {
+          const startIdx = Math.min(Math.max(3, Math.floor(words.length / 4)), words.length - 3);
+          let found = false;
+          
+          for (let i = startIdx; i < words.length - 2 && !found; i++) {
+            const phrase = `${words[i]} ${words[i + 1]} ${words[i + 2]}`;
+            if (phrase.match(/[<>()\[\]{}*]/)) continue;
+            
+            const escapedPhrase = phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const match = leadParagraph.match(new RegExp(`(${escapedPhrase.replace(/\*/g, '\\*')})`, 'i'));
+            if (match) {
+              const originalPhrase = match[1];
+              leadParagraph = leadParagraph.replace(originalPhrase, `<a href="${primaryUrl}">${originalPhrase}</a>`);
+              found = true;
+              console.log(`[HYPERLINK FIX] Moved hyperlink to first paragraph with phrase: "${originalPhrase}"`);
+            }
+          }
+          
+          if (!found && words.length >= 5) {
+            for (let i = 2; i < Math.min(5, words.length - 2) && !found; i++) {
+              const phrase = `${words[i]} ${words[i + 1]} ${words[i + 2]}`;
+              if (!phrase.match(/[<>()\[\]{}*]/)) {
+                const escapedPhrase = phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                const match = leadParagraph.match(new RegExp(`(${escapedPhrase.replace(/\*/g, '\\*')})`, 'i'));
+                if (match) {
+                  const originalPhrase = match[1];
+                  leadParagraph = leadParagraph.replace(originalPhrase, `<a href="${primaryUrl}">${originalPhrase}</a>`);
+                  found = true;
+                  console.log(`[HYPERLINK FIX] Moved hyperlink to first paragraph with fallback phrase: "${originalPhrase}"`);
+                }
+              }
+            }
+          }
+        }
+        
+        paragraphs[0] = leadParagraph;
+        generatedContent = hasHTMLTags 
+          ? paragraphs.map(p => (p.trim().endsWith('</p>') ? p : p + '</p>')).join('')
+          : paragraphs.join('\n\n');
+      } else if (!hasHyperlink) {
+        // No hyperlink at all - inject into first paragraph
         console.warn('[HYPERLINK WARNING] Generated content does not include hyperlink for URL:', primaryUrl);
         console.log('[HYPERLINK FIX] Injecting hyperlink into first paragraph...');
-        
-        // Split into paragraphs to find the first paragraph
-        const hasHTMLTags = generatedContent.includes('</p>');
-        let paragraphs: string[] = [];
-        
-        if (hasHTMLTags) {
-          paragraphs = generatedContent.split('</p>').filter(p => p.trim().length > 0);
-        } else {
-          paragraphs = generatedContent.split(/\n\s*\n/).filter(p => p.trim().length > 0);
-        }
         
         if (paragraphs.length > 0) {
           let leadParagraph = paragraphs[0].trim();
@@ -3722,7 +3781,7 @@ IF YOU DO NOT INCLUDE THESE SECTION MARKERS IN YOUR OUTPUT, YOUR RESPONSE IS INC
             : paragraphs.join('\n\n');
         }
       } else {
-        console.log('[HYPERLINK SUCCESS] Hyperlink found in generated content for URL:', primaryUrl);
+        console.log('[HYPERLINK SUCCESS] Hyperlink found in first paragraph for URL:', primaryUrl);
       }
     }
     
@@ -3919,6 +3978,65 @@ export async function POST(request: Request) {
               }
               
               console.log('✅ "Also Read" section placed after first paragraph');
+              
+              // Clean up: Remove any standalone headline-like lines that appear after "Also Read"
+              // These are often AI-generated summaries that shouldn't be there
+              const alsoReadIndex = analysisWithPriceAction.indexOf('Also Read:');
+              if (alsoReadIndex !== -1) {
+                const afterAlsoRead = analysisWithPriceAction.substring(alsoReadIndex);
+                // Look for standalone lines (not in paragraphs) that look like headlines
+                const lines = afterAlsoRead.split('\n');
+                let cleanedLines: string[] = [];
+                let foundSectionMarker = false;
+                
+                for (let i = 0; i < lines.length; i++) {
+                  const line = lines[i].trim();
+                  
+                  // Skip empty lines
+                  if (!line) {
+                    cleanedLines.push(lines[i]);
+                    continue;
+                  }
+                  
+                  // Keep "Also Read" section
+                  if (line.includes('Also Read:')) {
+                    cleanedLines.push(lines[i]);
+                    continue;
+                  }
+                  
+                  // Keep section markers
+                  if (line.startsWith('## Section:')) {
+                    foundSectionMarker = true;
+                    cleanedLines.push(lines[i]);
+                    continue;
+                  }
+                  
+                  // Keep HTML paragraphs
+                  if (line.startsWith('<p>') || line.includes('</p>')) {
+                    cleanedLines.push(lines[i]);
+                    continue;
+                  }
+                  
+                  // Remove standalone lines that look like headlines (short, no punctuation at end, or quotes)
+                  // These are often AI-generated summaries that appear after "Also Read"
+                  const isStandaloneHeadline = 
+                    !foundSectionMarker && // Only before section marker
+                    line.length < 100 && // Short line
+                    !line.startsWith('**') && // Not bolded company name
+                    !line.match(/^[A-Z][^.!?]*[.!?]$/) && // Not a complete sentence
+                    (line.includes("'") || line.match(/^[A-Z][a-z]+/)); // Looks like a headline
+                  
+                  if (isStandaloneHeadline) {
+                    console.log(`[CLEANUP] Removing standalone headline-like line after "Also Read": "${line}"`);
+                    continue; // Skip this line
+                  }
+                  
+                  cleanedLines.push(lines[i]);
+                }
+                
+                const beforeAlsoRead = analysisWithPriceAction.substring(0, alsoReadIndex);
+                analysisWithPriceAction = beforeAlsoRead + cleanedLines.join('\n');
+              }
               
               // Ensure "## Section: The Catalyst" comes AFTER "Also Read"
               // Check if section marker exists and is before "Also Read"
