@@ -4256,11 +4256,14 @@ export async function POST(request: Request) {
                 revenueEstimateMatch = earningsContent.match(/Revenue Estimate:\s*(\$[\d.]+[BM])/i);
                 revenuePriorMatch = earningsContent.match(/Revenue Estimate:.*?\((?:Up|Down) from (\$[\d.]+[BM]) YoY\)/i);
               }
+              // Try to extract consensus and price target from structured format if narrative format didn't match
+              let extractedRating: string | null = null;
+              let extractedPriceTarget: string | null = null;
               if (!consensusRatingMatch || !priceTargetMatch) {
                 const consensusLineMatch = earningsContent.match(/Analyst Consensus:\s*([A-Za-z]+) Rating.*?\(\$([\d.]+) Avg Price Target\)/i);
                 if (consensusLineMatch) {
-                  consensusRatingMatch = [null, consensusLineMatch[1]];
-                  priceTargetMatch = [null, consensusLineMatch[2]];
+                  extractedRating = consensusLineMatch[1];
+                  extractedPriceTarget = consensusLineMatch[2];
                 }
               }
               
@@ -4325,9 +4328,12 @@ export async function POST(request: Request) {
                   lines.push(`<strong>Revenue Estimate</strong>: ${revEst}${revPrior && direction ? ` (${direction} from ${revPrior} YoY)` : ''}`);
                 }
                 
-                if (consensusRatingMatch && priceTargetMatch) {
-                  const rating = consensusRatingMatch[1].charAt(0) + consensusRatingMatch[1].slice(1).toLowerCase();
-                  const target = parseFloat(priceTargetMatch[1]);
+                const ratingValue = extractedRating || (consensusRatingMatch ? consensusRatingMatch[1] : null);
+                const targetValue = extractedPriceTarget || (priceTargetMatch ? priceTargetMatch[1] : null);
+                
+                if (ratingValue && targetValue) {
+                  const rating = ratingValue.charAt(0) + ratingValue.slice(1).toLowerCase();
+                  const target = parseFloat(targetValue);
                   lines.push(`<strong>Analyst Consensus</strong>: ${rating} Rating ($${target.toFixed(2)} Avg Price Target)`);
                   
                   // Add price comparison logic note
@@ -4342,11 +4348,11 @@ export async function POST(request: Request) {
                       priceTargetNote = `\n\n<strong>Note:</strong> <em>The average price target suggests the stock is trading at a premium to analyst targets.</em>`;
                     }
                   }
-                } else if (consensusRatingMatch) {
-                  const rating = consensusRatingMatch[1].charAt(0) + consensusRatingMatch[1].slice(1).toLowerCase();
+                } else if (ratingValue) {
+                  const rating = ratingValue.charAt(0) + ratingValue.slice(1).toLowerCase();
                   lines.push(`<strong>Analyst Consensus</strong>: ${rating} Rating`);
-                } else if (priceTargetMatch) {
-                  const target = parseFloat(priceTargetMatch[1]);
+                } else if (targetValue) {
+                  const target = parseFloat(targetValue);
                   lines.push(`<strong>Analyst Consensus</strong>: $${target.toFixed(2)} Avg Price Target`);
                   
                   // Add price comparison logic note
