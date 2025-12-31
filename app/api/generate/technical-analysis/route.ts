@@ -2507,15 +2507,21 @@ async function fetchConsensusRatings(ticker: string) {
     // Use calendar/consensus-ratings endpoint as specified
     const consensusUrl = `https://api.benzinga.com/api/v2/calendar/consensus-ratings?${params.toString()}`;
     
+    console.log(`[CONSENSUS RATINGS] Fetching for ticker: ${ticker}`);
+    console.log(`[CONSENSUS RATINGS] URL: ${consensusUrl}`);
+    
     const consensusRes = await fetch(consensusUrl, {
       method: 'GET',
       headers: {
         'Accept': 'application/json'
       },
     });
+    
+    console.log(`[CONSENSUS RATINGS] Response status: ${consensusRes.status} ${consensusRes.statusText}`);
       
     if (consensusRes.ok) {
       const consensusData = await consensusRes.json();
+      console.log(`[CONSENSUS RATINGS] Raw response data:`, JSON.stringify(consensusData).substring(0, 500));
       
       // Handle different response structures
       let extractedConsensus = null;
@@ -2562,11 +2568,25 @@ async function fetchConsensusRatings(ticker: string) {
         };
         
         if (consensus.consensus_price_target || consensus.consensus_rating) {
+          console.log(`[CONSENSUS RATINGS] Successfully extracted:`, {
+            rating: consensus.consensus_rating,
+            priceTarget: consensus.consensus_price_target,
+            totalAnalysts: consensus.total_analyst_count,
+            buyPercentage: consensus.buy_percentage
+          });
           return consensus;
+        } else {
+          console.log(`[CONSENSUS RATINGS] No valid rating or price target found in extracted data`);
         }
+      } else {
+        console.log(`[CONSENSUS RATINGS] Could not extract consensus data from response`);
       }
+    } else {
+      const errorText = await consensusRes.text().catch(() => '');
+      console.log(`[CONSENSUS RATINGS] API error response: ${errorText.substring(0, 300)}`);
     }
     
+    console.log(`[CONSENSUS RATINGS] Returning null - no data found`);
     return null;
   } catch (error) {
     console.error('Error fetching consensus ratings:', error);
@@ -2715,6 +2735,24 @@ async function generateTechnicalAnalysis(data: TechnicalAnalysisData, provider?:
       fetchConsensusRatings(data.symbol),
       fetchNextEarningsDate(data.symbol)
     ]);
+    
+    // Log fetched data for debugging
+    if (consensusRatings) {
+      console.log('[WGO W/ News] Consensus ratings fetched:', {
+        rating: consensusRatings.consensus_rating,
+        priceTarget: consensusRatings.consensus_price_target,
+        buyPercentage: consensusRatings.buy_percentage,
+        totalAnalysts: consensusRatings.total_analyst_count
+      });
+    } else {
+      console.log('[WGO W/ News] No consensus ratings data available');
+    }
+    
+    if (nextEarnings) {
+      console.log('[WGO W/ News] Next earnings fetched:', typeof nextEarnings === 'object' ? nextEarnings : { date: nextEarnings });
+    } else {
+      console.log('[WGO W/ News] No earnings data available');
+    }
     
     // Handle earnings data - could be string (old format) or object (new format)
     const nextEarningsDate = typeof nextEarnings === 'string' ? nextEarnings : nextEarnings?.date || null;
