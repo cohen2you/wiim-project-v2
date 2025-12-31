@@ -2504,8 +2504,8 @@ async function fetchConsensusRatings(ticker: string) {
     params.append('token', BENZINGA_API_KEY);
     params.append('parameters[tickers]', ticker);
     
-    // Use calendar/consensus-ratings endpoint as specified
-    const consensusUrl = `https://api.benzinga.com/api/v2/calendar/consensus-ratings?${params.toString()}`;
+    // Try consensus-ratings endpoint (without calendar prefix) - if 404, fallback to analyst/insights aggregation
+    let consensusUrl = `https://api.benzinga.com/api/v2/consensus-ratings?${params.toString()}`;
     
     console.log(`[CONSENSUS RATINGS] Fetching for ticker: ${ticker}`);
     console.log(`[CONSENSUS RATINGS] URL: ${consensusUrl}`);
