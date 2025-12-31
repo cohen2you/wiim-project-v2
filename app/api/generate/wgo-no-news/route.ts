@@ -300,6 +300,197 @@ async function fetchRecentArticles(ticker: string): Promise<any[]> {
   }
 }
 
+// Fetch consensus ratings from Benzinga calendar endpoint
+async function fetchConsensusRatings(ticker: string) {
+  try {
+    const BENZINGA_API_KEY = process.env.BENZINGA_API_KEY;
+    if (!BENZINGA_API_KEY) {
+      console.error('Error: BENZINGA_API_KEY is missing from environment variables.');
+      return null;
+    }
+
+    const params = new URLSearchParams();
+    params.append('token', BENZINGA_API_KEY);
+    params.append('parameters[tickers]', ticker);
+    
+    // Use calendar/consensus-ratings endpoint as specified
+    const consensusUrl = `https://api.benzinga.com/api/v2/calendar/consensus-ratings?${params.toString()}`;
+    
+    console.log('WGO No News: Fetching consensus ratings from:', consensusUrl);
+    const consensusRes = await fetch(consensusUrl, {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json'
+      },
+    });
+      
+    if (consensusRes.ok) {
+      const consensusData = await consensusRes.json();
+      
+      // Handle different response structures
+      let extractedConsensus = null;
+      
+      if (Array.isArray(consensusData)) {
+        extractedConsensus = consensusData.find((item: any) => 
+          item.ticker?.toUpperCase() === ticker.toUpperCase() || 
+          item.symbol?.toUpperCase() === ticker.toUpperCase()
+        ) || consensusData[0];
+      } else if (consensusData.consensus) {
+        extractedConsensus = consensusData.consensus;
+      } else if (consensusData[ticker.toUpperCase()]) {
+        extractedConsensus = consensusData[ticker.toUpperCase()];
+      } else if (consensusData.ratings && Array.isArray(consensusData.ratings)) {
+        extractedConsensus = consensusData.ratings.find((item: any) => 
+          item.ticker?.toUpperCase() === ticker.toUpperCase() || 
+          item.symbol?.toUpperCase() === ticker.toUpperCase()
+        ) || consensusData.ratings[0];
+      } else {
+        extractedConsensus = consensusData;
+      }
+      
+      if (extractedConsensus) {
+        const consensusPriceTarget = 
+          extractedConsensus.consensus_price_target ?? 
+          extractedConsensus.consensusPriceTarget ??
+          extractedConsensus.price_target ??
+          extractedConsensus.priceTarget ??
+          extractedConsensus.target ??
+          extractedConsensus.pt ??
+          extractedConsensus.consensus_target ??
+          null;
+        
+        const consensus = {
+          consensus_rating: extractedConsensus.consensus_rating || extractedConsensus.consensusRating || extractedConsensus.rating || null,
+          consensus_price_target: consensusPriceTarget,
+          high_price_target: extractedConsensus.high_price_target || extractedConsensus.highPriceTarget || extractedConsensus.high || extractedConsensus.high_target || null,
+          low_price_target: extractedConsensus.low_price_target || extractedConsensus.lowPriceTarget || extractedConsensus.low || extractedConsensus.low_target || null,
+          total_analyst_count: extractedConsensus.total_analyst_count || extractedConsensus.totalAnalystCount || extractedConsensus.analyst_count || extractedConsensus.count || null,
+          // Rating distributions
+          buy_percentage: extractedConsensus.buy_percentage || extractedConsensus.buyPercentage || extractedConsensus.buy || null,
+          hold_percentage: extractedConsensus.hold_percentage || extractedConsensus.holdPercentage || extractedConsensus.hold || null,
+          sell_percentage: extractedConsensus.sell_percentage || extractedConsensus.sellPercentage || extractedConsensus.sell || null,
+        };
+        
+        if (consensus.consensus_price_target || consensus.consensus_rating) {
+          console.log('WGO No News: Consensus ratings fetched:', consensus);
+          return consensus;
+        }
+      }
+    } else {
+      const errorText = await consensusRes.text().catch(() => '');
+      console.log('WGO No News: Consensus ratings API failed:', consensusRes.status, 'Error:', errorText.substring(0, 300));
+    }
+    
+    return null;
+  } catch (error) {
+    console.error('WGO No News: Error fetching consensus ratings:', error);
+    return null;
+  }
+}
+
+// Fetch next earnings date from Benzinga calendar
+async function fetchNextEarningsDate(ticker: string) {
+  try {
+    const BENZINGA_API_KEY = process.env.BENZINGA_API_KEY;
+    if (!BENZINGA_API_KEY) {
+      return null;
+    }
+
+    const today = new Date();
+    const dateFrom = today.toISOString().split('T')[0];
+    // Look ahead 180 days (6 months) for earnings dates
+    const dateTo = new Date(Date.now() + 180 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    
+    // Use the v2 calendar/earnings endpoint with proper parameters
+    const url = 'https://api.benzinga.com/api/v2/calendar/earnings' +
+      `?token=${BENZINGA_API_KEY}` +
+      `&parameters[tickers]=${encodeURIComponent(ticker)}` +
+      `&parameters[date_from]=${dateFrom}` +
+      `&parameters[date_to]=${dateTo}` +
+      `&pagesize=20`;
+    
+    console.log('WGO No News: Fetching earnings date from:', url);
+    const earningsRes = await fetch(url, {
+      headers: { accept: 'application/json' }
+    });
+      
+    if (earningsRes.ok) {
+      const raw = await earningsRes.text();
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(raw.trim());
+      } catch {
+        console.log('WGO No News: Earnings calendar: Invalid JSON response');
+        return null;
+      }
+      
+      // Handle different response structures (array or wrapped in object)
+      interface EarningsResponse {
+        earnings?: unknown[];
+        results?: unknown[];
+        data?: unknown[];
+      }
+      
+      const results: unknown[] = Array.isArray(parsed)
+        ? parsed
+        : ((parsed as EarningsResponse).earnings 
+          || (parsed as EarningsResponse).results 
+          || (parsed as EarningsResponse).data 
+          || []);
+      
+      // Find the earliest upcoming earnings date
+      interface EarningsItem {
+        date?: string;
+        earnings_date?: string;
+        earningsDate?: string;
+        eps_estimate?: number;
+        eps_prior?: number;
+        revenue_estimate?: number;
+        revenue_prior?: number;
+        [key: string]: unknown;
+      }
+      
+      const upcomingEarnings = results
+        .filter((item: unknown): item is EarningsItem => {
+          const earningsItem = item as EarningsItem;
+          const earningsDate = earningsItem.date || earningsItem.earnings_date || earningsItem.earningsDate;
+          if (!earningsDate) return false;
+          const date = new Date(earningsDate);
+          return date >= today;
+        })
+        .sort((a: EarningsItem, b: EarningsItem) => {
+          const dateA = new Date(a.date || a.earnings_date || a.earningsDate || 0);
+          const dateB = new Date(b.date || b.earnings_date || b.earningsDate || 0);
+          return dateA.getTime() - dateB.getTime();
+        });
+      
+      if (upcomingEarnings.length > 0) {
+        const nextEarnings = upcomingEarnings[0];
+        const earningsDate = nextEarnings.date || nextEarnings.earnings_date || nextEarnings.earningsDate;
+        if (earningsDate) {
+          const earningsData = {
+            date: earningsDate,
+            eps_estimate: nextEarnings.eps_estimate || null,
+            eps_prior: nextEarnings.eps_prior || null,
+            revenue_estimate: nextEarnings.revenue_estimate || null,
+            revenue_prior: nextEarnings.revenue_prior || null,
+          };
+          console.log('WGO No News: Next earnings data:', earningsData);
+          return earningsData;
+        }
+      }
+    } else {
+      const errorText = await earningsRes.text().catch(() => '');
+      console.log('WGO No News: Earnings calendar error:', errorText.substring(0, 300));
+    }
+    
+    return null;
+  } catch (error) {
+    console.error('WGO No News: Error fetching next earnings date:', error);
+    return null;
+  }
+}
+
 async function fetchStockData(ticker: string) {
   try {
     // Fetch up to 2 relevant recent articles
@@ -472,14 +663,22 @@ async function fetchStockData(ticker: string) {
       console.log('Using real analyst ratings data:', analystRatings);
     }
     
+    // Fetch consensus ratings and earnings date
+    const [consensusRatings, nextEarnings] = await Promise.all([
+      fetchConsensusRatings(ticker),
+      fetchNextEarningsDate(ticker)
+    ]);
+    
     return {
       priceAction,
       analystRatings,
       recentArticles, // Array of up to 2 articles
+      consensusRatings, // Consensus rating and price target
+      nextEarnings, // Next earnings date and estimates
     };
   } catch (error) {
     console.error('Error fetching stock data:', error);
-    return { priceAction: null, analystRatings: [], recentArticles: [] };
+    return { priceAction: null, analystRatings: [], recentArticles: [], consensusRatings: null, nextEarnings: null };
   }
 }
 
@@ -575,7 +774,37 @@ TECHNICAL ANALYSIS PARAGRAPH 2 (RSI AND MACD): Write a single paragraph that com
 
 TECHNICAL ANALYSIS PARAGRAPH 3 (SUPPORT/RESISTANCE AND TRADING ADVICE): Write a single paragraph that includes: (1) Key support and resistance levels if available, rounded to nearest $0.50 (e.g., "Key support is at $265.50, while resistance is at $277.00"), and (2) Trading advice/insight (e.g., "Traders should keep an eye on the support and resistance levels, as well as the momentum indicators, to gauge the stock's next moves. The current technical setup suggests that while the stock has shown resilience, caution is warranted as it navigates these key levels"). Keep this to 2-3 sentences maximum.
 
-5. PRICE ACTION LINE (at the end):
+${stockData.consensusRatings || stockData.nextEarnings ? `
+5. EARNINGS AND ANALYST OUTLOOK SECTION (forward-looking):
+After the technical analysis section, include a forward-looking section that anticipates the upcoming earnings report and provides analyst outlook. This section should be forward-looking and set expectations.
+
+${stockData.nextEarnings ? `
+UPCOMING EARNINGS DATA:
+- Next Earnings Date: ${new Date(stockData.nextEarnings.date).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
+${stockData.nextEarnings.eps_estimate ? `- EPS Estimate: $${parseFloat(stockData.nextEarnings.eps_estimate.toString()).toFixed(2)}` : ''}
+${stockData.nextEarnings.eps_prior ? `- Previous EPS: $${parseFloat(stockData.nextEarnings.eps_prior.toString()).toFixed(2)}` : ''}
+${stockData.nextEarnings.revenue_estimate ? `- Revenue Estimate: $${(parseFloat(stockData.nextEarnings.revenue_estimate.toString()) / 1000000).toFixed(2)}M` : ''}
+${stockData.nextEarnings.revenue_prior ? `- Previous Revenue: $${(parseFloat(stockData.nextEarnings.revenue_prior.toString()) / 1000000).toFixed(2)}M` : ''}
+
+CRITICAL: Write a forward-looking paragraph (2 sentences) that anticipates the upcoming earnings report. Mention the earnings date and any estimates if available. Format: "Investors are looking ahead to the company's next earnings report, scheduled for ${new Date(stockData.nextEarnings.date).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}. ${stockData.nextEarnings.eps_estimate ? `Analysts are expecting earnings per share of $${parseFloat(stockData.nextEarnings.eps_estimate.toString()).toFixed(2)}${stockData.nextEarnings.eps_prior ? `, compared to $${parseFloat(stockData.nextEarnings.eps_prior.toString()).toFixed(2)} in the previous quarter` : ''}.` : 'The report will provide key insights into the company\'s financial performance and outlook.'}"
+` : ''}
+
+${stockData.consensusRatings ? `
+ANALYST OUTLOOK DATA:
+- Consensus Rating: ${stockData.consensusRatings.consensus_rating ? stockData.consensusRatings.consensus_rating.charAt(0) + stockData.consensusRatings.consensus_rating.slice(1).toLowerCase() : 'N/A'}
+- Consensus Price Target: ${stockData.consensusRatings.consensus_price_target ? '$' + parseFloat(stockData.consensusRatings.consensus_price_target.toString()).toFixed(2) : 'N/A'}
+${stockData.consensusRatings.high_price_target ? `- High Price Target: $${parseFloat(stockData.consensusRatings.high_price_target.toString()).toFixed(2)}` : ''}
+${stockData.consensusRatings.low_price_target ? `- Low Price Target: $${parseFloat(stockData.consensusRatings.low_price_target.toString()).toFixed(2)}` : ''}
+${stockData.consensusRatings.total_analyst_count ? `- Total Analysts: ${stockData.consensusRatings.total_analyst_count}` : ''}
+${stockData.consensusRatings.buy_percentage ? `- Buy Rating: ${parseFloat(stockData.consensusRatings.buy_percentage.toString()).toFixed(1)}%` : ''}
+${stockData.consensusRatings.hold_percentage ? `- Hold Rating: ${parseFloat(stockData.consensusRatings.hold_percentage.toString()).toFixed(1)}%` : ''}
+${stockData.consensusRatings.sell_percentage ? `- Sell Rating: ${parseFloat(stockData.consensusRatings.sell_percentage.toString()).toFixed(1)}%` : ''}
+
+CRITICAL: Write a forward-looking paragraph (2 sentences) about analyst outlook. Include the consensus rating and price target. Format: "${stockData.priceAction?.companyName || ticker} has a consensus ${stockData.consensusRatings.consensus_rating ? stockData.consensusRatings.consensus_rating.charAt(0) + stockData.consensusRatings.consensus_rating.slice(1).toLowerCase() : 'N/A'} rating among analysts${stockData.consensusRatings.consensus_price_target ? ` with an average price target of $${parseFloat(stockData.consensusRatings.consensus_price_target.toString()).toFixed(2)}` : ''}. ${stockData.consensusRatings.buy_percentage ? `The analyst community shows ${parseFloat(stockData.consensusRatings.buy_percentage.toString()).toFixed(0)}% buy ratings, ` : ''}${stockData.consensusRatings.total_analyst_count ? `with ${stockData.consensusRatings.total_analyst_count} analysts covering the stock.` : 'Analysts are monitoring the stock\'s performance ahead of the upcoming earnings report.'}"
+` : ''}
+` : ''}
+
+6. PRICE ACTION LINE (at the end):
 - Format: "[TICKER] Price Action: [Company Name] shares were [up/down] [X.XX]% at $[XX.XX] [during premarket trading/during after-hours trading/while the market was closed] on [Day], according to <a href=\"https://pro.benzinga.com\">Benzinga Pro</a>."
 - All prices must be formatted to exactly 2 decimal places
 

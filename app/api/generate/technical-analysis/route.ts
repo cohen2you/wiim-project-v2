@@ -2504,7 +2504,8 @@ async function fetchConsensusRatings(ticker: string) {
     params.append('token', BENZINGA_API_KEY);
     params.append('parameters[tickers]', ticker);
     
-    const consensusUrl = `https://api.benzinga.com/api/v2/consensus-ratings?${params.toString()}`;
+    // Use calendar/consensus-ratings endpoint as specified
+    const consensusUrl = `https://api.benzinga.com/api/v2/calendar/consensus-ratings?${params.toString()}`;
     
     const consensusRes = await fetch(consensusUrl, {
       method: 'GET',
@@ -2641,7 +2642,14 @@ async function fetchNextEarningsDate(ticker: string) {
         const nextEarnings = upcomingEarnings[0];
         const earningsDate = nextEarnings.date || nextEarnings.earnings_date || nextEarnings.earningsDate;
         if (earningsDate) {
-          return earningsDate;
+          // Return full earnings data including estimates
+          return {
+            date: earningsDate,
+            eps_estimate: nextEarnings.eps_estimate || nextEarnings.epsEstimate || null,
+            eps_prior: nextEarnings.eps_prior || nextEarnings.epsPrior || null,
+            revenue_estimate: nextEarnings.revenue_estimate || nextEarnings.revenueEstimate || null,
+            revenue_prior: nextEarnings.revenue_prior || nextEarnings.revenuePrior || null,
+          };
         }
       }
     } else {
@@ -2696,10 +2704,13 @@ async function generateTechnicalAnalysis(data: TechnicalAnalysisData, provider?:
     const sp500Change = marketContext?.indices.find(idx => idx.ticker === 'SPY')?.change || null;
 
     // Fetch consensus ratings and earnings date for analyst overview and P/E sections
-    const [consensusRatings, nextEarningsDate] = await Promise.all([
+    const [consensusRatings, nextEarnings] = await Promise.all([
       fetchConsensusRatings(data.symbol),
       fetchNextEarningsDate(data.symbol)
     ]);
+    
+    // Handle earnings data - could be string (old format) or object (new format)
+    const nextEarningsDate = typeof nextEarnings === 'string' ? nextEarnings : nextEarnings?.date || null;
 
     // Fetch P/E ratio from Benzinga quote API
     let peRatio: number | null = null;
@@ -3081,29 +3092,41 @@ ${data.turningPoints?.supportBreakDate ? `- Price broke below support on ${data.
 
 ${!data.turningPoints || Object.keys(data.turningPoints).length === 0 ? '- No significant turning points identified in the past year' : ''}
 
-${consensusRatings && (consensusRatings.consensus_rating || consensusRatings.consensus_price_target) ? `
-ANALYST OVERVIEW:
+${consensusRatings || nextEarnings ? `
+EARNINGS AND ANALYST OUTLOOK SECTION (forward-looking):
+After the technical analysis section, include a forward-looking section that anticipates the upcoming earnings report and provides analyst outlook. This section should be forward-looking and set expectations.
 
+${nextEarnings ? `
+UPCOMING EARNINGS DATA:
+- Next Earnings Date: ${typeof nextEarnings === 'object' && nextEarnings.date ? new Date(nextEarnings.date).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : nextEarningsDate ? new Date(nextEarningsDate).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : 'Not available'}
+${typeof nextEarnings === 'object' && nextEarnings.eps_estimate ? `- EPS Estimate: $${parseFloat(nextEarnings.eps_estimate.toString()).toFixed(2)}` : ''}
+${typeof nextEarnings === 'object' && nextEarnings.eps_prior ? `- Previous EPS: $${parseFloat(nextEarnings.eps_prior.toString()).toFixed(2)}` : ''}
+${typeof nextEarnings === 'object' && nextEarnings.revenue_estimate ? `- Revenue Estimate: $${(parseFloat(nextEarnings.revenue_estimate.toString()) / 1000000).toFixed(2)}M` : ''}
+${typeof nextEarnings === 'object' && nextEarnings.revenue_prior ? `- Previous Revenue: $${(parseFloat(nextEarnings.revenue_prior.toString()) / 1000000).toFixed(2)}M` : ''}
+
+CRITICAL: Write a forward-looking paragraph (2 sentences) that anticipates the upcoming earnings report. Mention the earnings date and any estimates if available. Format: "Investors are looking ahead to the company's next earnings report, scheduled for ${typeof nextEarnings === 'object' && nextEarnings.date ? new Date(nextEarnings.date).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : nextEarningsDate ? new Date(nextEarningsDate).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : 'a date to be announced'}. ${typeof nextEarnings === 'object' && nextEarnings.eps_estimate ? `Analysts are expecting earnings per share of $${parseFloat(nextEarnings.eps_estimate.toString()).toFixed(2)}${typeof nextEarnings === 'object' && nextEarnings.eps_prior ? `, compared to $${parseFloat(nextEarnings.eps_prior.toString()).toFixed(2)} in the previous quarter` : ''}.` : 'The report will provide key insights into the company\'s financial performance and outlook.'}"
+` : ''}
+
+${consensusRatings ? `
+ANALYST OUTLOOK DATA:
 - Consensus Rating: ${consensusRatings.consensus_rating ? consensusRatings.consensus_rating.charAt(0) + consensusRatings.consensus_rating.slice(1).toLowerCase() : 'N/A'}
 - Consensus Price Target: ${consensusRatings.consensus_price_target ? '$' + parseFloat(consensusRatings.consensus_price_target.toString()).toFixed(2) : 'N/A'}
+${consensusRatings.high_price_target ? `- High Price Target: $${parseFloat(consensusRatings.high_price_target.toString()).toFixed(2)}` : ''}
+${consensusRatings.low_price_target ? `- Low Price Target: $${parseFloat(consensusRatings.low_price_target.toString()).toFixed(2)}` : ''}
+${consensusRatings.total_analyst_count ? `- Total Analysts: ${consensusRatings.total_analyst_count}` : ''}
+${consensusRatings.buy_percentage ? `- Buy Rating: ${parseFloat(consensusRatings.buy_percentage.toString()).toFixed(1)}%` : ''}
+${consensusRatings.hold_percentage ? `- Hold Rating: ${parseFloat(consensusRatings.hold_percentage.toString()).toFixed(1)}%` : ''}
+${consensusRatings.sell_percentage ? `- Sell Rating: ${parseFloat(consensusRatings.sell_percentage.toString()).toFixed(1)}%` : ''}
 
-CRITICAL: After the technical analysis section, include a one-line analyst overview statement. Format: "${data.companyName || data.symbol} has a consensus ${consensusRatings.consensus_rating ? consensusRatings.consensus_rating.charAt(0) + consensusRatings.consensus_rating.slice(1).toLowerCase() : 'N/A'} rating among analysts${consensusRatings.consensus_price_target ? ` with an average price target of $${parseFloat(consensusRatings.consensus_price_target.toString()).toFixed(2)}` : ''}."
+CRITICAL: Write a forward-looking paragraph (2 sentences) about analyst outlook. Include the consensus rating and price target. Format: "${data.companyName || data.symbol} has a consensus ${consensusRatings.consensus_rating ? consensusRatings.consensus_rating.charAt(0) + consensusRatings.consensus_rating.slice(1).toLowerCase() : 'N/A'} rating among analysts${consensusRatings.consensus_price_target ? ` with an average price target of $${parseFloat(consensusRatings.consensus_price_target.toString()).toFixed(2)}` : ''}. ${consensusRatings.buy_percentage ? `The analyst community shows ${parseFloat(consensusRatings.buy_percentage.toString()).toFixed(0)}% buy ratings, ` : ''}${consensusRatings.total_analyst_count ? `with ${consensusRatings.total_analyst_count} analysts covering the stock.` : 'Analysts are monitoring the stock\'s performance ahead of the upcoming earnings report.'}"
 ` : ''}
 
 ${peRatio !== null ? `
-P/E RATIO AND EARNINGS:
-
+P/E RATIO CONTEXT:
 - Current P/E Ratio: ${peRatio.toFixed(1)}
-- Next Earnings Date: ${nextEarningsDate ? new Date(nextEarningsDate).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : 'Not available'}
 
-CRITICAL: After the analyst overview section (if present), include P/E ratio information. State the P/E ratio and add a comparison to the sector. Format: "At current levels, the P/E ratio of ${peRatio.toFixed(1)} suggests the stock is ${peRatio > 25 ? 'overvalued' : peRatio < 15 ? 'undervalued' : 'fairly valued'} relative to peers." If next earnings date is available, include it at the end of this section: "The company is scheduled to report earnings on ${nextEarningsDate ? new Date(nextEarningsDate).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : 'a date to be announced'}."
-` : nextEarningsDate ? `
-P/E RATIO AND EARNINGS:
-
-- Current P/E Ratio: Not available
-- Next Earnings Date: ${new Date(nextEarningsDate).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
-
-CRITICAL: After the analyst overview section (if present), include earnings information if available. Include the next earnings date: "The company is scheduled to report earnings on ${new Date(nextEarningsDate).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}."
+CRITICAL: If P/E ratio is available, include it in the analyst outlook section. Format: "At current levels, the P/E ratio of ${peRatio.toFixed(1)} suggests the stock is ${peRatio > 25 ? 'overvalued' : peRatio < 15 ? 'undervalued' : 'fairly valued'} relative to peers."
+` : ''}
 ` : ''}
 
 ${newsContext && (newsContext.scrapedContent || (newsContext.selectedArticles && newsContext.selectedArticles.length > 0)) ? `
