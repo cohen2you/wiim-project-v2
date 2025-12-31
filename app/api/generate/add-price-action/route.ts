@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { preserveHyperlinks, ensureProperPriceActionPlacement } from '../../../../lib/hyperlink-preservation';
+import { fetchETFs, formatETFInfo } from '@/lib/etf-utils';
 
 // Helper function to fetch price data
 async function fetchPriceData(ticker: string) {
@@ -205,6 +206,27 @@ function generatePriceActionLine(ticker: string, priceData: any): string {
   }
 }
 
+// Enhanced price action line generator with ETF information
+async function generatePriceActionLineWithETFs(ticker: string, priceData: any): Promise<string> {
+  const basePriceAction = generatePriceActionLine(ticker, priceData);
+  
+  // Fetch and append ETF information
+  try {
+    const etfs = await fetchETFs(ticker);
+    if (etfs && etfs.length > 0) {
+      const etfInfo = formatETFInfo(etfs);
+      if (etfInfo) {
+        return basePriceAction + etfInfo;
+      }
+    }
+  } catch (etfError) {
+    console.error(`Error fetching ETF data for ${ticker}:`, etfError);
+    // Continue without ETF info if there's an error
+  }
+  
+  return basePriceAction;
+}
+
 
 
 // Helper function to remove existing Price Action lines
@@ -229,8 +251,8 @@ export async function POST(request: Request) {
     // Get current price data for the price action line
     const priceData = await fetchPriceData(ticker);
     
-    // Add price action line at the bottom
-    const priceActionLine = generatePriceActionLine(ticker, priceData);
+    // Add price action line at the bottom (with ETF information)
+    const priceActionLine = await generatePriceActionLineWithETFs(ticker, priceData);
     
     // Combine story with price action line
     let completeStory = story;

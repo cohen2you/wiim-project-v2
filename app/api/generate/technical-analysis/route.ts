@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 
 import { aiProvider, AIProvider } from '@/lib/aiProvider';
+import { fetchETFs, formatETFInfo } from '@/lib/etf-utils';
 
 const BZ_NEWS_URL = 'https://api.benzinga.com/api/v2/news';
 
@@ -256,84 +257,15 @@ async function generatePriceAction(ticker: string): Promise<string> {
       }
     }
     
-    let priceActionText = '';
+    // Calculate change percent
+    const changePercent = regularSessionChange !== 0 ? regularSessionChange : (typeof quote.changePercent === 'number' ? quote.changePercent : 0);
+    const upDown = changePercent > 0 ? 'up' : changePercent < 0 ? 'down' : 'unchanged';
+    const absChange = Math.abs(changePercent).toFixed(2);
+    const displayPrice = formatPriceValue(regularSessionClose || quoteClose || quote.lastTradePrice);
     
-    // When markets are closed (holiday/weekend), use previous trading day's regular session data
-    if (marketStatus === 'closed' && regularSessionChange !== 0) {
-      // Markets are closed: show previous trading day's regular session close
-      const regularUpDown = regularSessionChange > 0 ? 'up' : regularSessionChange < 0 ? 'down' : 'unchanged';
-      const absRegularChange = Math.abs(regularSessionChange).toFixed(2);
-      // Use the regular session close price, not the current lastTradePrice
-      const closePrice = formatPriceValue(regularSessionClose || quoteClose || quote.lastTradePrice);
-      priceActionText = `<strong>${symbol} Price Action:</strong> ${companyName} shares were ${regularUpDown} ${absRegularChange}% at $${closePrice}${marketStatusPhrase} on ${dayOfWeek}`;
-    } else if (marketStatus === 'premarket' && premarketChange !== 0) {
-      // Premarket: use premarket change
-      const premarketUpDown = premarketChange > 0 ? 'up' : premarketChange < 0 ? 'down' : 'unchanged';
-      const absPremarketChange = Math.abs(premarketChange).toFixed(2);
-      priceActionText = `<strong>${symbol} Price Action:</strong> ${companyName} shares were ${premarketUpDown} ${absPremarketChange}% at $${lastPrice}${marketStatusPhrase} on ${dayOfWeek}`;
-    } else if (marketStatus === 'afterhours' && hasAfterHoursData && regularSessionChange !== 0) {
-      // After-hours: show both regular session and after-hours changes
-      const regularUpDown = regularSessionChange > 0 ? 'up' : regularSessionChange < 0 ? 'down' : 'unchanged';
-      const afterHoursUpDown = afterHoursChange > 0 ? 'up' : afterHoursChange < 0 ? 'down' : 'unchanged';
-      const absRegularChange = Math.abs(regularSessionChange).toFixed(2);
-      const absAfterHoursChange = Math.abs(afterHoursChange).toFixed(2);
-      priceActionText = `<strong>${symbol} Price Action:</strong> ${companyName} shares were ${regularUpDown} ${absRegularChange}% during regular trading and ${afterHoursUpDown} ${absAfterHoursChange}% in after-hours trading on ${dayOfWeek}, last trading at $${lastPrice}`;
-    } else if (regularSessionChange !== 0) {
-      // Regular trading (open): use regular session change
-      const regularUpDown = regularSessionChange > 0 ? 'up' : regularSessionChange < 0 ? 'down' : 'unchanged';
-      const absRegularChange = Math.abs(regularSessionChange).toFixed(2);
-      if (marketStatus === 'open') {
-        priceActionText = `<strong>${symbol} Price Action:</strong> ${companyName} shares were ${regularUpDown} ${absRegularChange}% at $${lastPrice} at the time of publication on ${dayOfWeek}`;
-      } else {
-        priceActionText = `<strong>${symbol} Price Action:</strong> ${companyName} shares were ${regularUpDown} ${absRegularChange}% at $${lastPrice}${marketStatusPhrase} on ${dayOfWeek}`;
-      }
-    } else {
-      // Fallback: use changePercent if regular session calculation failed
-      const changePercent = typeof quote.changePercent === 'number' ? quote.changePercent : 0;
-      const upDown = changePercent > 0 ? 'up' : changePercent < 0 ? 'down' : 'unchanged';
-      const absChange = Math.abs(changePercent).toFixed(2);
-      console.log(`[PRICE ACTION] Fallback to changePercent: ${changePercent.toFixed(2)}%`);
-      if (marketStatus === 'open') {
-        priceActionText = `<strong>${symbol} Price Action:</strong> ${companyName} shares were ${upDown} ${absChange}% at $${lastPrice} at the time of publication on ${dayOfWeek}`;
-    } else {
-      priceActionText = `<strong>${symbol} Price Action:</strong> ${companyName} shares were ${upDown} ${absChange}% at $${lastPrice}${marketStatusPhrase} on ${dayOfWeek}`;
-      }
-    }
-    
-    // Add 52-week range context if available
-    if (quote.fiftyTwoWeekLow && quote.fiftyTwoWeekHigh && quote.lastTradePrice) {
-      const currentPrice = quote.lastTradePrice;
-      const yearLow = quote.fiftyTwoWeekLow;
-      const yearHigh = quote.fiftyTwoWeekHigh;
-      
-      let rangeText = '';
-      
-      if (currentPrice > yearHigh) {
-        rangeText = `. The stock is trading at a new 52-week high`;
-      } else if (currentPrice < yearLow) {
-        rangeText = `. The stock is trading at a new 52-week low`;
-      } else {
-        const rangePosition = (currentPrice - yearLow) / (yearHigh - yearLow);
-        
-        if (rangePosition >= 0.95) {
-          rangeText = `. The stock is trading near its 52-week high of $${formatPriceValue(yearHigh)}`;
-        } else if (rangePosition <= 0.03) {
-          rangeText = `. The stock is trading near its 52-week low of $${formatPriceValue(yearLow)}`;
-        } else if (rangePosition >= 0.90) {
-          rangeText = `. The stock is approaching its 52-week high of $${formatPriceValue(yearHigh)}`;
-        } else if (rangePosition <= 0.05) {
-          rangeText = `. The stock is near its 52-week low of $${formatPriceValue(yearLow)}`;
-        }
-      }
-      
-      if (rangeText) {
-        priceActionText += rangeText;
-      }
-    }
-    
-    priceActionText += ', according to Benzinga Pro data.';
-    
-    return priceActionText;
+    // Build simple 1-sentence price action: Current Price, % Change (no volume)
+    // Note: dayOfWeek is already calculated earlier in the function
+    return `<strong>${symbol} Price Action:</strong> ${companyName} shares were ${upDown} ${absChange}% at $${displayPrice} at the time of publication on ${dayOfWeek}, according to Benzinga Pro data.`;
   } catch (error) {
     console.error(`Error generating price action for ${ticker}:`, error);
     return '';
@@ -3265,10 +3197,12 @@ EARNINGS AND ANALYST OUTLOOK SECTION (forward-looking):
 After the technical analysis section, you MUST include a separate section with the header "## Section: Earnings & Analyst Outlook". This section should be forward-looking and help investors understand both the stock's value proposition and how analysts view it.
 
 CRITICAL INSTRUCTIONS FOR THIS SECTION:
-- Weave earnings data and analyst data together into a cohesive narrative (2-3 sentences total)
+- Start with a brief introductory sentence (1 sentence max) about the earnings date
+- Then present key data points as separate lines (not HTML bullets) with bold labels
+- Format: Use <strong> tags to bold the labels (EPS Estimate, Revenue Estimate, Analyst Consensus), followed by the data on the same line
+- Each data point should be on its own line with a blank line between them
 - Focus on helping investors understand: (1) whether the stock represents good value, and (2) how analysts view the stock
-- Connect earnings expectations with analyst sentiment - do analysts see value ahead of earnings?
-- If P/E ratio is available, use it to assess value in context of analyst price targets
+- CRITICAL: When mentioning the price target in the intro sentence, compare it to the current price. If price target is BELOW current price, say "suggesting the stock may be trading at a premium relative to analyst expectations" instead of "indicating potential upside"
 - Make it forward-looking and actionable for investors
 
 ${nextEarnings ? `
@@ -3299,10 +3233,16 @@ P/E RATIO CONTEXT:
 - Valuation Assessment: ${peRatio > 25 ? 'Overvalued' : peRatio < 15 ? 'Undervalued' : 'Fairly valued'} relative to peers
 ` : ''}
 
-CRITICAL: Write 2-3 sentences that INTEGRATE all available data (earnings, analyst consensus, P/E ratio) into a cohesive narrative. Do NOT write separate sentences for each data point. Instead, weave them together to help investors understand:
-1. Whether the stock represents good value (use P/E ratio and analyst price targets to assess this)
-2. How analysts view the stock (consensus rating, buy/hold/sell distribution)
-3. What to watch for ahead of earnings (if earnings date is available)
+CRITICAL FORMATTING REQUIREMENTS:
+- Start with ONE introductory sentence (e.g., "Investors are looking ahead to the company's next earnings report on [DATE].")
+- Then format the data as separate lines (not HTML bullets) with bold labels
+- Each data point should be on its own line with a blank line between them
+- Format example:
+  <strong>EPS Estimate</strong>: $X.XX (Up/Down from $X.XX YoY)
+
+  <strong>Revenue Estimate</strong>: $X.XX Billion (Up/Down from $X.XX Billion YoY)
+
+  <strong>Analyst Consensus</strong>: [Rating] Rating ($X.XX Avg Price Target)
 
 IMPORTANT: CRITICAL RULE - Only mention "analysts expecting earnings per share" if eps_estimate is actually available. Do NOT use eps_prior (same quarter from prior year) as an expectation. eps_prior is only for comparison purposes when eps_estimate exists. If eps_estimate is null/not available, do NOT write "analysts expecting earnings per share" - instead, just mention the earnings date without specific estimates.
 
@@ -3537,7 +3477,14 @@ Example of INCORRECT first paragraph (DO NOT DO THIS): "**Rocket Lab Corporation
 
 - TECHNICAL ANALYSIS PARAGRAPH 2 (RSI AND MACD): Write a single paragraph that combines: (1) RSI level and interpretation (e.g., "The RSI is at 44.45, which is considered neutral territory"), and (2) MACD status (e.g., "Meanwhile, MACD is below its signal line, indicating bearish pressure on the stock"). Keep this to 2 sentences maximum. STOP AFTER THIS PARAGRAPH.
 
-- TECHNICAL ANALYSIS PARAGRAPH 3 (SUPPORT/RESISTANCE AND TRADING ADVICE): Write a single paragraph that includes: (1) Key support and resistance levels rounded to nearest $0.50 (e.g., "Key support is at $265.50, while resistance is at $277.00"), and (2) Trading advice/insight (e.g., "Traders should keep an eye on the support and resistance levels, as well as the momentum indicators, to gauge the stock's next moves. The current technical setup suggests that while AAPL has shown resilience, caution is warranted as it navigates these key levels"). Keep this to 2-3 sentences maximum. STOP AFTER THIS PARAGRAPH.
+- TECHNICAL ANALYSIS PARAGRAPH 3 (RSI/MACD SUMMARY): Write a single sentence that summarizes the RSI and MACD signals (e.g., "The combination of neutral RSI and bearish MACD suggests mixed momentum"). Keep this to 1 sentence maximum. STOP AFTER THIS PARAGRAPH.
+
+- KEY LEVELS (MANDATORY): After paragraph 3, you MUST extract and display the key support and resistance levels in a clear, scannable format. Format as bullet points using HTML <ul> and <li> tags:
+<ul>
+<li><strong>Key Resistance</strong>: $XXX.XX</li>
+<li><strong>Key Support</strong>: $XXX.XX</li>
+</ul>
+These should be clearly labeled, rounded to the nearest $0.50, and formatted as bullet points. This format helps with SEO and Featured Snippets.
 
 CRITICAL: After these technical analysis paragraphs, move directly to any additional content (analyst ratings/earnings section if applicable) and then end with the "## Section: Price Action" marker. Do NOT write any paragraph or content in the Price Action section - just place the section marker. The price action line is automatically generated and added after your article. Do NOT add more technical analysis paragraphs beyond these three.
 
@@ -3966,10 +3913,38 @@ export async function POST(request: Request) {
         const analysis = await generateTechnicalAnalysis(technicalData, aiProvider, newsContext, marketContext);
         
         // Generate price action and append to analysis
+        // Fetch ETF information first
+        let etfInfo = '';
+        try {
+          const etfs = await fetchETFs(ticker);
+          if (etfs && etfs.length > 0) {
+            etfInfo = formatETFInfo(etfs);
+          }
+        } catch (etfError) {
+          console.error(`Error fetching ETF data for ${ticker}:`, etfError);
+        }
+        
+        // Generate price action
         const priceAction = await generatePriceAction(ticker);
-        let analysisWithPriceAction = priceAction 
-          ? `${analysis}\n\n${priceAction}`
-          : analysis;
+        
+        // Remove any AI-generated "## Section: Price Action" marker from the end of analysis
+        // since we're adding it ourselves with the actual price action line
+        let cleanAnalysis = analysis.trim();
+        const priceActionMarkerPattern = /##\s*Section:\s*Price Action\s*$/i;
+        cleanAnalysis = cleanAnalysis.replace(priceActionMarkerPattern, '').trim();
+        
+        // Build the final content: analysis + ETF section (if available) + Price Action section + price action line
+        let analysisWithPriceAction = cleanAnalysis;
+        
+        // Add ETF section before price action if available
+        if (etfInfo) {
+          analysisWithPriceAction += etfInfo;
+        }
+        
+        // Add Price Action section marker and price action line
+        if (priceAction) {
+          analysisWithPriceAction += `\n\n## Section: Price Action\n\n${priceAction}`;
+        }
 
         // Fetch related articles and add "Also Read" and "Read Next" sections
         const excludeUrl = newsContext?.newsUrl || (newsContext?.selectedArticles && newsContext.selectedArticles[0]?.url) || undefined;
@@ -4009,6 +3984,18 @@ export async function POST(request: Request) {
               // Plain text format: split by double newlines
               paragraphs = analysisWithPriceAction.split(/\n\s*\n/).filter(p => p.trim().length > 0);
             }
+            
+            // Remove any existing "Also Read" text from the AI output first
+            paragraphs = paragraphs.filter(p => {
+              const trimmed = p.trim();
+              // Remove standalone "Also Read" lines (without links or not properly formatted)
+              if (trimmed === 'Also Read' || trimmed === 'Also Read:' || 
+                  (trimmed.includes('Also Read') && !trimmed.includes('<a href'))) {
+                console.log(`[CLEANUP] Removing standalone "Also Read" text: "${trimmed}"`);
+                return false;
+              }
+              return true;
+            });
             
             // Insert "Also Read" after the first paragraph (index 1)
             if (paragraphs.length >= 1) {
@@ -4053,9 +4040,20 @@ export async function POST(request: Request) {
                     continue;
                   }
                   
-                  // Keep "Also Read" section
-                  if (line.includes('Also Read:')) {
-                    cleanedLines.push(lines[i]);
+                  // Keep "Also Read" section (only the properly formatted one with link)
+                  if (line.includes('Also Read')) {
+                    // Check if this is a properly formatted "Also Read" (has link)
+                    const hasLink = line.includes('<a href');
+                    // Check if we already have a properly formatted "Also Read" section
+                    const hasExistingAlsoRead = cleanedLines.some(l => l.includes('Also Read') && l.includes('<a href'));
+                    
+                    if (hasLink && !hasExistingAlsoRead) {
+                      // This is the first properly formatted "Also Read" with link - keep it
+                      cleanedLines.push(lines[i]);
+                    } else {
+                      // This is a duplicate or standalone "Also Read" without link - remove it
+                      console.log(`[CLEANUP] Removing duplicate or standalone "Also Read" line: "${line}"`);
+                    }
                     continue;
                   }
                   
@@ -4214,41 +4212,191 @@ export async function POST(request: Request) {
             }
           }
           
-          // First, ensure "## Section: Price Action" marker exists before price action line
+          // Note: ETF section and Price Action section are now added earlier in the code
+          // We no longer need to insert the section marker here since it's handled above
           
-          // Find the price action line position
-          const priceActionRegex = /<strong>.*?Price Action:<\/strong>/i;
-          const priceActionMatch = analysisWithPriceAction.match(priceActionRegex);
-          let priceActionIndex = -1;
-          if (priceActionMatch && priceActionMatch.index !== undefined) {
-            priceActionIndex = priceActionMatch.index;
+          // Post-process Earnings & Analyst Outlook section to format with bold labels
+          const earningsSectionMarker = /##\s*Section:\s*Earnings\s*&\s*Analyst\s*Outlook/i;
+          const earningsSectionMatch = analysisWithPriceAction.match(earningsSectionMarker);
+          console.log('[EARNINGS FORMAT] Checking for Earnings section marker:', !!earningsSectionMatch);
+          if (earningsSectionMatch && earningsSectionMatch.index !== undefined) {
+            const afterEarningsMarker = analysisWithPriceAction.substring(earningsSectionMatch.index + earningsSectionMatch[0].length);
+            const nextSectionMatch = afterEarningsMarker.match(/(##\s*Section:|##\s*Top\s*ETF|Price Action:)/i);
+            const earningsSectionEnd = nextSectionMatch ? nextSectionMatch.index! : afterEarningsMarker.length;
+            const earningsContent = afterEarningsMarker.substring(0, earningsSectionEnd).trim();
+            
+            console.log('[EARNINGS FORMAT] Earnings content length:', earningsContent.length);
+            console.log('[EARNINGS FORMAT] Already formatted?', earningsContent.includes('<strong>EPS Estimate</strong>'));
+            
+            // Check if content is already formatted (has bullet points with <strong> tags for labels)
+            if (!earningsContent.includes('<ul>') && !earningsContent.includes('<strong>EPS Estimate</strong>') && !earningsContent.includes('<strong>Revenue Estimate</strong>')) {
+              // Extract earnings data from the content - handle multiple date patterns
+              // Try multiple patterns for date extraction
+              // First try to match full date format: "on February 26, 2026"
+              let earningsDateMatch = earningsContent.match(/(?:scheduled for|on|report on|earnings report on) ([A-Za-z]+ \d{1,2}, \d{4})/i);
+              if (!earningsDateMatch) {
+                // Fallback to partial date: "on February 26"
+                earningsDateMatch = earningsContent.match(/(?:scheduled for|on|report on|earnings report on) ([^,]+?)(?:,|\.|$)/i);
+              }
+              
+              const epsEstimateMatch = earningsContent.match(/earnings per share of \$([\d.-]+)/i);
+              const epsPriorMatch = earningsContent.match(/(?:up from|down from|compared to|from the same quarter last year) \$([\d.-]+)/i);
+              const revenueEstimateMatch = earningsContent.match(/revenue of (\$[\d.]+[BM])/i);
+              const revenuePriorMatch = earningsContent.match(/revenue.*?(?:up from|down from|compared to|from the same quarter last year|from the prior-year period) (\$[\d.]+[BM])/i);
+              const consensusRatingMatch = earningsContent.match(/(?:consensus|has a) ([A-Za-z]+) rating/i);
+              const priceTargetMatch = earningsContent.match(/price target of \$([\d.]+)/i);
+              
+              console.log('[EARNINGS FORMAT] Extracting data:', {
+                hasDate: !!earningsDateMatch,
+                dateMatch: earningsDateMatch ? earningsDateMatch[1] : null,
+                hasEPS: !!epsEstimateMatch,
+                hasRevenue: !!revenueEstimateMatch,
+                hasConsensus: !!consensusRatingMatch,
+                hasPriceTarget: !!priceTargetMatch,
+                contentSample: earningsContent.substring(0, 300)
+              });
+              
+              // Build formatted lines with bold labels (plain text format, not HTML bullets)
+              const lines: string[] = [];
+              
+              if (earningsDateMatch && earningsDateMatch[1]) {
+                const intro = `Investors are looking ahead to the next earnings report on ${earningsDateMatch[1].trim()}.`;
+                
+                if (epsEstimateMatch) {
+                  const epsEst = epsEstimateMatch[1];
+                  const epsPrior = epsPriorMatch ? epsPriorMatch[1] : null;
+                  const direction = epsPrior ? (parseFloat(epsEst) > parseFloat(epsPrior) ? 'Up' : parseFloat(epsEst) < parseFloat(epsPrior) ? 'Down' : '') : '';
+                  lines.push(`<strong>EPS Estimate</strong>: $${epsEst}${epsPrior && direction ? ` (${direction} from $${epsPrior} YoY)` : ''}`);
+                }
+                
+                if (revenueEstimateMatch) {
+                  const revEst = revenueEstimateMatch[1];
+                  const revPrior = revenuePriorMatch ? revenuePriorMatch[1] : null;
+                  const direction = revPrior ? (parseFloat(revEst.replace(/[$,BM]/g, '')) > parseFloat(revPrior.replace(/[$,BM]/g, '')) ? 'Up' : parseFloat(revEst.replace(/[$,BM]/g, '')) < parseFloat(revPrior.replace(/[$,BM]/g, '')) ? 'Down' : '') : '';
+                  lines.push(`<strong>Revenue Estimate</strong>: ${revEst}${revPrior && direction ? ` (${direction} from ${revPrior} YoY)` : ''}`);
+                }
+                
+                let priceTargetNote = '';
+                if (consensusRatingMatch && priceTargetMatch) {
+                  const rating = consensusRatingMatch[1].charAt(0) + consensusRatingMatch[1].slice(1).toLowerCase();
+                  const target = parseFloat(priceTargetMatch[1]);
+                  lines.push(`<strong>Analyst Consensus</strong>: ${rating} Rating ($${target.toFixed(2)} Avg Price Target)`);
+                  
+                  // Add price comparison logic note
+                  if (technicalData.currentPrice) {
+                    const currentPrice = technicalData.currentPrice;
+                    const priceDiff = ((target - currentPrice) / currentPrice) * 100;
+                    if (priceDiff > 0) {
+                      // Target is above current price = upside potential
+                      priceTargetNote = `\n\n<strong>Note:</strong> <em>The average price target implies significant upside potential from current levels.</em>`;
+                    } else {
+                      // Target is below current price = trading at premium
+                      priceTargetNote = `\n\n<strong>Note:</strong> <em>The average price target suggests the stock is trading at a premium to analyst targets.</em>`;
+                    }
+                  }
+                } else if (consensusRatingMatch) {
+                  const rating = consensusRatingMatch[1].charAt(0) + consensusRatingMatch[1].slice(1).toLowerCase();
+                  lines.push(`<strong>Analyst Consensus</strong>: ${rating} Rating`);
+                } else if (priceTargetMatch) {
+                  const target = parseFloat(priceTargetMatch[1]);
+                  lines.push(`<strong>Analyst Consensus</strong>: $${target.toFixed(2)} Avg Price Target`);
+                  
+                  // Add price comparison logic note
+                  if (technicalData.currentPrice) {
+                    const currentPrice = technicalData.currentPrice;
+                    const priceDiff = ((target - currentPrice) / currentPrice) * 100;
+                    if (priceDiff > 0) {
+                      priceTargetNote = `\n\nNote: The average price target implies significant upside potential from current levels.`;
+                    } else {
+                      priceTargetNote = `\n\nNote: The average price target suggests the stock is trading at a premium to analyst targets.`;
+                    }
+                  }
+                }
+                
+                if (lines.length > 0) {
+                  // Format as HTML bullet points with bold labels
+                  const formattedSection = `${intro}\n\n<ul>\n${lines.map(l => `  <li>${l}</li>`).join('\n')}\n</ul>${priceTargetNote}`;
+                  // Replace the entire earnings content with the formatted version
+                  const beforeEarnings = analysisWithPriceAction.substring(0, earningsSectionMatch.index + earningsSectionMatch[0].length);
+                  const afterEarnings = analysisWithPriceAction.substring(earningsSectionMatch.index + earningsSectionMatch[0].length + earningsSectionEnd);
+                  analysisWithPriceAction = `${beforeEarnings}\n\n${formattedSection}\n\n${afterEarnings}`;
+                  console.log('✅ Formatted Earnings & Analyst Outlook section with bold labels and bullet points');
+                } else {
+                  console.log('⚠️ Could not extract earnings data from content - regex patterns may need updating');
+                  console.log('Earnings content sample:', earningsContent.substring(0, 200));
+                }
+              } else {
+                console.log('⚠️ Earnings date not found in content - cannot format section');
+                console.log('Earnings content sample:', earningsContent.substring(0, 200));
+              }
+            } else {
+              console.log('✅ Earnings section already formatted with bold labels');
+            }
           } else {
-            priceActionIndex = analysisWithPriceAction.indexOf('Price Action:');
+            console.log('⚠️ Earnings section marker not found in analysis');
           }
           
-          // Insert section marker if it doesn't exist
-          if (!hasPriceActionMarker && priceActionIndex !== -1) {
-            console.log('Adding "## Section: Price Action" marker');
-            // Find the start of the <strong> tag or the beginning of the line
-            const beforePriceAction = analysisWithPriceAction.substring(0, priceActionIndex);
-            const strongTagStart = beforePriceAction.lastIndexOf('<strong>');
-            if (strongTagStart !== -1) {
-              const beforeStrong = analysisWithPriceAction.substring(0, strongTagStart).trim();
-              const strongAndAfter = analysisWithPriceAction.substring(strongTagStart);
-              analysisWithPriceAction = `${beforeStrong}\n\n## Section: Price Action\n\n${strongAndAfter}`;
-              // Update priceActionIndex after insertion
-              priceActionIndex = analysisWithPriceAction.indexOf('Price Action:');
-            } else {
-              // Insert before "Price Action:"
-              const beforeText = analysisWithPriceAction.substring(0, priceActionIndex).trim();
-              const priceActionAndAfter = analysisWithPriceAction.substring(priceActionIndex);
-              analysisWithPriceAction = `${beforeText}\n\n## Section: Price Action\n\n${priceActionAndAfter}`;
-              // Update priceActionIndex after insertion
-              priceActionIndex = analysisWithPriceAction.indexOf('Price Action:');
+          // Post-process Technical Analysis section to extract and format Key Levels
+          const technicalSectionMarker = /##\s*Section:\s*Technical\s*Analysis/i;
+          const technicalSectionMatch = analysisWithPriceAction.match(technicalSectionMarker);
+          if (technicalSectionMatch && technicalSectionMatch.index !== undefined) {
+            const afterTechnicalMarker = analysisWithPriceAction.substring(technicalSectionMatch.index + technicalSectionMatch[0].length);
+            const nextSectionMatch = afterTechnicalMarker.match(/(##\s*Section:|##\s*Top\s*ETF|Price Action:)/i);
+            const technicalSectionEnd = nextSectionMatch ? nextSectionMatch.index! : afterTechnicalMarker.length;
+            const technicalContent = afterTechnicalMarker.substring(0, technicalSectionEnd);
+            
+            // Extract support and resistance levels
+            const supportMatch = technicalContent.match(/(?:Key\s+)?support\s+(?:is\s+at|at)\s+\$([\d.]+)/i);
+            const resistanceMatch = technicalContent.match(/(?:Key\s+)?resistance\s+(?:is\s+at|at)\s+\$([\d.]+)/i);
+            
+            if (supportMatch || resistanceMatch) {
+              // Check if Key Levels are already formatted as bullet points
+              const hasBulletFormat = technicalContent.includes('<ul>') && technicalContent.includes('Key Resistance') && technicalContent.includes('Key Support');
+              
+              // Also check if they exist in plain text format (need to replace)
+              const hasPlainTextFormat = technicalContent.includes('Key Resistance:') || technicalContent.includes('Key Support:');
+              
+              if (!hasBulletFormat) {
+                // Round to nearest $0.50
+                const roundToHalf = (val: number) => Math.round(val * 2) / 2;
+                const support = supportMatch ? roundToHalf(parseFloat(supportMatch[1])).toFixed(2) : null;
+                const resistance = resistanceMatch ? roundToHalf(parseFloat(resistanceMatch[1])).toFixed(2) : null;
+                
+                if (support || resistance) {
+                  // If plain text format exists, remove it first
+                  let cleanedTechnicalContent = technicalContent;
+                  if (hasPlainTextFormat) {
+                    // Remove existing plain text Key Resistance/Support lines
+                    cleanedTechnicalContent = cleanedTechnicalContent.replace(/Key\s+Resistance:\s*\$\d+\.\d+\s*\n?/gi, '');
+                    cleanedTechnicalContent = cleanedTechnicalContent.replace(/Key\s+Support:\s*\$\d+\.\d+\s*\n?/gi, '');
+                  }
+                  
+                  // Find the end of the last paragraph in technical section
+                  const lastParagraphEnd = cleanedTechnicalContent.lastIndexOf('</p>');
+                  const beforeLastParagraph = cleanedTechnicalContent.substring(0, lastParagraphEnd !== -1 ? lastParagraphEnd + 4 : cleanedTechnicalContent.length);
+                  const afterLastParagraph = cleanedTechnicalContent.substring(lastParagraphEnd !== -1 ? lastParagraphEnd + 4 : cleanedTechnicalContent.length);
+                  
+                  // Build Key Levels section as bullet points
+                  const keyLevelBullets: string[] = [];
+                  if (resistance) {
+                    keyLevelBullets.push(`<strong>Key Resistance</strong>: $${resistance}`);
+                  }
+                  if (support) {
+                    keyLevelBullets.push(`<strong>Key Support</strong>: $${support}`);
+                  }
+                  const keyLevels = keyLevelBullets.length > 0 
+                    ? `\n\n<ul>\n${keyLevelBullets.map(b => `  <li>${b}</li>`).join('\n')}\n</ul>`
+                    : '';
+                  
+                  // Update the technical section
+                  const beforeTechnical = analysisWithPriceAction.substring(0, technicalSectionMatch.index + technicalSectionMatch[0].length);
+                  const updatedTechnicalContent = `${beforeLastParagraph}${keyLevels}${afterLastParagraph}`;
+                  const afterTechnical = analysisWithPriceAction.substring(technicalSectionMatch.index + technicalSectionMatch[0].length + technicalSectionEnd);
+                  analysisWithPriceAction = `${beforeTechnical}\n\n${updatedTechnicalContent}${afterTechnical}`;
+                  console.log('✅ Extracted and formatted Key Levels from Technical Analysis');
+                }
+              }
             }
-            console.log('✅ Added "## Section: Price Action" marker');
-          } else if (hasPriceActionMarker) {
-            console.log('"## Section: Price Action" marker already exists');
           }
           
           // Now insert "Read Next" at the very end, after the price action line
@@ -4265,29 +4413,7 @@ export async function POST(request: Request) {
           }
         } else {
           console.log('No related articles available');
-          
-          // Still need to add "## Section: Price Action" marker even without related articles
-          const priceActionSectionMarker = /##\s*Section:\s*Price Action/i;
-          if (!analysisWithPriceAction.match(priceActionSectionMarker)) {
-            console.log('Adding "## Section: Price Action" marker (no related articles)');
-            const priceActionIndex = analysisWithPriceAction.indexOf('Price Action:');
-            if (priceActionIndex !== -1) {
-              // Find the start of the <strong> tag or the beginning of the line
-              const beforePriceAction = analysisWithPriceAction.substring(0, priceActionIndex);
-              const strongTagStart = beforePriceAction.lastIndexOf('<strong>');
-              if (strongTagStart !== -1) {
-                const beforeStrong = analysisWithPriceAction.substring(0, strongTagStart).trim();
-                const strongAndAfter = analysisWithPriceAction.substring(strongTagStart);
-                analysisWithPriceAction = `${beforeStrong}\n\n## Section: Price Action\n\n${strongAndAfter}`;
-              } else {
-                // Insert before "Price Action:"
-                const beforeText = analysisWithPriceAction.substring(0, priceActionIndex).trim();
-                const priceActionAndAfter = analysisWithPriceAction.substring(priceActionIndex);
-                analysisWithPriceAction = `${beforeText}\n\n## Section: Price Action\n\n${priceActionAndAfter}`;
-              }
-              console.log('✅ Added "## Section: Price Action" marker before price action line');
-            }
-          }
+          // Note: ETF section and Price Action section are already added earlier
         }
 
         return {

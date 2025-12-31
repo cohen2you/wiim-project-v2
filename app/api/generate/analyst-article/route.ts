@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { aiProvider, type AIProvider } from '../../../../lib/aiProvider';
+import { fetchETFs, formatETFInfo } from '@/lib/etf-utils';
 
 export const dynamic = 'force-dynamic';
 
@@ -412,6 +413,20 @@ export async function POST(req: Request) {
             priceActionLine.includes('0.00%') && !priceActionLine.includes('unchanged')) {
           console.warn(`Generated price action line contains invalid data, using fallback: ${priceActionLine}`);
           priceActionLine = `Price Action: ${finalTicker} shares closed on ${getCurrentDayName()}.`;
+        }
+        
+        // Fetch and append ETF information
+        try {
+          const etfs = await fetchETFs(finalTicker);
+          if (etfs && etfs.length > 0) {
+            const etfInfo = formatETFInfo(etfs);
+            if (etfInfo) {
+              priceActionLine += etfInfo;
+            }
+          }
+        } catch (etfError) {
+          console.error(`Error fetching ETF data for ${finalTicker}:`, etfError);
+          // Continue without ETF info if there's an error
         }
       } else {
         console.warn(`Price data unavailable or invalid for ${finalTicker}, using fallback`);

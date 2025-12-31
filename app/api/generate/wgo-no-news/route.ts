@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import OpenAI from 'openai';
+import { fetchETFs, formatETFInfo } from '@/lib/etf-utils';
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const BENZINGA_API_KEY = process.env.BENZINGA_API_KEY!;
@@ -879,25 +880,47 @@ CRITICAL INSTRUCTIONS:
 
 3. LEAD PARAGRAPH (exactly 2 sentences):
 - First sentence: Start with company name and ticker, describe actual price movement (up/down/unchanged) with time context
-- Second sentence: Brief context about what's driving momentum based on technical data
+- Second sentence: Brief context about sector correlation or market context - do NOT mention technical indicators here
 
-4. TECHNICAL ANALYSIS SECTION (simplified structure):
+4. SECTION MARKER: After the lead paragraph, insert "## Section: The Catalyst" on its own line.
+
+5. CATALYST SECTION (after section marker):
+- Focus ONLY on sector correlation, market context, and relative strength/weakness
+- Explain whether the stock is moving WITH or AGAINST broader market trends
+- Mention sector performance (e.g., "defying broad declines in the Technology sector")
+- DO NOT mention specific Moving Averages (SMAs), RSI numbers, MACD, or any technical indicators here
+- DO NOT mention 12-month performance, 52-week ranges, or specific price levels here
+- Keep to 1-2 sentences focused on market/sector correlation
+
+6. SECTION MARKER: After the Catalyst section, insert "## Section: Technical Analysis" on its own line.
+
+7. TECHNICAL ANALYSIS SECTION (simplified structure):
 Write exactly 3 paragraphs for technical analysis:
 
 TECHNICAL ANALYSIS PARAGRAPH 1 (MOVING AVERAGES, 12-MONTH PERFORMANCE, 52-WEEK RANGE): Write a single paragraph that combines: (1) Stock position relative to 20-day and 100-day SMAs with exact percentages if available (e.g., "Apple stock is currently trading 2.3% below its 20-day simple moving average (SMA), but is X% above its 100-day SMA, demonstrating longer-term strength"), (2) 12-month performance if available (e.g., "Shares have increased/decreased X% over the past 12 months"), and (3) 52-week range position (e.g., "and are currently closer to 52-week highs than 52-week lows" or vice versa). If specific technical data is not available in the stock data, use general language about the stock's technical position. Keep this to 2-3 sentences maximum.
 
-TECHNICAL ANALYSIS PARAGRAPH 2 (RSI AND MACD): Write a single paragraph that combines: (1) RSI level and interpretation if available (e.g., "The RSI is at 44.45, which is considered neutral territory"), and (2) MACD status if available (e.g., "Meanwhile, MACD is below its signal line, indicating bearish pressure on the stock"). If specific indicator data is not available, use general language about momentum indicators. Keep this to 2 sentences maximum.
+TECHNICAL ANALYSIS PARAGRAPH 2 (RSI AND MACD): Write a single paragraph that combines: (1) RSI level and interpretation if available. CRITICAL RSI INTERPRETATION: RSI below 30 = oversold/bearish, RSI 30-45 = bearish, RSI 45-55 = neutral, RSI 55-70 = bullish momentum, RSI above 70 = overbought. Use accurate interpretations (e.g., "The RSI is at 62.41, signaling bullish momentum that still has room to run before hitting overbought territory"), and (2) MACD status if available (e.g., "Meanwhile, MACD is above its signal line, suggesting bullish conditions" or "MACD is below its signal line, indicating bearish pressure"). If specific indicator data is not available, use general language about momentum indicators. Keep this to 2 sentences maximum.
 
-TECHNICAL ANALYSIS PARAGRAPH 3 (SUPPORT/RESISTANCE AND TRADING ADVICE): Write a single paragraph that includes: (1) Key support and resistance levels if available, rounded to nearest $0.50 (e.g., "Key support is at $265.50, while resistance is at $277.00"), and (2) Trading advice/insight (e.g., "Traders should keep an eye on the support and resistance levels, as well as the momentum indicators, to gauge the stock's next moves. The current technical setup suggests that while the stock has shown resilience, caution is warranted as it navigates these key levels"). Keep this to 2-3 sentences maximum.
+TECHNICAL ANALYSIS PARAGRAPH 3 (RSI/MACD SUMMARY): Write a single sentence that summarizes the RSI and MACD signals using accurate RSI interpretations (e.g., "The combination of bullish RSI and bullish MACD confirms strong upward momentum" or "The combination of neutral RSI and bearish MACD suggests mixed momentum"). Keep this to 1 sentence maximum. STOP AFTER THIS PARAGRAPH.
+
+KEY LEVELS (MANDATORY): After paragraph 3, you MUST extract and display the key support and resistance levels in a clear, scannable format. Format as bullet points using HTML <ul> and <li> tags:
+<ul>
+<li><strong>Key Resistance</strong>: $XXX.XX</li>
+<li><strong>Key Support</strong>: $XXX.XX</li>
+</ul>
+These should be clearly labeled, rounded to the nearest $0.50, and formatted as bullet points. This format helps with SEO and Featured Snippets.
 
 ${stockData.consensusRatings || stockData.nextEarnings ? `
 5. EARNINGS AND ANALYST OUTLOOK SECTION (forward-looking):
 After the technical analysis section, include a forward-looking section that anticipates the upcoming earnings report and provides analyst outlook. This section should help investors understand both the stock's value proposition and how analysts view it.
 
 CRITICAL INSTRUCTIONS FOR THIS SECTION:
-- Weave earnings data and analyst data together into a cohesive narrative (2-3 sentences total)
+- Start with a brief introductory sentence (1 sentence max) about the earnings date
+- Then present key data points as separate lines (not HTML bullets) with bold labels
+- Format: Use <strong> tags to bold the labels (EPS Estimate, Revenue Estimate, Analyst Consensus), followed by the data on the same line
+- Each data point should be on its own line with a blank line between them
 - Focus on helping investors understand: (1) whether the stock represents good value, and (2) how analysts view the stock
-- Connect earnings expectations with analyst sentiment - do analysts see value ahead of earnings?
+- CRITICAL: When mentioning the price target in the intro sentence, compare it to the current price. If price target is BELOW current price, say "suggesting the stock may be trading at a premium relative to analyst expectations" instead of "indicating potential upside"
 - Make it forward-looking and actionable for investors
 
 ${stockData.nextEarnings ? `
@@ -922,10 +945,16 @@ ${stockData.consensusRatings.hold_percentage ? `- Hold Rating: ${parseFloat(stoc
 ${stockData.consensusRatings.sell_percentage ? `- Sell Rating: ${parseFloat(stockData.consensusRatings.sell_percentage.toString()).toFixed(1)}%` : ''}
 ` : ''}
 
-CRITICAL: Write 2-3 sentences that INTEGRATE all available data (earnings, analyst consensus) into a cohesive narrative. Do NOT write separate sentences for each data point. Instead, weave them together to help investors understand:
-1. Whether the stock represents good value (use analyst price targets to assess this)
-2. How analysts view the stock (consensus rating, buy/hold/sell distribution)
-3. What to watch for ahead of earnings (if earnings date is available)
+CRITICAL FORMATTING REQUIREMENTS:
+- Start with ONE introductory sentence (e.g., "Investors are looking ahead to the company's next earnings report on [DATE].")
+- Then format the data as separate lines (not HTML bullets) with bold labels
+- Each data point should be on its own line with a blank line between them
+- Format example:
+  <strong>EPS Estimate</strong>: $X.XX (Up/Down from $X.XX YoY)
+
+  <strong>Revenue Estimate</strong>: $X.XX Billion (Up/Down from $X.XX Billion YoY)
+
+  <strong>Analyst Consensus</strong>: [Rating] Rating ($X.XX Avg Price Target)
 
 IMPORTANT: When earnings estimates are available, ALWAYS compare them to the same quarter from the previous year (year-over-year comparison):
 - If eps_prior is available, compare eps_estimate to eps_prior (e.g., "up from $0.65 from the same quarter last year" or "down from $0.80 from the prior-year period")
@@ -943,11 +972,15 @@ ${stockData.nextEarnings && stockData.consensusRatings ? `
 ` : ''}
 ` : ''}
 
-6. PRICE ACTION LINE (at the end):
+SECTION BOUNDARIES (STRICT - CRITICAL):
+- **CATALYST SECTION:** Focus ONLY on News (or lack of it), Sector Correlation, Market Context, and Relative Strength. DO NOT mention specific Moving Averages (SMAs), RSI numbers, MACD, 12-month performance, 52-week ranges, or any technical indicators here.
+- **TECHNICAL ANALYSIS SECTION:** This is the ONLY place for SMAs, RSI, MACD, 12-month performance, 52-week ranges, and all technical data. DO NOT repeat technical data from this section in the Catalyst section.
+
+8. PRICE ACTION LINE (at the end):
 - Format: "[TICKER] Price Action: [Company Name] shares were [up/down] [X.XX]% at $[XX.XX] [during premarket trading/during after-hours trading/while the market was closed] on [Day], according to <a href=\"https://pro.benzinga.com\">Benzinga Pro</a>."
 - All prices must be formatted to exactly 2 decimal places
 
-6. WRITING STYLE:
+9. WRITING STYLE:
 - Professional financial journalism
 - Active voice, clear language
 - No flowery phrases like "amidst" or "whilst"
@@ -1036,8 +1069,217 @@ Generate the basic technical story now.`;
       } else {
         console.log('"Read Next" section already exists');
       }
-    } else {
-      console.log('No related articles available');
+      } else {
+        console.log('No related articles available');
+      }
+
+    // Post-process Earnings & Analyst Outlook section to format as bullet points
+    const earningsSectionMarker = /##\s*Section:\s*Earnings\s*&\s*Analyst\s*Outlook/i;
+    const earningsSectionMatch = story.match(earningsSectionMarker);
+    if (earningsSectionMatch && earningsSectionMatch.index !== undefined) {
+      const afterEarningsMarker = story.substring(earningsSectionMatch.index + earningsSectionMatch[0].length);
+      const nextSectionMatch = afterEarningsMarker.match(/(##\s*Section:|##\s*Top\s*ETF|Price Action:)/i);
+      const earningsSectionEnd = nextSectionMatch ? nextSectionMatch.index! : afterEarningsMarker.length;
+      const earningsContent = afterEarningsMarker.substring(0, earningsSectionEnd).trim();
+      
+      // Check if content is already formatted (has bullet points with <strong> tags for labels)
+      if (!earningsContent.includes('<ul>') && !earningsContent.includes('<strong>EPS Estimate</strong>') && !earningsContent.includes('<strong>Revenue Estimate</strong>')) {
+        // Extract earnings data from the content - handle multiple date patterns
+        // First try to match full date format: "on February 26, 2026"
+        let earningsDateMatch = earningsContent.match(/(?:scheduled for|on|report on|earnings report on) ([A-Za-z]+ \d{1,2}, \d{4})/i);
+        if (!earningsDateMatch) {
+          // Fallback to partial date: "on February 26"
+          earningsDateMatch = earningsContent.match(/(?:scheduled for|on|report on|earnings report on) ([^,]+?)(?:,|\.|$)/i);
+        }
+        
+        const epsEstimateMatch = earningsContent.match(/earnings per share of \$([\d.-]+)/i);
+        const epsPriorMatch = earningsContent.match(/(?:up from|down from|compared to|from the same quarter last year) \$([\d.-]+)/i);
+        const revenueEstimateMatch = earningsContent.match(/revenue of (\$[\d.]+[BM])/i);
+        const revenuePriorMatch = earningsContent.match(/revenue.*?(?:up from|down from|compared to|from the same quarter last year|from the prior-year period) (\$[\d.]+[BM])/i);
+        const consensusRatingMatch = earningsContent.match(/(?:consensus|has a) ([A-Za-z]+) rating/i);
+        const priceTargetMatch = earningsContent.match(/price target of \$([\d.]+)/i);
+        
+        console.log('[EARNINGS FORMAT] Extracting data:', {
+          hasDate: !!earningsDateMatch,
+          dateMatch: earningsDateMatch ? earningsDateMatch[1] : null,
+          hasEPS: !!epsEstimateMatch,
+          hasRevenue: !!revenueEstimateMatch,
+          hasConsensus: !!consensusRatingMatch,
+          hasPriceTarget: !!priceTargetMatch,
+          contentSample: earningsContent.substring(0, 300)
+        });
+        
+        // Build formatted lines with bold labels (plain text format, not HTML bullets)
+        const lines: string[] = [];
+        
+        if (earningsDateMatch) {
+          const intro = `Investors are looking ahead to the next earnings report on ${earningsDateMatch[1]}.`;
+          
+          if (epsEstimateMatch) {
+            const epsEst = epsEstimateMatch[1];
+            const epsPrior = epsPriorMatch ? epsPriorMatch[1] : null;
+            const direction = epsPrior ? (parseFloat(epsEst) > parseFloat(epsPrior) ? 'Up' : parseFloat(epsEst) < parseFloat(epsPrior) ? 'Down' : '') : '';
+            lines.push(`<strong>EPS Estimate</strong>: $${epsEst}${epsPrior && direction ? ` (${direction} from $${epsPrior} YoY)` : ''}`);
+          }
+          
+          if (revenueEstimateMatch) {
+            const revEst = revenueEstimateMatch[1];
+            const revPrior = revenuePriorMatch ? revenuePriorMatch[1] : null;
+            const direction = revPrior ? (parseFloat(revEst.replace(/[$,BM]/g, '')) > parseFloat(revPrior.replace(/[$,BM]/g, '')) ? 'Up' : parseFloat(revEst.replace(/[$,BM]/g, '')) < parseFloat(revPrior.replace(/[$,BM]/g, '')) ? 'Down' : '') : '';
+            lines.push(`<strong>Revenue Estimate</strong>: ${revEst}${revPrior && direction ? ` (${direction} from ${revPrior} YoY)` : ''}`);
+          }
+          
+          let priceTargetNote = '';
+          if (consensusRatingMatch && priceTargetMatch) {
+            const rating = consensusRatingMatch[1].charAt(0) + consensusRatingMatch[1].slice(1).toLowerCase();
+            const target = parseFloat(priceTargetMatch[1]);
+            lines.push(`<strong>Analyst Consensus</strong>: ${rating} Rating ($${target.toFixed(2)} Avg Price Target)`);
+            
+            // Add price comparison logic note
+            if (stockData.priceAction?.last) {
+              const currentPrice = stockData.priceAction.last;
+              const priceDiff = ((target - currentPrice) / currentPrice) * 100;
+              if (priceDiff > 0) {
+                // Target is above current price = upside potential
+                priceTargetNote = `\n\n<strong>Note:</strong> <em>The average price target implies significant upside potential from current levels.</em>`;
+              } else {
+                // Target is below current price = trading at premium
+                priceTargetNote = `\n\n<strong>Note:</strong> <em>The average price target suggests the stock is trading at a premium to analyst targets.</em>`;
+              }
+            }
+          } else if (consensusRatingMatch) {
+            const rating = consensusRatingMatch[1].charAt(0) + consensusRatingMatch[1].slice(1).toLowerCase();
+            lines.push(`<strong>Analyst Consensus</strong>: ${rating} Rating`);
+          } else if (priceTargetMatch) {
+            const target = parseFloat(priceTargetMatch[1]);
+            lines.push(`<strong>Analyst Consensus</strong>: $${target.toFixed(2)} Avg Price Target`);
+            
+            // Add price comparison logic note
+            if (stockData.priceAction?.last) {
+              const currentPrice = stockData.priceAction.last;
+              const priceDiff = ((target - currentPrice) / currentPrice) * 100;
+              if (priceDiff > 0) {
+                priceTargetNote = `\n\nNote: The average price target implies significant upside potential from current levels.`;
+              } else {
+                priceTargetNote = `\n\nNote: The average price target suggests the stock is trading at a premium to analyst targets.`;
+              }
+            }
+          }
+          
+          if (lines.length > 0) {
+            // Format as HTML bullet points with bold labels
+            const formattedSection = `${intro}\n\n<ul>\n${lines.map(l => `  <li>${l}</li>`).join('\n')}\n</ul>${priceTargetNote}`;
+            const beforeEarnings = story.substring(0, earningsSectionMatch.index + earningsSectionMatch[0].length);
+            const afterEarnings = story.substring(earningsSectionMatch.index + earningsSectionMatch[0].length + earningsSectionEnd);
+            story = `${beforeEarnings}\n\n${formattedSection}\n\n${afterEarnings}`;
+            console.log('✅ Formatted Earnings & Analyst Outlook section with bold labels and bullet points');
+          }
+        }
+      }
+    }
+    
+    // Post-process Technical Analysis section to extract and format Key Levels
+    const technicalSectionMarker = /##\s*Section:\s*Technical\s*Analysis/i;
+    const technicalSectionMatch = story.match(technicalSectionMarker);
+    if (technicalSectionMatch && technicalSectionMatch.index !== undefined) {
+      const afterTechnicalMarker = story.substring(technicalSectionMatch.index + technicalSectionMatch[0].length);
+      const nextSectionMatch = afterTechnicalMarker.match(/(##\s*Section:|##\s*Top\s*ETF|Price Action:)/i);
+      const technicalSectionEnd = nextSectionMatch ? nextSectionMatch.index! : afterTechnicalMarker.length;
+      const technicalContent = afterTechnicalMarker.substring(0, technicalSectionEnd);
+      
+      // Extract support and resistance levels
+      const supportMatch = technicalContent.match(/(?:Key\s+)?support\s+(?:is\s+at|at)\s+\$([\d.]+)/i);
+      const resistanceMatch = technicalContent.match(/(?:Key\s+)?resistance\s+(?:is\s+at|at)\s+\$([\d.]+)/i);
+      
+      if (supportMatch || resistanceMatch) {
+        // Check if Key Levels are already formatted as bullet points
+        const hasBulletFormat = technicalContent.includes('<ul>') && technicalContent.includes('Key Resistance') && technicalContent.includes('Key Support');
+        
+        // Also check if they exist in plain text format (need to replace)
+        const hasPlainTextFormat = technicalContent.includes('Key Resistance:') || technicalContent.includes('Key Support:');
+        
+        if (!hasBulletFormat) {
+          // Round to nearest $0.50
+          const roundToHalf = (val: number) => Math.round(val * 2) / 2;
+          const support = supportMatch ? roundToHalf(parseFloat(supportMatch[1])).toFixed(2) : null;
+          const resistance = resistanceMatch ? roundToHalf(parseFloat(resistanceMatch[1])).toFixed(2) : null;
+          
+          if (support || resistance) {
+            // If plain text format exists, remove it first
+            let cleanedTechnicalContent = technicalContent;
+            if (hasPlainTextFormat) {
+              // Remove existing plain text Key Resistance/Support lines
+              cleanedTechnicalContent = cleanedTechnicalContent.replace(/Key\s+Resistance:\s*\$\d+\.\d+\s*\n?/gi, '');
+              cleanedTechnicalContent = cleanedTechnicalContent.replace(/Key\s+Support:\s*\$\d+\.\d+\s*\n?/gi, '');
+            }
+            
+            // Find the end of the last paragraph in technical section
+            const lastParagraphEnd = cleanedTechnicalContent.lastIndexOf('</p>');
+            const beforeLastParagraph = cleanedTechnicalContent.substring(0, lastParagraphEnd !== -1 ? lastParagraphEnd + 4 : cleanedTechnicalContent.length);
+            const afterLastParagraph = cleanedTechnicalContent.substring(lastParagraphEnd !== -1 ? lastParagraphEnd + 4 : cleanedTechnicalContent.length);
+            
+            // Build Key Levels section as bullet points
+            const keyLevelBullets: string[] = [];
+            if (resistance) {
+              keyLevelBullets.push(`<strong>Key Resistance</strong>: $${resistance}`);
+            }
+            if (support) {
+              keyLevelBullets.push(`<strong>Key Support</strong>: $${support}`);
+            }
+            const keyLevels = keyLevelBullets.length > 0 
+              ? `\n\n<ul>\n${keyLevelBullets.map(b => `  <li>${b}</li>`).join('\n')}\n</ul>`
+              : '';
+            
+            // Update the technical section
+            const beforeTechnical = story.substring(0, technicalSectionMatch.index + technicalSectionMatch[0].length);
+            const updatedTechnicalContent = `${beforeLastParagraph}${keyLevels}${afterLastParagraph}`;
+            const afterTechnical = story.substring(technicalSectionMatch.index + technicalSectionMatch[0].length + technicalSectionEnd);
+            story = `${beforeTechnical}\n\n${updatedTechnicalContent}${afterTechnical}`;
+            console.log('✅ Extracted and formatted Key Levels from Technical Analysis');
+          }
+        }
+      }
+    }
+
+    // Fetch and append ETF information after price action line
+    try {
+      const etfs = await fetchETFs(ticker);
+      if (etfs && etfs.length > 0) {
+        const etfInfo = formatETFInfo(etfs);
+        if (etfInfo) {
+          // Find the price action line and append ETF info after it
+          const priceActionIndex = story.indexOf('Price Action:');
+          if (priceActionIndex !== -1) {
+            // Find the end of the price action line (look for "according to Benzinga Pro data" or similar ending)
+            const afterPriceAction = story.substring(priceActionIndex);
+            // Look for the end pattern: period followed by optional space and "according to" or end of line
+            const endMatch = afterPriceAction.match(/(\.\s*(?:according to|$))/i);
+            if (endMatch && endMatch.index !== undefined) {
+              // Find the actual end after "according to Benzinga Pro data" or similar
+              const potentialEnd = priceActionIndex + endMatch.index + endMatch[0].length;
+              // Look for the period that ends the sentence after "according to"
+              const fullEndMatch = story.substring(potentialEnd - 50, potentialEnd + 50).match(/(according to[^.]*\.)/i);
+              if (fullEndMatch) {
+                const insertIndex = story.indexOf(fullEndMatch[0], potentialEnd - 50) + fullEndMatch[0].length;
+                story = story.substring(0, insertIndex) + etfInfo + story.substring(insertIndex);
+              } else {
+                // Fallback: insert after the period we found
+                const insertIndex = priceActionIndex + endMatch.index + 1;
+                story = story.substring(0, insertIndex) + etfInfo + story.substring(insertIndex);
+              }
+            } else {
+              // If we can't find the end, append at the end of the story
+              story += etfInfo;
+            }
+          } else {
+            // If no price action found, append at the end
+            story += etfInfo;
+          }
+        }
+      }
+    } catch (etfError) {
+      console.error(`Error fetching ETF data for ${ticker}:`, etfError);
+      // Continue without ETF info if there's an error
     }
 
     return NextResponse.json({ 
