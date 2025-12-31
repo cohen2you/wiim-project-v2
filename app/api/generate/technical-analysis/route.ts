@@ -4436,11 +4436,11 @@ export async function POST(request: Request) {
                 // Try to extract EPS estimate value
                 const epsMatch = epsValue.match(/\$([\d.-]+)/);
                 if (epsMatch) {
-                  epsEstimateMatch = [null, epsMatch[1]] as RegExpMatchArray;
+                  epsEstimateMatch = epsMatch;
                   // Try to extract prior EPS
                   const priorMatch = epsValue.match(/(?:up from|down from|Up from|Down from)\s+\$([\d.-]+)/i);
                   if (priorMatch) {
-                    epsPriorMatch = [null, priorMatch[1]] as RegExpMatchArray;
+                    epsPriorMatch = priorMatch;
                   }
                 }
               }
@@ -4449,11 +4449,11 @@ export async function POST(request: Request) {
                 // Try to extract revenue estimate value (handle "Billion"/"Million" as words or "B"/"M" as letters)
                 const revMatch = revValue.match(/(\$[\d.]+(?:\s+)?(?:[BM]|(?:[BM]illion)))/i);
                 if (revMatch) {
-                  revenueEstimateMatch = [null, revMatch[1]] as RegExpMatchArray;
+                  revenueEstimateMatch = revMatch;
                   // Try to extract prior revenue
                   const priorMatch = revValue.match(/(?:up from|down from|Up from|Down from)\s+(\$[\d.]+(?:\s+)?(?:[BM]|(?:[BM]illion)))/i);
                   if (priorMatch) {
-                    revenuePriorMatch = [null, priorMatch[1]] as RegExpMatchArray;
+                    revenuePriorMatch = priorMatch;
                   }
                 }
               }
