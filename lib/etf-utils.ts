@@ -367,7 +367,7 @@ function formatExchangeName(exchangeCode: string | null | undefined): string {
 }
 
 // Function to format ETF information as a section with subhead and bulleted list
-export function formatETFInfo(etfs: Array<ETFHolder & { ticker?: string; exchange?: string }>): string {
+export function formatETFInfo(etfs: Array<ETFHolder & { ticker?: string; exchange?: string }>, stockTicker?: string): string {
   if (!etfs || etfs.length === 0) {
     return '';
   }
@@ -393,17 +393,14 @@ export function formatETFInfo(etfs: Array<ETFHolder & { ticker?: string; exchang
     }
   });
   
-  // Build insight sentence about why ETF holdings matter
+  // Calculate total weight to determine if it's "heavy"
   const totalWeight = etfs.reduce((sum, etf) => sum + parseFloat(etf.sharepercentage || '0'), 0);
-  let insight = '';
   
-  if (totalWeight > 15) {
-    insight = `With significant weighting across these ETFs, the stock's performance can impact investors tracking these funds, making it important for ETF investors to monitor the company's moves.`;
-  } else if (totalWeight > 5) {
-    insight = `These holdings represent meaningful positions that can influence ETF performance, making the stock's movements relevant for investors in these funds.`;
-  } else {
-    insight = `These ETF holdings provide institutional backing and can contribute to trading volume, making them relevant for investors tracking fund performance.`;
-  }
+  // Build insight using "Passive Flows" angle
+  const tickerText = stockTicker ? stockTicker : 'the stock';
+  const weightDescription = totalWeight > 15 ? 'such a heavy weight' : totalWeight > 5 ? 'significant weight' : 'meaningful weight';
+  
+  const insight = `<p><strong>Significance:</strong> Because ${tickerText} carries ${weightDescription} in these funds, any significant inflows or outflows for these ETFs will likely force automatic buying or selling of the stock.</p>`;
   
   // Return as a section with subhead, bulleted list (using HTML <ul> for WordPress), and insight
   return `\n\n## Top ETF Exposure\n\n<ul>\n${etfBullets.join('\n')}\n</ul>\n\n${insight}`;

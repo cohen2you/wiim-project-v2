@@ -897,7 +897,7 @@ CRITICAL INSTRUCTIONS:
 7. TECHNICAL ANALYSIS SECTION (simplified structure):
 Write exactly 3 paragraphs for technical analysis:
 
-TECHNICAL ANALYSIS PARAGRAPH 1 (MOVING AVERAGES, 12-MONTH PERFORMANCE, 52-WEEK RANGE): Write a single paragraph that combines: (1) Stock position relative to 20-day and 100-day SMAs with exact percentages if available (e.g., "Apple stock is currently trading 2.3% below its 20-day simple moving average (SMA), but is X% above its 100-day SMA, demonstrating longer-term strength"), (2) 12-month performance if available (e.g., "Shares have increased/decreased X% over the past 12 months"), and (3) 52-week range position (e.g., "and are currently closer to 52-week highs than 52-week lows" or vice versa). If specific technical data is not available in the stock data, use general language about the stock's technical position. Keep this to 2-3 sentences maximum.
+TECHNICAL ANALYSIS PARAGRAPH 1 (MOVING AVERAGES, 12-MONTH PERFORMANCE, 52-WEEK RANGE): Write a single paragraph that combines: (1) Stock position relative to 20-day and 100-day SMAs with exact percentages if available (e.g., "Apple stock is currently trading 2.3% below its 20-day simple moving average (SMA), but is X% above its 100-day SMA, demonstrating longer-term strength"), (2) 12-month performance if available (e.g., "Shares have increased/decreased X% over the past 12 months"), and (3) 52-week range position (e.g., "and are currently positioned closer to their 52-week highs than lows" or "closer to their 52-week lows than highs" - DO NOT include a percentage, just use qualitative positioning). If specific technical data is not available in the stock data, use general language about the stock's technical position. Keep this to 2-3 sentences maximum.
 
 TECHNICAL ANALYSIS PARAGRAPH 2 (RSI AND MACD): Write a single paragraph that combines: (1) RSI level and interpretation if available. CRITICAL RSI INTERPRETATION: RSI below 30 = oversold/bearish, RSI 30-45 = bearish, RSI 45-55 = neutral, RSI 55-70 = bullish momentum, RSI above 70 = overbought. Use accurate interpretations (e.g., "The RSI is at 62.41, signaling bullish momentum that still has room to run before hitting overbought territory"), and (2) MACD status if available (e.g., "Meanwhile, MACD is above its signal line, suggesting bullish conditions" or "MACD is below its signal line, indicating bearish pressure"). If specific indicator data is not available, use general language about momentum indicators. Keep this to 2 sentences maximum.
 
@@ -1287,7 +1287,7 @@ Generate the basic technical story now.`;
     try {
       const etfs = await fetchETFs(ticker);
       if (etfs && etfs.length > 0) {
-        const etfInfo = formatETFInfo(etfs);
+        const etfInfo = formatETFInfo(etfs, ticker);
         if (etfInfo) {
           // Find the price action line and append ETF info after it
           const priceActionIndex = story.indexOf('Price Action:');

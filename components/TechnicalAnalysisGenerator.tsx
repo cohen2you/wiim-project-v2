@@ -398,7 +398,17 @@ const TechnicalAnalysisGenerator = forwardRef<TechnicalAnalysisGeneratorRef>((pr
 
       try {
 
-        const plainText = targetDiv.textContent?.trim() || '';
+        // Clone and remove button before getting text content
+        const cloneForText = targetDiv.cloneNode(true) as HTMLElement;
+        const copyButtonInClone = cloneForText.querySelector('button');
+        if (copyButtonInClone) {
+          copyButtonInClone.remove();
+        }
+        const timestampInClone = cloneForText.querySelector('[data-timestamp]');
+        if (timestampInClone) {
+          timestampInClone.remove();
+        }
+        const plainText = cloneForText.textContent?.trim() || '';
 
         await navigator.clipboard.writeText(plainText);
 

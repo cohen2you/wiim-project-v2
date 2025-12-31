@@ -2423,6 +2423,82 @@ async function fetchMarketContext(usePreviousDay: boolean = false): Promise<Mark
   }
 }
 
+// Fetch recent analyst actions (upgrades, downgrades, initiations) from Benzinga
+async function fetchRecentAnalystActions(ticker: string, limit: number = 3) {
+  try {
+    const BENZINGA_API_KEY = process.env.BENZINGA_API_KEY;
+    if (!BENZINGA_API_KEY) {
+      return [];
+    }
+
+    const analystUrl = `https://api.benzinga.com/api/v2.1/calendar/ratings?token=${BENZINGA_API_KEY}&parameters[tickers]=${encodeURIComponent(ticker)}&parameters[range]=6m`;
+    
+    console.log(`[RECENT ANALYST ACTIONS] Fetching for ticker: ${ticker}`);
+    const analystRes = await fetch(analystUrl, {
+      headers: { Accept: 'application/json' },
+    });
+    
+    if (analystRes.ok) {
+      const analystData = await analystRes.json();
+      const ratingsArray = Array.isArray(analystData) ? analystData : (analystData.ratings || []);
+      
+      // Sort by date (most recent first) and format recent actions
+      const recentActions = ratingsArray
+        .sort((a: any, b: any) => {
+          const dateA = new Date(a.date || a.created || 0).getTime();
+          const dateB = new Date(b.date || b.created || 0).getTime();
+          return dateB - dateA; // Most recent first
+        })
+        .slice(0, limit)
+        .map((rating: any) => {
+          // Use API field names: analyst, action_company, rating_current, rating_prior, pt_current, pt_prior
+          const firm = rating.analyst || rating.firm || rating.analyst_firm || rating.firm_name || 'Unknown Firm';
+          const actionCompany = rating.action_company || rating.action || rating.rating_action || '';
+          const currentRating = rating.rating_current || rating.rating || rating.new_rating || '';
+          const priorRating = rating.rating_prior || rating.rating_prior || '';
+          const priceTarget = rating.pt_current || rating.pt || rating.price_target || rating.target || null;
+          const priorTarget = rating.pt_prior || rating.price_target_prior || null;
+          
+          // Format the action description based on action_company and rating changes
+          let actionText = '';
+          const actionLower = actionCompany.toLowerCase();
+          
+          if (actionLower.includes('upgrade') || (priorRating && currentRating && currentRating !== priorRating)) {
+            actionText = `Upgraded to ${currentRating}`;
+          } else if (actionLower.includes('downgrade')) {
+            actionText = `Downgraded to ${currentRating}`;
+          } else if (actionLower.includes('initiate') || actionLower.includes('reinstated')) {
+            actionText = `Initiated with ${currentRating}`;
+          } else if (currentRating) {
+            actionText = `${currentRating}`;
+          }
+          
+          // Add price target info if available
+          if (priceTarget && priorTarget && parseFloat(priceTarget.toString()) !== parseFloat(priorTarget.toString())) {
+            const direction = parseFloat(priceTarget.toString()) > parseFloat(priorTarget.toString()) ? 'Raised' : 'Lowered';
+            actionText += ` (${direction} Target to $${parseFloat(priceTarget.toString()).toFixed(2)})`;
+          } else if (priceTarget) {
+            actionText += ` (Target $${parseFloat(priceTarget.toString()).toFixed(2)})`;
+          }
+          
+          return {
+            firm,
+            action: actionText,
+            date: rating.date || rating.created || null
+          };
+        });
+      
+      console.log(`[RECENT ANALYST ACTIONS] Found ${recentActions.length} recent actions`);
+      return recentActions;
+    }
+    
+    return [];
+  } catch (error) {
+    console.error('Error fetching recent analyst actions:', error);
+    return [];
+  }
+}
+
 // Fetch consensus ratings from Benzinga
 async function fetchConsensusRatings(ticker: string) {
   try {
@@ -2785,10 +2861,11 @@ async function generateTechnicalAnalysis(data: TechnicalAnalysisData, provider?:
     const sectorPerformance = await getStockSectorPerformance(data.symbol, marketContext || null);
     const sp500Change = marketContext?.indices.find(idx => idx.ticker === 'SPY')?.change || null;
 
-    // Fetch consensus ratings and earnings date for analyst overview and P/E sections
-    const [consensusRatings, nextEarnings] = await Promise.all([
+    // Fetch consensus ratings, earnings date, and recent analyst actions
+    const [consensusRatings, nextEarnings, recentAnalystActions] = await Promise.all([
       fetchConsensusRatings(data.symbol),
-      fetchNextEarningsDate(data.symbol)
+      fetchNextEarningsDate(data.symbol),
+      fetchRecentAnalystActions(data.symbol, 3)
     ]);
     
     // Log fetched data for debugging
@@ -2814,6 +2891,7 @@ async function generateTechnicalAnalysis(data: TechnicalAnalysisData, provider?:
 
     // Fetch P/E ratio from Benzinga quote API
     let peRatio: number | null = null;
+    let useForwardPE = false;
     try {
       const BENZINGA_API_KEY = process.env.BENZINGA_API_KEY;
       if (BENZINGA_API_KEY) {
@@ -2823,6 +2901,18 @@ async function generateTechnicalAnalysis(data: TechnicalAnalysisData, provider?:
           if (benzingaData && benzingaData[data.symbol]) {
             const quote = benzingaData[data.symbol];
             peRatio = quote.pe || quote.priceEarnings || quote.pe_ratio || null;
+            
+            // Determine if we should use Forward P/E
+            // Rule: IF TrailingEPS < 0 AND ForwardEPS > 0, display "Forward P/E"
+            if (nextEarnings && typeof nextEarnings === 'object') {
+              const trailingEPS = nextEarnings.eps_prior ? parseFloat(nextEarnings.eps_prior.toString()) : null;
+              const forwardEPS = nextEarnings.eps_estimate ? parseFloat(nextEarnings.eps_estimate.toString()) : null;
+              
+              if (trailingEPS !== null && forwardEPS !== null) {
+                useForwardPE = trailingEPS < 0 && forwardEPS > 0;
+                console.log(`[P/E RATIO] Trailing EPS: ${trailingEPS}, Forward EPS: ${forwardEPS}, Using Forward P/E: ${useForwardPE}`);
+              }
+            }
           }
         }
       }
@@ -3042,9 +3132,7 @@ SUPPORT/RESISTANCE:
 
 - Low: $${formatPrice(data.fiftyTwoWeekLow)}
 
-- Current Position: ${data.fiftyTwoWeekHigh && data.fiftyTwoWeekLow && data.currentPrice ? 
-
-  `${(((data.currentPrice - data.fiftyTwoWeekLow) / (data.fiftyTwoWeekHigh - data.fiftyTwoWeekLow)) * 100).toFixed(1)}% of range` : 'N/A'}
+- Current Price: $${formatPrice(data.currentPrice)}
 
 
 
@@ -3197,13 +3285,21 @@ EARNINGS AND ANALYST OUTLOOK SECTION (forward-looking):
 After the technical analysis section, you MUST include a separate section with the header "## Section: Earnings & Analyst Outlook". This section should be forward-looking and help investors understand both the stock's value proposition and how analysts view it.
 
 CRITICAL INSTRUCTIONS FOR THIS SECTION:
-- Start with a brief introductory sentence (1 sentence max) about the earnings date
-- Then present key data points as separate lines (not HTML bullets) with bold labels
-- Format: Use <strong> tags to bold the labels (EPS Estimate, Revenue Estimate, Analyst Consensus), followed by the data on the same line
-- Each data point should be on its own line with a blank line between them
-- Focus on helping investors understand: (1) whether the stock represents good value, and (2) how analysts view the stock
-- CRITICAL: When mentioning the price target in the intro sentence, compare it to the current price. If price target is BELOW current price, say "suggesting the stock may be trading at a premium relative to analyst expectations" instead of "indicating potential upside"
-- Make it forward-looking and actionable for investors
+- Start with ONE introductory sentence (e.g., "Investors are looking ahead to the next earnings report on [DATE].")
+- Then format the data as HTML bullet points with bold labels
+- Group "Hard Numbers" together: EPS Estimate, Revenue Estimate, and Valuation (P/E Ratio) as separate bullet points
+- Group "Opinions" together: Create a subsection "Analyst Consensus & Recent Actions" that includes:
+  - The consensus rating and average price target
+  - Recent analyst moves (last 3) with firm names and specific actions (e.g., "Goldman Sachs: Upgraded to Buy (Raised Target to $500)")
+- Format example:
+  <ul>
+  <li><strong>EPS Estimate</strong>: $X.XX (Up/Down from $X.XX YoY)</li>
+  <li><strong>Revenue Estimate</strong>: $X.XX Billion (Up/Down from $X.XX Billion YoY)</li>
+  ${peRatio !== null ? `<li><strong>Valuation</strong>: ${useForwardPE ? 'Forward' : ''} P/E of ${peRatio.toFixed(1)}x (Indicates ${peRatio > 25 ? 'premium valuation' : peRatio < 15 ? 'value opportunity' : 'fair valuation'})</li>` : ''}
+  </ul>
+  
+  <strong>Analyst Consensus & Recent Actions:</strong>
+  The stock carries a ${consensusRatings?.consensus_rating ? consensusRatings.consensus_rating.charAt(0) + consensusRatings.consensus_rating.slice(1).toLowerCase() : 'N/A'} Rating with an average price target of $${consensusRatings?.consensus_price_target ? parseFloat(consensusRatings.consensus_price_target.toString()).toFixed(2) : 'N/A'}. ${recentAnalystActions && recentAnalystActions.length > 0 ? `Recent analyst moves include:\n${recentAnalystActions.map((action: any) => `${action.firm}: ${action.action}`).join('\n')}` : 'No recent analyst actions available.'}
 
 ${nextEarnings ? `
 UPCOMING EARNINGS DATA:
@@ -3229,8 +3325,13 @@ ${consensusRatings.sell_percentage ? `- Sell Rating: ${parseFloat(consensusRatin
 
 ${peRatio !== null ? `
 P/E RATIO CONTEXT:
-- Current P/E Ratio: ${peRatio.toFixed(1)}
-- Valuation Assessment: ${peRatio > 25 ? 'Overvalued' : peRatio < 15 ? 'Undervalued' : 'Fairly valued'} relative to peers
+- ${useForwardPE ? 'Forward' : 'Current'} P/E Ratio: ${peRatio.toFixed(1)}x
+- Valuation Assessment: ${peRatio > 25 ? 'Indicates premium valuation' : peRatio < 15 ? 'Indicates value opportunity' : 'Suggests fair valuation'} relative to peers
+` : ''}
+
+${recentAnalystActions && recentAnalystActions.length > 0 ? `
+RECENT ANALYST ACTIONS (Last 3 Major Actions):
+${recentAnalystActions.map((action: any) => `- ${action.firm}: ${action.action}`).join('\n')}
 ` : ''}
 
 CRITICAL FORMATTING REQUIREMENTS:
@@ -3473,7 +3574,7 @@ Example of INCORRECT first paragraph (DO NOT DO THIS): "**Rocket Lab Corporation
   
   Use the actual percentage changes from the market context data provided. This paragraph should be exactly 2 sentences. CRITICAL: ${marketStatus === 'premarket' ? 'During premarket, use PAST TENSE since the market data is from the previous trading day. Reference it as "on the previous trading day" or "yesterday".' : marketStatus === 'open' ? 'Use PRESENT TENSE since markets are currently open.' : 'Use PAST TENSE since markets are closed.'} Use smooth transitions like "The broader market saw..." or "Meanwhile, broader market indicators..." rather than awkward phrases like "On the trading day".` : ''}
 
-- TECHNICAL ANALYSIS PARAGRAPH 1 (MOVING AVERAGES, 12-MONTH PERFORMANCE, 52-WEEK RANGE): Write a single paragraph that combines: (1) Stock position relative to 20-day and 100-day SMAs with exact percentages (e.g., "Apple stock is currently trading 2.3% below its 20-day simple moving average (SMA), but is X% above its 100-day SMA, demonstrating longer-term strength"), (2) 12-month performance (e.g., "Shares have increased/decreased X% over the past 12 months"), and (3) 52-week range position (e.g., "and are currently closer to 52-week highs than 52-week lows" or vice versa). Keep this to 2-3 sentences maximum. STOP AFTER THIS PARAGRAPH.
+- TECHNICAL ANALYSIS PARAGRAPH 1 (MOVING AVERAGES, 12-MONTH PERFORMANCE, 52-WEEK RANGE): Write a single paragraph that combines: (1) Stock position relative to 20-day and 100-day SMAs with exact percentages (e.g., "Apple stock is currently trading 2.3% below its 20-day simple moving average (SMA), but is X% above its 100-day SMA, demonstrating longer-term strength"), (2) 12-month performance (e.g., "Shares have increased/decreased X% over the past 12 months"), and (3) 52-week range position (e.g., "and are currently positioned closer to their 52-week highs than lows" or "closer to their 52-week lows than highs" - DO NOT include a percentage, just use qualitative positioning). Keep this to 2-3 sentences maximum. STOP AFTER THIS PARAGRAPH.
 
 - TECHNICAL ANALYSIS PARAGRAPH 2 (RSI AND MACD): Write a single paragraph that combines: (1) RSI level and interpretation (e.g., "The RSI is at 44.45, which is considered neutral territory"), and (2) MACD status (e.g., "Meanwhile, MACD is below its signal line, indicating bearish pressure on the stock"). Keep this to 2 sentences maximum. STOP AFTER THIS PARAGRAPH.
 
@@ -3918,7 +4019,7 @@ export async function POST(request: Request) {
         try {
           const etfs = await fetchETFs(ticker);
           if (etfs && etfs.length > 0) {
-            etfInfo = formatETFInfo(etfs);
+            etfInfo = formatETFInfo(etfs, ticker);
           }
         } catch (etfError) {
           console.error(`Error fetching ETF data for ${ticker}:`, etfError);
@@ -3933,18 +4034,8 @@ export async function POST(request: Request) {
         const priceActionMarkerPattern = /##\s*Section:\s*Price Action\s*$/i;
         cleanAnalysis = cleanAnalysis.replace(priceActionMarkerPattern, '').trim();
         
-        // Build the final content: analysis + ETF section (if available) + Price Action section + price action line
+        // Build the final content: start with clean analysis (ETF and Price Action will be added later)
         let analysisWithPriceAction = cleanAnalysis;
-        
-        // Add ETF section before price action if available
-        if (etfInfo) {
-          analysisWithPriceAction += etfInfo;
-        }
-        
-        // Add Price Action section marker and price action line
-        if (priceAction) {
-          analysisWithPriceAction += `\n\n## Section: Price Action\n\n${priceAction}`;
-        }
 
         // Fetch related articles and add "Also Read" and "Read Next" sections
         const excludeUrl = newsContext?.newsUrl || (newsContext?.selectedArticles && newsContext.selectedArticles[0]?.url) || undefined;
@@ -4064,23 +4155,46 @@ export async function POST(request: Request) {
                     continue;
                   }
                   
+                  // Remove standalone hyperlinks or headline-like text between "Also Read" and section marker
+                  // This catches things like "Latest Market Insights" with links or other standalone headlines
+                  if (!foundSectionMarker) {
+                    // Check if line is a standalone hyperlink (has <a href> but not wrapped in <p> tags)
+                    const hasLink = line.includes('<a href');
+                    const isInParagraph = line.startsWith('<p>') || line.match(/<p[^>]*>.*<a href/);
+                    
+                    if (hasLink && !isInParagraph) {
+                      console.log(`[CLEANUP] Removing standalone hyperlink between "Also Read" and section marker: "${line}"`);
+                      continue;
+                    }
+                  }
+                  
                   // Keep HTML paragraphs
                   if (line.startsWith('<p>') || line.includes('</p>')) {
                     cleanedLines.push(lines[i]);
                     continue;
                   }
                   
-                  // Remove standalone lines that look like headlines (short, no punctuation at end, or quotes)
-                  // These are often AI-generated summaries that appear after "Also Read"
+                  // Remove standalone lines that look like headlines or fragments
+                  // These are often AI-generated summaries or fragments that appear after "Also Read"
+                  const trimmedLine = line.trim();
                   const isStandaloneHeadline = 
                     !foundSectionMarker && // Only before section marker
-                    line.length < 100 && // Short line
-                    !line.startsWith('**') && // Not bolded company name
-                    !line.match(/^[A-Z][^.!?]*[.!?]$/) && // Not a complete sentence
-                    (line.includes("'") || line.match(/^[A-Z][a-z]+/)); // Looks like a headline
+                    trimmedLine.length > 0 && // Not empty
+                    trimmedLine.length < 150 && // Short line
+                    !trimmedLine.startsWith('**') && // Not bolded company name
+                    !trimmedLine.startsWith('##') && // Not a section marker
+                    !trimmedLine.startsWith('<') && // Not HTML
+                    (
+                      // Fragment that starts with lowercase and ends with punctuation (e.g., "crashed 71% since the election.")
+                      (trimmedLine.match(/^[a-z].*[.!?]\s*$/) && trimmedLine.length < 100) ||
+                      // Short fragment that doesn't look like a proper paragraph (no capital start or no punctuation)
+                      (trimmedLine.length < 50 && !trimmedLine.match(/^[A-Z][^.!?]*[.!?]\s*$/)) ||
+                      // Looks like a headline with quotes
+                      (trimmedLine.includes("'") && trimmedLine.match(/^[A-Z][a-z]+/))
+                    );
                   
                   if (isStandaloneHeadline) {
-                    console.log(`[CLEANUP] Removing standalone headline-like line after "Also Read": "${line}"`);
+                    console.log(`[CLEANUP] Removing standalone headline-like line or fragment after "Also Read": "${trimmedLine}"`);
                     continue; // Skip this line
                   }
                   
@@ -4216,6 +4330,41 @@ export async function POST(request: Request) {
           // We no longer need to insert the section marker here since it's handled above
           
           // Post-process Earnings & Analyst Outlook section to format with bold labels
+          // Re-fetch P/E ratio and recent analyst actions for post-processing
+          let peRatioForPost: number | null = null;
+          let useForwardPEForPost = false;
+          let recentAnalystActionsForPost: any[] = [];
+          
+          try {
+            const BENZINGA_API_KEY = process.env.BENZINGA_API_KEY;
+            if (BENZINGA_API_KEY) {
+              // Fetch P/E ratio
+              const benzingaRes = await fetch(`https://api.benzinga.com/api/v2/quoteDelayed?token=${BENZINGA_API_KEY}&symbols=${ticker}`);
+              if (benzingaRes.ok) {
+                const benzingaData = await benzingaRes.json();
+                if (benzingaData && benzingaData[ticker]) {
+                  const quote = benzingaData[ticker];
+                  peRatioForPost = quote.pe || quote.priceEarnings || quote.pe_ratio || null;
+                }
+              }
+              
+              // Fetch recent analyst actions
+              recentAnalystActionsForPost = await fetchRecentAnalystActions(ticker, 3);
+              
+              // Determine Forward P/E if we have earnings data
+              const nextEarningsCheck = await fetchNextEarningsDate(ticker);
+              if (nextEarningsCheck && typeof nextEarningsCheck === 'object') {
+                const trailingEPS = nextEarningsCheck.eps_prior ? parseFloat(nextEarningsCheck.eps_prior.toString()) : null;
+                const forwardEPS = nextEarningsCheck.eps_estimate ? parseFloat(nextEarningsCheck.eps_estimate.toString()) : null;
+                if (trailingEPS !== null && forwardEPS !== null) {
+                  useForwardPEForPost = trailingEPS < 0 && forwardEPS > 0;
+                }
+              }
+            }
+          } catch (error) {
+            console.error('Error fetching P/E or analyst actions for post-processing:', error);
+          }
+          
           const earningsSectionMarker = /##\s*Section:\s*Earnings\s*&\s*Analyst\s*Outlook/i;
           const earningsSectionMatch = analysisWithPriceAction.match(earningsSectionMarker);
           console.log('[EARNINGS FORMAT] Checking for Earnings section marker:', !!earningsSectionMatch);
@@ -4226,10 +4375,16 @@ export async function POST(request: Request) {
             const earningsContent = afterEarningsMarker.substring(0, earningsSectionEnd).trim();
             
             console.log('[EARNINGS FORMAT] Earnings content length:', earningsContent.length);
-            console.log('[EARNINGS FORMAT] Already formatted?', earningsContent.includes('<strong>EPS Estimate</strong>'));
+            console.log('[EARNINGS FORMAT] Has <ul> tags?', earningsContent.includes('<ul>'));
+            console.log('[EARNINGS FORMAT] Has "Analyst Consensus & Recent Actions"?', earningsContent.includes('Analyst Consensus & Recent Actions'));
             
-            // Check if content is already formatted (has bullet points with <strong> tags for labels)
-            if (!earningsContent.includes('<ul>') && !earningsContent.includes('<strong>EPS Estimate</strong>') && !earningsContent.includes('<strong>Revenue Estimate</strong>')) {
+            // Check if content is already in the NEW format (has <ul> tags AND "Analyst Consensus & Recent Actions" subsection)
+            // We want to reformat if it's in the old format (even if it has bold labels or structured lines)
+            const hasNewFormatStructure = earningsContent.includes('<ul>') && earningsContent.includes('Analyst Consensus & Recent Actions');
+            const hasOldFormatStructure = earningsContent.match(/^(EPS Estimate|Revenue Estimate|Analyst Consensus):/im);
+            
+            // Always reformat unless it's already in the new format
+            if (!hasNewFormatStructure) {
               // Extract earnings data from the content - handle multiple date patterns
               // Try multiple patterns for date extraction
               // First try to match full date format: "on February 26, 2026"
@@ -4242,19 +4397,20 @@ export async function POST(request: Request) {
               // Try narrative format first, then structured format
               let epsEstimateMatch = earningsContent.match(/earnings per share of \$([\d.-]+)/i);
               let epsPriorMatch = earningsContent.match(/(?:up from|down from|compared to|from the same quarter last year|from a loss of) \$([\d.-]+)/i);
-              let revenueEstimateMatch = earningsContent.match(/revenue of (\$[\d.]+[BM])/i);
-              let revenuePriorMatch = earningsContent.match(/revenue.*?(?:up from|down from|compared to|from the same quarter last year|from the prior-year period) (\$[\d.]+[BM])/i);
+              // Match revenue with "billion"/"million" as words or "B"/"M" as letters
+              let revenueEstimateMatch = earningsContent.match(/revenue of (\$[\d.]+(?:\s+)?(?:[BM]|(?:[BM]illion)))/i);
+              let revenuePriorMatch = earningsContent.match(/revenue.*?(?:up from|down from|compared to|from the same quarter last year|from the prior-year period) (\$[\d.]+(?:\s+)?(?:[BM]|(?:[BM]illion)))/i);
               let consensusRatingMatch = earningsContent.match(/(?:consensus|has a) ([A-Za-z]+) rating/i);
               let priceTargetMatch = earningsContent.match(/price target of \$([\d.]+)/i);
               
-              // If narrative format didn't match, try structured format (e.g., "EPS Estimate: $0.73")
+              // If narrative format didn't match, try structured format (e.g., "EPS Estimate: $0.73" or "<strong>EPS Estimate</strong>: $0.73")
               if (!epsEstimateMatch) {
-                epsEstimateMatch = earningsContent.match(/EPS Estimate:\s*\$([\d.-]+)/i);
-                epsPriorMatch = earningsContent.match(/EPS Estimate:.*?\((?:Up|Down) from \$([\d.-]+) YoY\)/i);
+                epsEstimateMatch = earningsContent.match(/(?:<strong>)?EPS Estimate(?:<\/strong>)?:\s*\$([\d.-]+)/i);
+                epsPriorMatch = earningsContent.match(/(?:<strong>)?EPS Estimate(?:<\/strong>)?:.*?\((?:Up|Down) from \$([\d.-]+) YoY\)/i);
               }
               if (!revenueEstimateMatch) {
-                revenueEstimateMatch = earningsContent.match(/Revenue Estimate:\s*(\$[\d.]+[BM])/i);
-                revenuePriorMatch = earningsContent.match(/Revenue Estimate:.*?\((?:Up|Down) from (\$[\d.]+[BM]) YoY\)/i);
+                revenueEstimateMatch = earningsContent.match(/(?:<strong>)?Revenue Estimate(?:<\/strong>)?:\s*(\$[\d.]+(?:\s+)?(?:[BM]|(?:[BM]illion)))/i);
+                revenuePriorMatch = earningsContent.match(/(?:<strong>)?Revenue Estimate(?:<\/strong>)?:.*?\((?:Up|Down) from (\$[\d.]+(?:\s+)?(?:[BM]|(?:[BM]illion))) YoY\)/i);
               }
               // Try to extract consensus and price target from structured format if narrative format didn't match
               let extractedRating: string | null = null;
@@ -4267,23 +4423,50 @@ export async function POST(request: Request) {
                 }
               }
               
-              // Check if content already has formatted lines (e.g., "EPS Estimate: $0.73")
-              const formattedLines: string[] = [];
-              // Match lines that start with these labels (multiline mode with ^ and $)
-              const epsLineMatch = earningsContent.match(/^EPS Estimate:\s*(.+?)(?:\n|$)/im);
-              const revenueLineMatch = earningsContent.match(/^Revenue Estimate:\s*(.+?)(?:\n|$)/im);
-              const consensusLineMatch = earningsContent.match(/^Analyst Consensus:\s*(.+?)(?:\n|$)/im);
+              // Check if content already has formatted lines (e.g., "EPS Estimate: $0.73" or "<strong>EPS Estimate</strong>: $0.73")
+              // But we'll still extract them and reformat according to the new structure
+              // Match both plain text and HTML tags
+              const epsLineMatch = earningsContent.match(/(?:<strong>)?EPS Estimate(?:<\/strong>)?:\s*(.+?)(?:\n|$)/im);
+              const revenueLineMatch = earningsContent.match(/(?:<strong>)?Revenue Estimate(?:<\/strong>)?:\s*(.+?)(?:\n|$)/im);
+              const consensusLineMatch = earningsContent.match(/(?:<strong>)?Analyst Consensus(?:<\/strong>)?:\s*(.+?)(?:\n|$)/im);
               
-              if (epsLineMatch || revenueLineMatch || consensusLineMatch) {
-                // Content is already formatted - just extract and wrap in HTML
-                if (epsLineMatch) {
-                  formattedLines.push(`<strong>EPS Estimate</strong>: ${epsLineMatch[1].trim()}`);
+              // Extract values from formatted lines if they exist
+              if (epsLineMatch && !epsEstimateMatch) {
+                const epsValue = epsLineMatch[1].trim();
+                // Try to extract EPS estimate value
+                const epsMatch = epsValue.match(/\$([\d.-]+)/);
+                if (epsMatch) {
+                  epsEstimateMatch = [null, epsMatch[1]] as RegExpMatchArray;
+                  // Try to extract prior EPS
+                  const priorMatch = epsValue.match(/(?:up from|down from|Up from|Down from)\s+\$([\d.-]+)/i);
+                  if (priorMatch) {
+                    epsPriorMatch = [null, priorMatch[1]] as RegExpMatchArray;
+                  }
                 }
-                if (revenueLineMatch) {
-                  formattedLines.push(`<strong>Revenue Estimate</strong>: ${revenueLineMatch[1].trim()}`);
+              }
+              if (revenueLineMatch && !revenueEstimateMatch) {
+                const revValue = revenueLineMatch[1].trim();
+                // Try to extract revenue estimate value (handle "Billion"/"Million" as words or "B"/"M" as letters)
+                const revMatch = revValue.match(/(\$[\d.]+(?:\s+)?(?:[BM]|(?:[BM]illion)))/i);
+                if (revMatch) {
+                  revenueEstimateMatch = [null, revMatch[1]] as RegExpMatchArray;
+                  // Try to extract prior revenue
+                  const priorMatch = revValue.match(/(?:up from|down from|Up from|Down from)\s+(\$[\d.]+(?:\s+)?(?:[BM]|(?:[BM]illion)))/i);
+                  if (priorMatch) {
+                    revenuePriorMatch = [null, priorMatch[1]] as RegExpMatchArray;
+                  }
                 }
-                if (consensusLineMatch) {
-                  formattedLines.push(`<strong>Analyst Consensus</strong>: ${consensusLineMatch[1].trim()}`);
+              }
+              if (consensusLineMatch && (!extractedRating || !extractedPriceTarget)) {
+                const consensusValue = consensusLineMatch[1].trim();
+                // Extract rating and price target
+                const ratingMatch = consensusValue.match(/([A-Za-z]+)\s+Rating/i);
+                const targetMatch = consensusValue.match(/\$([\d.]+)/);
+                if (ratingMatch && !extractedRating) {
+                  extractedRating = ratingMatch[1];
+                }
+                if (targetMatch && !extractedPriceTarget) {
+                  extractedPriceTarget = targetMatch[1];
                 }
               }
               
@@ -4294,103 +4477,169 @@ export async function POST(request: Request) {
                 hasRevenue: !!revenueEstimateMatch,
                 hasConsensus: !!consensusRatingMatch,
                 hasPriceTarget: !!priceTargetMatch,
-                hasFormattedLines: formattedLines.length > 0,
                 contentSample: earningsContent.substring(0, 500)
               });
               
-              // Build formatted lines with bold labels
-              const lines: string[] = [];
+              // Build formatted section with new structure (separate Hard Numbers from Opinions)
               let intro = '';
               let priceTargetNote = '';
               
-              // Use pre-formatted lines if found, otherwise extract from narrative format
-              if (formattedLines.length > 0) {
-                lines.push(...formattedLines);
-                // Extract intro sentence from the beginning of the content (first sentence before formatted lines)
+              // Extract intro sentence
+              if (earningsDateMatch && earningsDateMatch[1]) {
+                intro = `Investors are looking ahead to the next earnings report on ${earningsDateMatch[1].trim()}.`;
+              } else {
+                // Try to extract intro from content
                 const introMatch = earningsContent.match(/^(.+?\.)(?:\n\n|\nEPS Estimate:|$)/m);
                 intro = introMatch ? introMatch[1].trim() : 'Investors are looking ahead to the next earnings report.';
-              } 
+              }
               
-              if (lines.length === 0 && earningsDateMatch && earningsDateMatch[1]) {
-                intro = `Investors are looking ahead to the next earnings report on ${earningsDateMatch[1].trim()}.`;
-                
-                if (epsEstimateMatch) {
-                  const epsEst = epsEstimateMatch[1];
-                  const epsPrior = epsPriorMatch ? epsPriorMatch[1] : null;
-                  const direction = epsPrior ? (parseFloat(epsEst) > parseFloat(epsPrior) ? 'Up' : parseFloat(epsEst) < parseFloat(epsPrior) ? 'Down' : '') : '';
-                  lines.push(`<strong>EPS Estimate</strong>: $${epsEst}${epsPrior && direction ? ` (${direction} from $${epsPrior} YoY)` : ''}`);
-                }
-                
-                if (revenueEstimateMatch) {
-                  const revEst = revenueEstimateMatch[1];
-                  const revPrior = revenuePriorMatch ? revenuePriorMatch[1] : null;
-                  const direction = revPrior ? (parseFloat(revEst.replace(/[$,BM]/g, '')) > parseFloat(revPrior.replace(/[$,BM]/g, '')) ? 'Up' : parseFloat(revEst.replace(/[$,BM]/g, '')) < parseFloat(revPrior.replace(/[$,BM]/g, '')) ? 'Down' : '') : '';
-                  lines.push(`<strong>Revenue Estimate</strong>: ${revEst}${revPrior && direction ? ` (${direction} from ${revPrior} YoY)` : ''}`);
-                }
-                
-                const ratingValue = extractedRating || (consensusRatingMatch ? consensusRatingMatch[1] : null);
-                const targetValue = extractedPriceTarget || (priceTargetMatch ? priceTargetMatch[1] : null);
-                
-                if (ratingValue && targetValue) {
-                  const rating = ratingValue.charAt(0) + ratingValue.slice(1).toLowerCase();
-                  const target = parseFloat(targetValue);
-                  lines.push(`<strong>Analyst Consensus</strong>: ${rating} Rating ($${target.toFixed(2)} Avg Price Target)`);
-                  
-                  // Add price comparison logic note
-                  if (technicalData.currentPrice) {
-                    const currentPrice = technicalData.currentPrice;
-                    const priceDiff = ((target - currentPrice) / currentPrice) * 100;
-                    if (priceDiff > 0) {
-                      // Target is above current price = upside potential
-                      priceTargetNote = `\n\n<strong>Note:</strong> <em>The average price target implies significant upside potential from current levels.</em>`;
-                    } else {
-                      // Target is below current price = trading at premium
-                      priceTargetNote = `\n\n<strong>Note:</strong> <em>The average price target suggests the stock is trading at a premium to analyst targets.</em>`;
-                    }
-                  }
-                } else if (ratingValue) {
-                  const rating = ratingValue.charAt(0) + ratingValue.slice(1).toLowerCase();
-                  lines.push(`<strong>Analyst Consensus</strong>: ${rating} Rating`);
-                } else if (targetValue) {
-                  const target = parseFloat(targetValue);
-                  lines.push(`<strong>Analyst Consensus</strong>: $${target.toFixed(2)} Avg Price Target`);
-                  
-                  // Add price comparison logic note
-                  if (technicalData.currentPrice) {
-                    const currentPrice = technicalData.currentPrice;
-                    const priceDiff = ((target - currentPrice) / currentPrice) * 100;
-                    if (priceDiff > 0) {
-                      priceTargetNote = `\n\n<strong>Note:</strong> <em>The average price target implies significant upside potential from current levels.</em>`;
-                    } else {
-                      priceTargetNote = `\n\n<strong>Note:</strong> <em>The average price target suggests the stock is trading at a premium to analyst targets.</em>`;
-                    }
+              // Build "Hard Numbers" lines (EPS, Revenue, P/E)
+              const hardNumbers: string[] = [];
+              
+              if (epsEstimateMatch) {
+                const epsEst = epsEstimateMatch[1];
+                const epsPrior = epsPriorMatch ? epsPriorMatch[1] : null;
+                const direction = epsPrior ? (parseFloat(epsEst) > parseFloat(epsPrior) ? 'Up' : parseFloat(epsEst) < parseFloat(epsPrior) ? 'Down' : '') : '';
+                hardNumbers.push(`<strong>EPS Estimate</strong>: $${epsEst}${epsPrior && direction ? ` (${direction} from $${epsPrior} YoY)` : ''}`);
+              }
+              
+              if (revenueEstimateMatch) {
+                const revEst = revenueEstimateMatch[1];
+                const revPrior = revenuePriorMatch ? revenuePriorMatch[1] : null;
+                const direction = revPrior ? (parseFloat(revEst.replace(/[$,BM]/g, '')) > parseFloat(revPrior.replace(/[$,BM]/g, '')) ? 'Up' : parseFloat(revEst.replace(/[$,BM]/g, '')) < parseFloat(revPrior.replace(/[$,BM]/g, '')) ? 'Down' : '') : '';
+                hardNumbers.push(`<strong>Revenue Estimate</strong>: ${revEst}${revPrior && direction ? ` (${direction} from ${revPrior} YoY)` : ''}`);
+              }
+              
+              // Add P/E ratio if available (use post-processing values)
+              if (peRatioForPost) {
+                const peLabel = useForwardPEForPost ? 'Forward P/E' : 'P/E';
+                const peAssessment = peRatioForPost > 25 ? 'premium valuation' : peRatioForPost < 15 ? 'value opportunity' : 'fair valuation';
+                hardNumbers.push(`<strong>Valuation</strong>: ${peLabel} of ${peRatioForPost.toFixed(1)}x (Indicates ${peAssessment})`);
+              }
+              
+              // Extract consensus data for "Analyst Consensus & Recent Actions" subsection
+              const ratingValue = extractedRating || (consensusRatingMatch ? consensusRatingMatch[1] : null);
+              const targetValue = extractedPriceTarget || (priceTargetMatch ? priceTargetMatch[1] : null);
+              
+              // Extract recent analyst actions from content or use fetched data
+              let analystActionsHTML = '';
+              if (recentAnalystActionsForPost && recentAnalystActionsForPost.length > 0) {
+                // Format as HTML bullet points with bold firm names
+                const analystBullets = recentAnalystActionsForPost.map((action: any) => 
+                  `  <li><strong>${action.firm}</strong>: ${action.action}</li>`
+                ).join('\n');
+                analystActionsHTML = `<ul>\n${analystBullets}\n</ul>`;
+              } else {
+                // Try to extract from content
+                const analystActionsMatch = earningsContent.match(/Recent analyst moves include:([\s\S]*?)(?:\n\n|$)/i);
+                if (analystActionsMatch) {
+                  // If already formatted, use as-is, otherwise format
+                  const extractedText = analystActionsMatch[1].trim();
+                  if (extractedText.includes('<ul>')) {
+                    analystActionsHTML = extractedText;
+                  } else {
+                    // Parse and reformat plain text lines
+                    const lines = extractedText.split('\n').filter(line => line.trim());
+                    const analystBullets = lines.map((line: string) => {
+                      const match = line.match(/^([^:]+):\s*(.+)$/);
+                      if (match) {
+                        return `  <li><strong>${match[1].trim()}</strong>: ${match[2].trim()}</li>`;
+                      }
+                      return `  <li>${line.trim()}</li>`;
+                    }).join('\n');
+                    analystActionsHTML = `<ul>\n${analystBullets}\n</ul>`;
                   }
                 }
               }
               
-              // Format the section if we have lines
-              if (lines.length > 0 && intro) {
-                // Format as HTML bullet points with bold labels
-                const formattedSection = `${intro}\n\n<ul>\n${lines.map(l => `  <li>${l}</li>`).join('\n')}\n</ul>${priceTargetNote}`;
+              // Generate Valuation Insight with analysis
+              if (peRatioForPost && ratingValue && targetValue && technicalData.currentPrice) {
+                const target = parseFloat(targetValue);
+                const currentPrice = technicalData.currentPrice;
+                const priceDiff = ((target - currentPrice) / currentPrice) * 100;
+                
+                // Calculate earnings growth if we have EPS estimates
+                let earningsGrowthText = '';
+                if (epsEstimateMatch && epsPriorMatch) {
+                  const epsEst = parseFloat(epsEstimateMatch[1]);
+                  const epsPrior = parseFloat(epsPriorMatch[1]);
+                  if (epsPrior !== 0 && !isNaN(epsEst) && !isNaN(epsPrior)) {
+                    const growthPercent = ((epsEst - epsPrior) / Math.abs(epsPrior)) * 100;
+                    if (growthPercent > 0) {
+                      earningsGrowthText = `${Math.round(growthPercent)}% expected earnings growth`;
+                    } else if (growthPercent < 0) {
+                      earningsGrowthText = `${Math.abs(Math.round(growthPercent))}% expected earnings decline`;
+                    }
+                  }
+                }
+                
+                // Build valuation insight based on P/E, consensus, and price target
+                const peAssessment = peRatioForPost > 25 ? 'premium P/E multiple' : peRatioForPost < 15 ? 'value P/E multiple' : 'fair P/E multiple';
+                const ratingStrength = ratingValue.toLowerCase().includes('buy') || ratingValue.toLowerCase().includes('strong buy') ? 'strong consensus' : 'consensus';
+                
+                // Build the insight text
+                let insightText = `While the stock trades at a ${peAssessment}, the ${ratingStrength}`;
+                if (earningsGrowthText) {
+                  insightText += ` and ${earningsGrowthText}`;
+                } else {
+                  insightText += ' and rising estimates';
+                }
+                insightText += ` suggest analysts view ${earningsGrowthText ? 'this growth' : 'the growth prospects'} as justification for ${priceDiff > 0 ? `the ${Math.round(priceDiff)}% upside to analyst targets` : 'the current valuation'}.`;
+                
+                priceTargetNote = `\n\n<strong>Valuation Insight:</strong> <em>${insightText}</em>`;
+              } else if (peRatioForPost && ratingValue) {
+                // Simplified version if we don't have price target
+                const peAssessment = peRatioForPost > 25 ? 'premium P/E multiple' : peRatioForPost < 15 ? 'value P/E multiple' : 'fair P/E multiple';
+                const ratingStrength = ratingValue.toLowerCase().includes('buy') || ratingValue.toLowerCase().includes('strong buy') ? 'strong consensus' : 'consensus';
+                priceTargetNote = `\n\n<strong>Valuation Insight:</strong> <em>The stock trades at a ${peAssessment}, with ${ratingStrength} supporting the current valuation.</em>`;
+              }
+              
+              // Format the section if we have data
+              if (hardNumbers.length > 0 || ratingValue || targetValue || analystActionsHTML) {
+                // Build the formatted section
+                let formattedSection = `${intro}\n\n`;
+                
+                // Add "Hard Numbers" bullet points
+                if (hardNumbers.length > 0) {
+                  formattedSection += `<ul>\n${hardNumbers.map(l => `  <li>${l}</li>`).join('\n')}\n</ul>`;
+                }
+                
+                // Add "Analyst Consensus & Recent Actions" subsection if we have consensus data or actions
+                if (ratingValue || targetValue || analystActionsHTML) {
+                  formattedSection += `\n\n<strong>Analyst Consensus & Recent Actions:</strong>\n`;
+                  
+                  if (ratingValue && targetValue) {
+                    const rating = ratingValue.charAt(0) + ratingValue.slice(1).toLowerCase();
+                    const target = parseFloat(targetValue);
+                    formattedSection += `The stock carries a <strong>${rating}</strong> Rating with an average price target of <strong>$${target.toFixed(2)}</strong>.`;
+                  } else if (ratingValue) {
+                    const rating = ratingValue.charAt(0) + ratingValue.slice(1).toLowerCase();
+                    formattedSection += `The stock carries a <strong>${rating}</strong> Rating.`;
+                  } else if (targetValue) {
+                    const target = parseFloat(targetValue);
+                    formattedSection += `The stock has an average price target of <strong>$${target.toFixed(2)}</strong>.`;
+                  }
+                  
+                  if (analystActionsHTML) {
+                    formattedSection += ` Recent analyst moves include:\n${analystActionsHTML}`;
+                  } else if (!recentAnalystActionsForPost || recentAnalystActionsForPost.length === 0) {
+                    formattedSection += ` No recent analyst actions available.`;
+                  }
+                }
+                
+                formattedSection += priceTargetNote;
+                
                 // Replace the entire earnings content with the formatted version
                 const beforeEarnings = analysisWithPriceAction.substring(0, earningsSectionMatch.index + earningsSectionMatch[0].length);
                 const afterEarnings = analysisWithPriceAction.substring(earningsSectionMatch.index + earningsSectionMatch[0].length + earningsSectionEnd);
                 analysisWithPriceAction = `${beforeEarnings}\n\n${formattedSection}\n\n${afterEarnings}`;
-                console.log('✅ Formatted Earnings & Analyst Outlook section with bold labels and bullet points');
-              } else if (lines.length > 0) {
-                // We have lines but no intro - use default
-                intro = 'Investors are looking ahead to the next earnings report.';
-                const formattedSection = `${intro}\n\n<ul>\n${lines.map(l => `  <li>${l}</li>`).join('\n')}\n</ul>${priceTargetNote}`;
-                const beforeEarnings = analysisWithPriceAction.substring(0, earningsSectionMatch.index + earningsSectionMatch[0].length);
-                const afterEarnings = analysisWithPriceAction.substring(earningsSectionMatch.index + earningsSectionMatch[0].length + earningsSectionEnd);
-                analysisWithPriceAction = `${beforeEarnings}\n\n${formattedSection}\n\n${afterEarnings}`;
-                console.log('✅ Formatted Earnings & Analyst Outlook section (using default intro)');
+                console.log('✅ Formatted Earnings & Analyst Outlook section with P/E and recent analyst actions');
               } else {
                 console.log('⚠️ Could not extract earnings data from content - regex patterns may need updating');
                 console.log('Earnings content sample:', earningsContent.substring(0, 500));
               }
             } else {
-              console.log('✅ Earnings section already formatted with bold labels');
+              console.log('✅ Earnings section already in new format (has <ul> and "Analyst Consensus & Recent Actions" subsection)');
             }
           } else {
             console.log('⚠️ Earnings section marker not found in analysis');
@@ -4458,22 +4707,73 @@ export async function POST(request: Request) {
               }
             }
           }
-          
-          // Now insert "Read Next" at the very end, after the price action line
-          if (!analysisWithPriceAction.includes('Read Next:')) {
-            console.log('Adding "Read Next" section at the end');
-            // Always use HTML link format (for clickable links)
-            const readNextSection = `<p>Read Next: <a href="${relatedArticles[1]?.url || relatedArticles[0].url}">${relatedArticles[1]?.headline || relatedArticles[0].headline}</a></p>`;
-            
-            // Append to the end of the content
-            analysisWithPriceAction = `${analysisWithPriceAction.trim()}\n\n${readNextSection}`;
-            console.log('✅ Added "Read Next" section at the end');
-          } else {
-            console.log('"Read Next" section already exists');
-          }
         } else {
           console.log('No related articles available');
-          // Note: ETF section and Price Action section are already added earlier
+        }
+        
+        // Add ETF section and Price Action section AFTER all section ordering is complete
+        // Find where to insert ETF section (before "## Section: Price Action" or before price action line)
+        const priceActionSectionMarker = /##\s*Section:\s*Price Action/i;
+        const priceActionMarkerMatch = analysisWithPriceAction.match(priceActionSectionMarker);
+        const priceActionTextMatch = analysisWithPriceAction.match(/(?:<strong>.*?)?Price Action:(?:<\/strong>)?/i);
+        
+        if (etfInfo) {
+          // Insert ETF section before Price Action section marker or price action line
+          if (priceActionMarkerMatch && priceActionMarkerMatch.index !== undefined) {
+            // Insert before "## Section: Price Action"
+            const beforePriceAction = analysisWithPriceAction.substring(0, priceActionMarkerMatch.index).trim();
+            const afterPriceAction = analysisWithPriceAction.substring(priceActionMarkerMatch.index);
+            analysisWithPriceAction = `${beforePriceAction}${etfInfo}\n\n${afterPriceAction}`;
+            console.log('✅ Added ETF section before Price Action section marker');
+          } else if (priceActionTextMatch && priceActionTextMatch.index !== undefined) {
+            // Insert before price action line (if no section marker)
+            const beforePriceAction = analysisWithPriceAction.substring(0, priceActionTextMatch.index).trim();
+            const afterPriceAction = analysisWithPriceAction.substring(priceActionTextMatch.index);
+            analysisWithPriceAction = `${beforePriceAction}${etfInfo}\n\n${afterPriceAction}`;
+            console.log('✅ Added ETF section before price action line');
+          } else {
+            // No price action found, append ETF section at the end
+            analysisWithPriceAction = `${analysisWithPriceAction.trim()}${etfInfo}`;
+            console.log('✅ Added ETF section at the end (no price action found)');
+          }
+        }
+        
+        // Add Price Action section marker and price action line if not already present
+        if (priceAction) {
+          const hasPriceActionMarker = !!priceActionMarkerMatch;
+          const hasPriceActionText = !!priceActionTextMatch;
+          
+          if (!hasPriceActionMarker && !hasPriceActionText) {
+            // No price action found, add section marker and price action line at the end
+            analysisWithPriceAction += `\n\n## Section: Price Action\n\n${priceAction}`;
+            console.log('✅ Added Price Action section marker and price action line at the end');
+          } else if (!hasPriceActionMarker && hasPriceActionText) {
+            // Price action text exists but no section marker - add marker before it
+            if (priceActionTextMatch && priceActionTextMatch.index !== undefined) {
+              const beforePriceAction = analysisWithPriceAction.substring(0, priceActionTextMatch.index).trim();
+              const afterPriceAction = analysisWithPriceAction.substring(priceActionTextMatch.index);
+              analysisWithPriceAction = `${beforePriceAction}\n\n## Section: Price Action\n\n${afterPriceAction}`;
+              console.log('✅ Added Price Action section marker before existing price action text');
+            }
+          }
+          // If both marker and text exist, do nothing (already present)
+        }
+        
+        // Now insert "Read Next" at the VERY END, after ETF and Price Action sections
+        if (relatedArticles && relatedArticles.length > 0) {
+          // Remove any existing "Read Next" section first (it might have been added earlier by AI or other logic)
+          const readNextPattern = /<p>Read Next:.*?<\/p>/gi;
+          analysisWithPriceAction = analysisWithPriceAction.replace(readNextPattern, '').trim();
+          // Also handle plain text format (no <p> tags)
+          const readNextPlainPattern = /Read Next:.*?(?=\n\n|$)/gi;
+          analysisWithPriceAction = analysisWithPriceAction.replace(readNextPlainPattern, '').trim();
+          
+          // Always use HTML link format (for clickable links)
+          const readNextSection = `<p>Read Next: <a href="${relatedArticles[1]?.url || relatedArticles[0].url}">${relatedArticles[1]?.headline || relatedArticles[0].headline}</a></p>`;
+          
+          // Append to the very end of the content
+          analysisWithPriceAction = `${analysisWithPriceAction.trim()}\n\n${readNextSection}`;
+          console.log('✅ Added "Read Next" section at the very end (after ETF and Price Action)');
         }
 
         return {
