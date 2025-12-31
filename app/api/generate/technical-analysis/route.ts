@@ -3262,7 +3262,7 @@ CRITICAL INSTRUCTIONS FOR NEWS INTEGRATION:
 
 TASK: ${newsContext && (newsContext.scrapedContent || (newsContext.selectedArticles && newsContext.selectedArticles.length > 0)) ? `Write a conversational WGO article that helps readers understand "What's Going On" with the stock. LEAD with the current price move (direction and day of week, e.g., "shares are tumbling on Monday" or "shares are surging on Tuesday"). Use ONLY the day name (e.g., "on Thursday", "on Monday") - DO NOT include the date (e.g., do NOT use "on Thursday, December 18, 2025" or any date format). DO NOT include the percentage in the first paragraph. Then reference the news article provided above AND broader market context to explain what's going on - either the news is contributing to the move, OR the stock is moving despite positive/negative news (suggesting larger market elements may be at play). ${marketContext ? 'Use the broader market context (indices, sectors, market breadth) to provide additional context - is the stock moving with or against broader market trends? Reference specific sector performance when relevant (e.g., "Technology stocks are broadly lower today, contributing to the decline" or "Despite a strong market day, the stock is down, suggesting company-specific concerns").' : ''} Include the appropriate hyperlink in the first paragraph (three-word for Benzinga, one-word with outlet credit for others). When mentioning other companies in the article, always include their ticker symbol with exchange (e.g., "Snowflake Inc. (NYSE:SNOW)").
 
-MANDATORY: You MUST include section markers in your output. Insert "## Section: The Catalyst" AFTER the "Also Read" section (which comes after the FIRST paragraph), "## Section: Technical Analysis" after news paragraphs, "## Section: Earnings & Analyst Outlook" if earnings or analyst data is available (MANDATORY if consensus ratings or earnings date data is provided), and "## Section: Price Action" before the final price paragraph. These are REQUIRED - do not skip them.
+MANDATORY: You MUST include section markers in your output. Insert "## Section: The Catalyst" AFTER the "Also Read" section (which comes after the FIRST paragraph), "## Section: Technical Analysis" after news paragraphs, "## Section: Earnings & Analyst Outlook" if earnings or analyst data is available (MANDATORY if consensus ratings or earnings date data is provided), and "## Section: Price Action" immediately before the automatically-generated price action line at the end. CRITICAL: Do NOT write any paragraph or content in the "## Section: Price Action" section - the price action line is automatically generated and added after your article. Just place the section marker "## Section: Price Action" and end your article there. These section markers are REQUIRED - do not skip them.
 
 CRITICAL: The second paragraph (which appears AFTER "## Section: The Catalyst") and optionally third paragraph MUST include detailed, specific information from the news source article. Do NOT just summarize or use vague language. Extract and include:
 - Specific numbers, figures, percentages, dates, or metrics from the article
@@ -3299,7 +3299,7 @@ Rules for Headers:
    - Insert "## Section: The Catalyst" AFTER the "Also Read" section (which appears after the first paragraph) and BEFORE the detailed news paragraphs (Paragraph 2 with the specific details).
    - Insert "## Section: Technical Analysis" immediately after the news paragraphs and BEFORE the transition to technical data.
    - Insert "## Section: Earnings & Analyst Outlook" AFTER "## Section: Technical Analysis" if earnings data or analyst consensus ratings are available (this is MANDATORY when earnings/analyst data is provided).
-   - Insert "## Section: Price Action" BEFORE the final paragraph summarizing the current price/closing data.
+   - Insert "## Section: Price Action" immediately before the automatically-generated price action line at the end of the article. CRITICAL: Do NOT write any paragraph or content in this section - just place the section marker. The price action line is automatically generated and will be added after your article ends.
 
 CRITICAL: 
 - Do not try to write creative headers. Use these EXACT generic labels.
@@ -3472,7 +3472,7 @@ FINAL CRITICAL REMINDER - SECTION MARKERS (THIS IS NOT OPTIONAL): Your article o
 - "## Section: The Catalyst" AFTER the "Also Read" section (which appears after the first paragraph)
 - "## Section: Technical Analysis" after the news paragraphs  
 - "## Section: Analyst Ratings" if analyst overview is included
-- "## Section: Price Action" before the final price paragraph
+- "## Section: Price Action" immediately before the automatically-generated price action line (do NOT write any content in this section - just place the marker)
 IF YOU DO NOT INCLUDE THESE SECTION MARKERS IN YOUR OUTPUT, YOUR RESPONSE IS INCOMPLETE AND INCORRECT.`;
 
 
