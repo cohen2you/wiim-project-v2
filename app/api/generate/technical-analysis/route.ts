@@ -4239,12 +4239,50 @@ export async function POST(request: Request) {
                 earningsDateMatch = earningsContent.match(/(?:scheduled for|on|report on|earnings report on) ([^,]+?)(?:,|\.|$)/i);
               }
               
-              const epsEstimateMatch = earningsContent.match(/earnings per share of \$([\d.-]+)/i);
-              const epsPriorMatch = earningsContent.match(/(?:up from|down from|compared to|from the same quarter last year) \$([\d.-]+)/i);
-              const revenueEstimateMatch = earningsContent.match(/revenue of (\$[\d.]+[BM])/i);
-              const revenuePriorMatch = earningsContent.match(/revenue.*?(?:up from|down from|compared to|from the same quarter last year|from the prior-year period) (\$[\d.]+[BM])/i);
-              const consensusRatingMatch = earningsContent.match(/(?:consensus|has a) ([A-Za-z]+) rating/i);
-              const priceTargetMatch = earningsContent.match(/price target of \$([\d.]+)/i);
+              // Try narrative format first, then structured format
+              let epsEstimateMatch = earningsContent.match(/earnings per share of \$([\d.-]+)/i);
+              let epsPriorMatch = earningsContent.match(/(?:up from|down from|compared to|from the same quarter last year|from a loss of) \$([\d.-]+)/i);
+              let revenueEstimateMatch = earningsContent.match(/revenue of (\$[\d.]+[BM])/i);
+              let revenuePriorMatch = earningsContent.match(/revenue.*?(?:up from|down from|compared to|from the same quarter last year|from the prior-year period) (\$[\d.]+[BM])/i);
+              let consensusRatingMatch = earningsContent.match(/(?:consensus|has a) ([A-Za-z]+) rating/i);
+              let priceTargetMatch = earningsContent.match(/price target of \$([\d.]+)/i);
+              
+              // If narrative format didn't match, try structured format (e.g., "EPS Estimate: $0.73")
+              if (!epsEstimateMatch) {
+                epsEstimateMatch = earningsContent.match(/EPS Estimate:\s*\$([\d.-]+)/i);
+                epsPriorMatch = earningsContent.match(/EPS Estimate:.*?\((?:Up|Down) from \$([\d.-]+) YoY\)/i);
+              }
+              if (!revenueEstimateMatch) {
+                revenueEstimateMatch = earningsContent.match(/Revenue Estimate:\s*(\$[\d.]+[BM])/i);
+                revenuePriorMatch = earningsContent.match(/Revenue Estimate:.*?\((?:Up|Down) from (\$[\d.]+[BM]) YoY\)/i);
+              }
+              if (!consensusRatingMatch || !priceTargetMatch) {
+                const consensusLineMatch = earningsContent.match(/Analyst Consensus:\s*([A-Za-z]+) Rating.*?\(\$([\d.]+) Avg Price Target\)/i);
+                if (consensusLineMatch) {
+                  consensusRatingMatch = [null, consensusLineMatch[1]];
+                  priceTargetMatch = [null, consensusLineMatch[2]];
+                }
+              }
+              
+              // Check if content already has formatted lines (e.g., "EPS Estimate: $0.73")
+              const formattedLines: string[] = [];
+              // Match lines that start with these labels (multiline mode with ^ and $)
+              const epsLineMatch = earningsContent.match(/^EPS Estimate:\s*(.+?)(?:\n|$)/im);
+              const revenueLineMatch = earningsContent.match(/^Revenue Estimate:\s*(.+?)(?:\n|$)/im);
+              const consensusLineMatch = earningsContent.match(/^Analyst Consensus:\s*(.+?)(?:\n|$)/im);
+              
+              if (epsLineMatch || revenueLineMatch || consensusLineMatch) {
+                // Content is already formatted - just extract and wrap in HTML
+                if (epsLineMatch) {
+                  formattedLines.push(`<strong>EPS Estimate</strong>: ${epsLineMatch[1].trim()}`);
+                }
+                if (revenueLineMatch) {
+                  formattedLines.push(`<strong>Revenue Estimate</strong>: ${revenueLineMatch[1].trim()}`);
+                }
+                if (consensusLineMatch) {
+                  formattedLines.push(`<strong>Analyst Consensus</strong>: ${consensusLineMatch[1].trim()}`);
+                }
+              }
               
               console.log('[EARNINGS FORMAT] Extracting data:', {
                 hasDate: !!earningsDateMatch,
@@ -4253,14 +4291,25 @@ export async function POST(request: Request) {
                 hasRevenue: !!revenueEstimateMatch,
                 hasConsensus: !!consensusRatingMatch,
                 hasPriceTarget: !!priceTargetMatch,
-                contentSample: earningsContent.substring(0, 300)
+                hasFormattedLines: formattedLines.length > 0,
+                contentSample: earningsContent.substring(0, 500)
               });
               
-              // Build formatted lines with bold labels (plain text format, not HTML bullets)
+              // Build formatted lines with bold labels
               const lines: string[] = [];
+              let intro = '';
+              let priceTargetNote = '';
               
-              if (earningsDateMatch && earningsDateMatch[1]) {
-                const intro = `Investors are looking ahead to the next earnings report on ${earningsDateMatch[1].trim()}.`;
+              // Use pre-formatted lines if found, otherwise extract from narrative format
+              if (formattedLines.length > 0) {
+                lines.push(...formattedLines);
+                // Extract intro sentence from the beginning of the content (first sentence before formatted lines)
+                const introMatch = earningsContent.match(/^(.+?\.)(?:\n\n|\nEPS Estimate:|$)/m);
+                intro = introMatch ? introMatch[1].trim() : 'Investors are looking ahead to the next earnings report.';
+              } 
+              
+              if (lines.length === 0 && earningsDateMatch && earningsDateMatch[1]) {
+                intro = `Investors are looking ahead to the next earnings report on ${earningsDateMatch[1].trim()}.`;
                 
                 if (epsEstimateMatch) {
                   const epsEst = epsEstimateMatch[1];
@@ -4276,7 +4325,6 @@ export async function POST(request: Request) {
                   lines.push(`<strong>Revenue Estimate</strong>: ${revEst}${revPrior && direction ? ` (${direction} from ${revPrior} YoY)` : ''}`);
                 }
                 
-                let priceTargetNote = '';
                 if (consensusRatingMatch && priceTargetMatch) {
                   const rating = consensusRatingMatch[1].charAt(0) + consensusRatingMatch[1].slice(1).toLowerCase();
                   const target = parseFloat(priceTargetMatch[1]);
@@ -4306,28 +4354,34 @@ export async function POST(request: Request) {
                     const currentPrice = technicalData.currentPrice;
                     const priceDiff = ((target - currentPrice) / currentPrice) * 100;
                     if (priceDiff > 0) {
-                      priceTargetNote = `\n\nNote: The average price target implies significant upside potential from current levels.`;
+                      priceTargetNote = `\n\n<strong>Note:</strong> <em>The average price target implies significant upside potential from current levels.</em>`;
                     } else {
-                      priceTargetNote = `\n\nNote: The average price target suggests the stock is trading at a premium to analyst targets.`;
+                      priceTargetNote = `\n\n<strong>Note:</strong> <em>The average price target suggests the stock is trading at a premium to analyst targets.</em>`;
                     }
                   }
                 }
-                
-                if (lines.length > 0) {
-                  // Format as HTML bullet points with bold labels
-                  const formattedSection = `${intro}\n\n<ul>\n${lines.map(l => `  <li>${l}</li>`).join('\n')}\n</ul>${priceTargetNote}`;
-                  // Replace the entire earnings content with the formatted version
-                  const beforeEarnings = analysisWithPriceAction.substring(0, earningsSectionMatch.index + earningsSectionMatch[0].length);
-                  const afterEarnings = analysisWithPriceAction.substring(earningsSectionMatch.index + earningsSectionMatch[0].length + earningsSectionEnd);
-                  analysisWithPriceAction = `${beforeEarnings}\n\n${formattedSection}\n\n${afterEarnings}`;
-                  console.log('✅ Formatted Earnings & Analyst Outlook section with bold labels and bullet points');
-                } else {
-                  console.log('⚠️ Could not extract earnings data from content - regex patterns may need updating');
-                  console.log('Earnings content sample:', earningsContent.substring(0, 200));
-                }
+              }
+              
+              // Format the section if we have lines
+              if (lines.length > 0 && intro) {
+                // Format as HTML bullet points with bold labels
+                const formattedSection = `${intro}\n\n<ul>\n${lines.map(l => `  <li>${l}</li>`).join('\n')}\n</ul>${priceTargetNote}`;
+                // Replace the entire earnings content with the formatted version
+                const beforeEarnings = analysisWithPriceAction.substring(0, earningsSectionMatch.index + earningsSectionMatch[0].length);
+                const afterEarnings = analysisWithPriceAction.substring(earningsSectionMatch.index + earningsSectionMatch[0].length + earningsSectionEnd);
+                analysisWithPriceAction = `${beforeEarnings}\n\n${formattedSection}\n\n${afterEarnings}`;
+                console.log('✅ Formatted Earnings & Analyst Outlook section with bold labels and bullet points');
+              } else if (lines.length > 0) {
+                // We have lines but no intro - use default
+                intro = 'Investors are looking ahead to the next earnings report.';
+                const formattedSection = `${intro}\n\n<ul>\n${lines.map(l => `  <li>${l}</li>`).join('\n')}\n</ul>${priceTargetNote}`;
+                const beforeEarnings = analysisWithPriceAction.substring(0, earningsSectionMatch.index + earningsSectionMatch[0].length);
+                const afterEarnings = analysisWithPriceAction.substring(earningsSectionMatch.index + earningsSectionMatch[0].length + earningsSectionEnd);
+                analysisWithPriceAction = `${beforeEarnings}\n\n${formattedSection}\n\n${afterEarnings}`;
+                console.log('✅ Formatted Earnings & Analyst Outlook section (using default intro)');
               } else {
-                console.log('⚠️ Earnings date not found in content - cannot format section');
-                console.log('Earnings content sample:', earningsContent.substring(0, 200));
+                console.log('⚠️ Could not extract earnings data from content - regex patterns may need updating');
+                console.log('Earnings content sample:', earningsContent.substring(0, 500));
               }
             } else {
               console.log('✅ Earnings section already formatted with bold labels');
