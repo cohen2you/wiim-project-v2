@@ -115,7 +115,7 @@ export default function AddSubheadsButton({
   };
 
   return (
-    <div className="flex flex-col items-start gap-2">
+    <div className="flex flex-col items-start gap-2" style={{ userSelect: 'none', WebkitUserSelect: 'none', MozUserSelect: 'none', msUserSelect: 'none' }}>
       <button
         onClick={handleGenerate}
         disabled={isLoading || !articleText}
@@ -131,7 +131,11 @@ export default function AddSubheadsButton({
           transition: 'all 0.2s',
           display: 'flex',
           alignItems: 'center',
-          gap: '8px'
+          gap: '8px',
+          userSelect: 'none',
+          WebkitUserSelect: 'none',
+          MozUserSelect: 'none',
+          msUserSelect: 'none'
         }}
       >
         {isLoading ? (

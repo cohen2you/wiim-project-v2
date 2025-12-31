@@ -957,7 +957,7 @@ const TechnicalAnalysisGenerator = forwardRef<TechnicalAnalysisGeneratorRef>((pr
 
                 
 
-                <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'flex-start', gap: '8px', marginBottom: '16px' }}>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'flex-start', gap: '8px', marginBottom: '16px', userSelect: 'none', WebkitUserSelect: 'none', MozUserSelect: 'none', msUserSelect: 'none' }}>
 
                   <AddSubheadsButton
                     articleText={analysis.analysis}
@@ -978,7 +978,11 @@ const TechnicalAnalysisGenerator = forwardRef<TechnicalAnalysisGeneratorRef>((pr
                       fontSize: '13px',
                       fontWeight: '500',
                       cursor: 'pointer',
-                      transition: 'all 0.2s'
+                      transition: 'all 0.2s',
+                      userSelect: 'none',
+                      WebkitUserSelect: 'none',
+                      MozUserSelect: 'none',
+                      msUserSelect: 'none'
                     }}
 
                     onMouseEnter={(e) => {
