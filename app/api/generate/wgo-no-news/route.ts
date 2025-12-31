@@ -313,8 +313,8 @@ async function fetchConsensusRatings(ticker: string) {
     params.append('token', BENZINGA_API_KEY);
     params.append('parameters[tickers]', ticker);
     
-    // Try consensus-ratings endpoint (without calendar prefix) - if 404, fallback to analyst/insights aggregation
-    const consensusUrl = `https://api.benzinga.com/api/v2/consensus-ratings?${params.toString()}`;
+    // Use v1 consensus-ratings endpoint - if 404, fallback to analyst/insights aggregation
+    const consensusUrl = `https://api.benzinga.com/api/v1/consensus-ratings?${params.toString()}`;
     
     console.log('WGO No News: Fetching consensus ratings from:', consensusUrl);
     const consensusRes = await fetch(consensusUrl, {
