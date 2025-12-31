@@ -3259,9 +3259,11 @@ CRITICAL: Write 2-3 sentences that INTEGRATE all available data (earnings, analy
 2. How analysts view the stock (consensus rating, buy/hold/sell distribution)
 3. What to watch for ahead of earnings (if earnings date is available)
 
-IMPORTANT: When earnings estimates are available, ALWAYS compare them to previous quarter results:
-- If eps_prior is available, compare eps_estimate to eps_prior (e.g., "up from $0.65" or "down from $0.80")
-- If revenue_prior is available, compare revenue_estimate to revenue_prior (e.g., "revenue of $25.5M, up from $23.2M")
+IMPORTANT: CRITICAL RULE - Only mention "analysts expecting earnings per share" if eps_estimate is actually available. Do NOT use eps_prior (previous quarter's result) as an expectation. eps_prior is only for comparison purposes when eps_estimate exists. If eps_estimate is null/not available, do NOT write "analysts expecting earnings per share" - instead, just mention the earnings date without specific estimates.
+
+When earnings estimates ARE available, ALWAYS compare them to previous quarter results:
+- If eps_estimate AND eps_prior are both available, compare eps_estimate to eps_prior (e.g., "analysts expecting earnings per share of $0.75, up from $0.65 in the previous quarter")
+- If revenue_estimate AND revenue_prior are both available, compare revenue_estimate to revenue_prior (e.g., "revenue of $25.5M, up from $23.2M")
 - This comparison helps investors understand whether expectations show growth, decline, or stability
 
 EXAMPLE APPROACH (adapt based on available data):
