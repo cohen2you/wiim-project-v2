@@ -72,7 +72,25 @@ export default function AddSubheadsButton({
       // Update the parent state with the new optimized text
       if (data.optimizedText) {
         console.log('✅ Updating article with optimized text, length:', data.optimizedText.length);
-        onArticleUpdate(data.optimizedText);
+        
+        // Clean up the optimized text: remove markdown wrappers, convert markdown headings to HTML
+        let cleanedText = data.optimizedText;
+        
+        // Remove markdown code block wrapper (```markdown ... ```)
+        cleanedText = cleanedText.replace(/^```markdown\s*/i, '').replace(/\s*```$/i, '');
+        cleanedText = cleanedText.replace(/^```\s*/, '').replace(/\s*```$/, '');
+        
+        // Convert markdown H2 (## Heading) to HTML H2 (<h2>Heading</h2>)
+        cleanedText = cleanedText.replace(/^##\s+(.+)$/gm, '<h2>$1</h2>');
+        
+        // Convert markdown H3 (### Heading) to HTML H3 (<h3>Heading</h3>)
+        cleanedText = cleanedText.replace(/^###\s+(.+)$/gm, '<h3>$1</h3>');
+        
+        // Remove trailing "..." if it exists at the very end
+        cleanedText = cleanedText.replace(/\s*\.{3,}\s*$/, '').trim();
+        
+        console.log('✅ Cleaned text length:', cleanedText.length);
+        onArticleUpdate(cleanedText);
         setError(null); // Clear any previous errors
       } else {
         console.warn('⚠️ No optimizedText in response:', data);
