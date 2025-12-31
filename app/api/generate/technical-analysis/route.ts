@@ -2747,16 +2747,13 @@ async function fetchNextEarningsDate(ticker: string) {
         const nextEarnings = upcomingEarnings[0];
         const earningsDate = nextEarnings.date || nextEarnings.earnings_date || nextEarnings.earningsDate;
         if (earningsDate) {
-          // Log all available fields to see what the API actually returns
-          console.log('[EARNINGS API] Available fields in earnings response:', Object.keys(nextEarnings));
-          console.log('[EARNINGS API] Sample earnings item:', JSON.stringify(nextEarnings, null, 2).substring(0, 1000));
-          
           // Return full earnings data including estimates
+          // Note: Benzinga API returns eps_est and revenue_est (not eps_estimate/revenue_estimate)
           return {
             date: earningsDate,
-            eps_estimate: nextEarnings.eps_estimate || nextEarnings.epsEstimate || nextEarnings.eps_est || nextEarnings.epsEst || nextEarnings.estimated_eps || null,
+            eps_estimate: nextEarnings.eps_est || nextEarnings.epsEst || nextEarnings.eps_estimate || nextEarnings.epsEstimate || nextEarnings.estimated_eps || null,
             eps_prior: nextEarnings.eps_prior || nextEarnings.epsPrior || nextEarnings.eps_prev || nextEarnings.previous_eps || null,
-            revenue_estimate: nextEarnings.revenue_estimate || nextEarnings.revenueEstimate || nextEarnings.rev_est || nextEarnings.revEst || nextEarnings.estimated_revenue || null,
+            revenue_estimate: nextEarnings.revenue_est || nextEarnings.revenueEst || nextEarnings.revenue_estimate || nextEarnings.revenueEstimate || nextEarnings.estimated_revenue || null,
             revenue_prior: nextEarnings.revenue_prior || nextEarnings.revenuePrior || nextEarnings.rev_prev || nextEarnings.previous_revenue || null,
           };
         }
