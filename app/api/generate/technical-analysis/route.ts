@@ -3248,7 +3248,7 @@ CRITICAL INSTRUCTIONS FOR NEWS INTEGRATION:
    - "## Section: The Catalyst" - after the "Also Read" section (which appears after the first paragraph), before the detailed news paragraphs (Paragraph 2 with specific details)
    - "## Section: Technical Analysis" - after news paragraphs, before technical data
    - "## Section: Analyst Ratings" - only if Analyst Overview is included
-   - "## Section: Price Action" - before the final price/closing paragraph
+   - "## Section: Price Action" immediately before the automatically-generated price action line (do NOT write any content in this section - just place the marker)
    Use these EXACT labels - do not skip them.` : ''}
 
 7. COMPANY TICKER FORMATTING: When mentioning OTHER companies (not the primary stock being analyzed), you MUST include their ticker symbol with exchange in parentheses immediately after the company name. Format: "Company Name (EXCHANGE:TICKER)". Examples:
@@ -3378,7 +3378,7 @@ Example of INCORRECT first paragraph (DO NOT DO THIS): "**Rocket Lab Corporation
 
 - TECHNICAL ANALYSIS PARAGRAPH 3 (SUPPORT/RESISTANCE AND TRADING ADVICE): Write a single paragraph that includes: (1) Key support and resistance levels rounded to nearest $0.50 (e.g., "Key support is at $265.50, while resistance is at $277.00"), and (2) Trading advice/insight (e.g., "Traders should keep an eye on the support and resistance levels, as well as the momentum indicators, to gauge the stock's next moves. The current technical setup suggests that while AAPL has shown resilience, caution is warranted as it navigates these key levels"). Keep this to 2-3 sentences maximum. STOP AFTER THIS PARAGRAPH.
 
-CRITICAL: After these technical analysis paragraphs, move directly to any additional content (analyst ratings if applicable) or the price action line. Do NOT add more technical analysis paragraphs beyond these three.
+CRITICAL: After these technical analysis paragraphs, move directly to any additional content (analyst ratings/earnings section if applicable) and then end with the "## Section: Price Action" marker. Do NOT write any paragraph or content in the Price Action section - just place the section marker. The price action line is automatically generated and added after your article. Do NOT add more technical analysis paragraphs beyond these three.
 
 ${!newsContext || (!newsContext.scrapedContent && (!newsContext.selectedArticles || newsContext.selectedArticles.length === 0)) ? `- CRITICAL FOR NO-NEWS ARTICLES: Always mention the day of week (Monday, Tuesday, etc.) when describing the price move in the first paragraph. Use phrases like "shares are tumbling Monday" or "shares are surging Tuesday" to anchor the move in time. DO NOT include the percentage change in the first paragraph - it's already provided in the price action section at the bottom.
 
