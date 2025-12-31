@@ -846,7 +846,13 @@ TECHNICAL ANALYSIS PARAGRAPH 3 (SUPPORT/RESISTANCE AND TRADING ADVICE): Write a 
 
 ${stockData.consensusRatings || stockData.nextEarnings ? `
 5. EARNINGS AND ANALYST OUTLOOK SECTION (forward-looking):
-After the technical analysis section, include a forward-looking section that anticipates the upcoming earnings report and provides analyst outlook. This section should be forward-looking and set expectations.
+After the technical analysis section, include a forward-looking section that anticipates the upcoming earnings report and provides analyst outlook. This section should help investors understand both the stock's value proposition and how analysts view it.
+
+CRITICAL INSTRUCTIONS FOR THIS SECTION:
+- Weave earnings data and analyst data together into a cohesive narrative (2-3 sentences total)
+- Focus on helping investors understand: (1) whether the stock represents good value, and (2) how analysts view the stock
+- Connect earnings expectations with analyst sentiment - do analysts see value ahead of earnings?
+- Make it forward-looking and actionable for investors
 
 ${stockData.nextEarnings ? `
 UPCOMING EARNINGS DATA:
@@ -856,7 +862,6 @@ ${stockData.nextEarnings.eps_prior ? `- Previous EPS: $${parseFloat(stockData.ne
 ${stockData.nextEarnings.revenue_estimate ? `- Revenue Estimate: $${(parseFloat(stockData.nextEarnings.revenue_estimate.toString()) / 1000000).toFixed(2)}M` : ''}
 ${stockData.nextEarnings.revenue_prior ? `- Previous Revenue: $${(parseFloat(stockData.nextEarnings.revenue_prior.toString()) / 1000000).toFixed(2)}M` : ''}
 
-CRITICAL: Write a forward-looking paragraph (2 sentences) that anticipates the upcoming earnings report. Mention the earnings date and any estimates if available. Format: "Investors are looking ahead to the company's next earnings report, scheduled for ${new Date(stockData.nextEarnings.date).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}. ${stockData.nextEarnings.eps_estimate ? `Analysts are expecting earnings per share of $${parseFloat(stockData.nextEarnings.eps_estimate.toString()).toFixed(2)}${stockData.nextEarnings.eps_prior ? `, compared to $${parseFloat(stockData.nextEarnings.eps_prior.toString()).toFixed(2)} in the previous quarter` : ''}.` : 'The report will provide key insights into the company\'s financial performance and outlook.'}"
 ` : ''}
 
 ${stockData.consensusRatings ? `
@@ -869,8 +874,20 @@ ${stockData.consensusRatings.total_analyst_count ? `- Total Analysts: ${stockDat
 ${stockData.consensusRatings.buy_percentage ? `- Buy Rating: ${parseFloat(stockData.consensusRatings.buy_percentage.toString()).toFixed(1)}%` : ''}
 ${stockData.consensusRatings.hold_percentage ? `- Hold Rating: ${parseFloat(stockData.consensusRatings.hold_percentage.toString()).toFixed(1)}%` : ''}
 ${stockData.consensusRatings.sell_percentage ? `- Sell Rating: ${parseFloat(stockData.consensusRatings.sell_percentage.toString()).toFixed(1)}%` : ''}
+` : ''}
 
-CRITICAL: Write a forward-looking paragraph (2 sentences) about analyst outlook. Include the consensus rating and price target. Format: "${stockData.priceAction?.companyName || ticker} has a consensus ${stockData.consensusRatings.consensus_rating ? stockData.consensusRatings.consensus_rating.charAt(0) + stockData.consensusRatings.consensus_rating.slice(1).toLowerCase() : 'N/A'} rating among analysts${stockData.consensusRatings.consensus_price_target ? ` with an average price target of $${parseFloat(stockData.consensusRatings.consensus_price_target.toString()).toFixed(2)}` : ''}. ${stockData.consensusRatings.buy_percentage ? `The analyst community shows ${parseFloat(stockData.consensusRatings.buy_percentage.toString()).toFixed(0)}% buy ratings, ` : ''}${stockData.consensusRatings.total_analyst_count ? `with ${stockData.consensusRatings.total_analyst_count} analysts covering the stock.` : 'Analysts are monitoring the stock\'s performance ahead of the upcoming earnings report.'}"
+CRITICAL: Write 2-3 sentences that INTEGRATE all available data (earnings, analyst consensus) into a cohesive narrative. Do NOT write separate sentences for each data point. Instead, weave them together to help investors understand:
+1. Whether the stock represents good value (use analyst price targets to assess this)
+2. How analysts view the stock (consensus rating, buy/hold/sell distribution)
+3. What to watch for ahead of earnings (if earnings date is available)
+
+EXAMPLE APPROACH (adapt based on available data):
+${stockData.nextEarnings && stockData.consensusRatings ? `
+"Investors are looking ahead to the company's next earnings report, scheduled for ${new Date(stockData.nextEarnings.date).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}, ${stockData.nextEarnings.eps_estimate ? `with analysts expecting earnings per share of $${parseFloat(stockData.nextEarnings.eps_estimate.toString()).toFixed(2)}${stockData.nextEarnings.eps_prior ? `, compared to $${parseFloat(stockData.nextEarnings.eps_prior.toString()).toFixed(2)} in the previous quarter` : ''}.` : 'which will provide key insights into the company\'s financial performance.'} ${stockData.priceAction?.companyName || ticker} has a consensus ${stockData.consensusRatings.consensus_rating ? stockData.consensusRatings.consensus_rating.charAt(0) + stockData.consensusRatings.consensus_rating.slice(1).toLowerCase() : 'N/A'} rating among analysts${stockData.consensusRatings.consensus_price_target ? ` with an average price target of $${parseFloat(stockData.consensusRatings.consensus_price_target.toString()).toFixed(2)}` : ''}, ${stockData.consensusRatings.buy_percentage && parseFloat(stockData.consensusRatings.buy_percentage.toString()) > 50 ? `reflecting a bullish outlook from the analyst community with ${parseFloat(stockData.consensusRatings.buy_percentage.toString()).toFixed(0)}% buy ratings.` : stockData.consensusRatings.hold_percentage && parseFloat(stockData.consensusRatings.hold_percentage.toString()) > 50 ? `reflecting a cautious stance with ${parseFloat(stockData.consensusRatings.hold_percentage.toString()).toFixed(0)}% hold ratings.` : 'as investors monitor the stock ahead of the earnings release.'}"
+` : stockData.nextEarnings ? `
+"Investors are looking ahead to the company's next earnings report, scheduled for ${new Date(stockData.nextEarnings.date).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}, ${stockData.nextEarnings.eps_estimate ? `with analysts expecting earnings per share of $${parseFloat(stockData.nextEarnings.eps_estimate.toString()).toFixed(2)}${stockData.nextEarnings.eps_prior ? `, compared to $${parseFloat(stockData.nextEarnings.eps_prior.toString()).toFixed(2)} in the previous quarter` : ''}.` : 'which will provide key insights into the company\'s financial performance and outlook.'}"
+` : stockData.consensusRatings ? `
+"${stockData.priceAction?.companyName || ticker} has a consensus ${stockData.consensusRatings.consensus_rating ? stockData.consensusRatings.consensus_rating.charAt(0) + stockData.consensusRatings.consensus_rating.slice(1).toLowerCase() : 'N/A'} rating among analysts${stockData.consensusRatings.consensus_price_target ? ` with an average price target of $${parseFloat(stockData.consensusRatings.consensus_price_target.toString()).toFixed(2)}` : ''}, ${stockData.consensusRatings.buy_percentage && parseFloat(stockData.consensusRatings.buy_percentage.toString()) > 50 ? `reflecting a bullish outlook from the analyst community with ${parseFloat(stockData.consensusRatings.buy_percentage.toString()).toFixed(0)}% buy ratings.` : stockData.consensusRatings.hold_percentage && parseFloat(stockData.consensusRatings.hold_percentage.toString()) > 50 ? `reflecting a cautious stance with ${parseFloat(stockData.consensusRatings.hold_percentage.toString()).toFixed(0)}% hold ratings.` : 'as analysts monitor the stock\'s performance.'} ${stockData.consensusRatings.total_analyst_count ? `${stockData.consensusRatings.total_analyst_count} analysts are currently covering the stock.` : ''}"
 ` : ''}
 ` : ''}
 
