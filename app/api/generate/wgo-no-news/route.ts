@@ -458,6 +458,50 @@ async function fetchConsensusRatings(ticker: string) {
   }
 }
 
+// Helper function to format date string without timezone issues
+function formatEarningsDate(dateString: string | null | undefined): string {
+  if (!dateString) return 'a date to be announced';
+  try {
+    // Parse date string (format: YYYY-MM-DD) as local date to avoid timezone issues
+    const parts = dateString.split('-');
+    if (parts.length === 3) {
+      const year = parseInt(parts[0], 10);
+      const month = parseInt(parts[1], 10) - 1; // Month is 0-indexed
+      const day = parseInt(parts[2], 10);
+      const date = new Date(year, month, day);
+      return date.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+    }
+    // Fallback to standard parsing if format is unexpected
+    return new Date(dateString).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+  } catch (error) {
+    console.error('Error formatting earnings date:', error);
+    return dateString;
+  }
+}
+
+// Helper function to format revenue (converts to billions if >= 1000 million, otherwise millions)
+function formatRevenue(revenue: number | string | null | undefined): string {
+  if (revenue === null || revenue === undefined) return '';
+  try {
+    const numRevenue = typeof revenue === 'string' ? parseFloat(revenue) : revenue;
+    if (isNaN(numRevenue) || !isFinite(numRevenue)) return '';
+    
+    const millions = numRevenue / 1000000;
+    
+    // If >= 1000 million, format as billions
+    if (millions >= 1000) {
+      const billions = millions / 1000;
+      return `$${billions.toFixed(2)}B`;
+    } else {
+      // Otherwise format as millions
+      return `$${millions.toFixed(2)}M`;
+    }
+  } catch (error) {
+    console.error('Error formatting revenue:', error);
+    return '';
+  }
+}
+
 // Fetch next earnings date from Benzinga calendar
 async function fetchNextEarningsDate(ticker: string) {
   try {
@@ -538,12 +582,14 @@ async function fetchNextEarningsDate(ticker: string) {
         const nextEarnings = upcomingEarnings[0];
         const earningsDate = nextEarnings.date || nextEarnings.earnings_date || nextEarnings.earningsDate;
         if (earningsDate) {
+          // Return full earnings data including estimates
+          // Note: Benzinga API returns eps_est and revenue_est (not eps_estimate/revenue_estimate)
           const earningsData = {
             date: earningsDate,
-            eps_estimate: nextEarnings.eps_estimate || null,
-            eps_prior: nextEarnings.eps_prior || null,
-            revenue_estimate: nextEarnings.revenue_estimate || null,
-            revenue_prior: nextEarnings.revenue_prior || null,
+            eps_estimate: nextEarnings.eps_est || nextEarnings.epsEst || nextEarnings.eps_estimate || nextEarnings.epsEstimate || nextEarnings.estimated_eps || null,
+            eps_prior: nextEarnings.eps_prior || nextEarnings.epsPrior || nextEarnings.eps_prev || nextEarnings.previous_eps || null,
+            revenue_estimate: nextEarnings.revenue_est || nextEarnings.revenueEst || nextEarnings.revenue_estimate || nextEarnings.revenueEstimate || nextEarnings.estimated_revenue || null,
+            revenue_prior: nextEarnings.revenue_prior || nextEarnings.revenuePrior || nextEarnings.rev_prev || nextEarnings.previous_revenue || null,
           };
           console.log('WGO No News: Next earnings data:', earningsData);
           return earningsData;
@@ -856,7 +902,7 @@ CRITICAL INSTRUCTIONS FOR THIS SECTION:
 
 ${stockData.nextEarnings ? `
 UPCOMING EARNINGS DATA:
-- Next Earnings Date: ${new Date(stockData.nextEarnings.date).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
+- Next Earnings Date: ${formatEarningsDate(stockData.nextEarnings.date)}
 ${stockData.nextEarnings.eps_estimate ? `- EPS Estimate: $${parseFloat(stockData.nextEarnings.eps_estimate.toString()).toFixed(2)}` : ''}
 ${stockData.nextEarnings.eps_prior ? `- Previous EPS: $${parseFloat(stockData.nextEarnings.eps_prior.toString()).toFixed(2)}` : ''}
 ${stockData.nextEarnings.revenue_estimate ? `- Revenue Estimate: $${(parseFloat(stockData.nextEarnings.revenue_estimate.toString()) / 1000000).toFixed(2)}M` : ''}
@@ -881,16 +927,17 @@ CRITICAL: Write 2-3 sentences that INTEGRATE all available data (earnings, analy
 2. How analysts view the stock (consensus rating, buy/hold/sell distribution)
 3. What to watch for ahead of earnings (if earnings date is available)
 
-IMPORTANT: When earnings estimates are available, ALWAYS compare them to previous quarter results:
-- If eps_prior is available, compare eps_estimate to eps_prior (e.g., "up from $0.65" or "down from $0.80")
-- If revenue_prior is available, compare revenue_estimate to revenue_prior (e.g., "revenue of $25.5M, up from $23.2M")
-- This comparison helps investors understand whether expectations show growth, decline, or stability
+IMPORTANT: When earnings estimates are available, ALWAYS compare them to the same quarter from the previous year (year-over-year comparison):
+- If eps_prior is available, compare eps_estimate to eps_prior (e.g., "up from $0.65 from the same quarter last year" or "down from $0.80 from the prior-year period")
+- If revenue_prior is available, compare revenue_estimate to revenue_prior (e.g., "revenue of $25.5M, up from $23.2M from the same quarter last year")
+- NOTE: eps_prior and revenue_prior represent the same quarter from the previous year, NOT the sequentially previous quarter
+- This year-over-year comparison helps investors understand whether expectations show growth, decline, or stability compared to the same period last year
 
 EXAMPLE APPROACH (adapt based on available data):
 ${stockData.nextEarnings && stockData.consensusRatings ? `
-"Investors are looking ahead to the company's next earnings report, scheduled for ${new Date(stockData.nextEarnings.date).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}, ${stockData.nextEarnings.eps_estimate ? `with analysts expecting earnings per share of $${parseFloat(stockData.nextEarnings.eps_estimate.toString()).toFixed(2)}${stockData.nextEarnings.eps_prior ? `, ${parseFloat(stockData.nextEarnings.eps_estimate.toString()) > parseFloat(stockData.nextEarnings.eps_prior.toString()) ? 'up from' : parseFloat(stockData.nextEarnings.eps_estimate.toString()) < parseFloat(stockData.nextEarnings.eps_prior.toString()) ? 'down from' : 'compared to'} $${parseFloat(stockData.nextEarnings.eps_prior.toString()).toFixed(2)} in the previous quarter` : ''}${stockData.nextEarnings.revenue_estimate && stockData.nextEarnings.revenue_prior ? ` and revenue of $${(parseFloat(stockData.nextEarnings.revenue_estimate.toString()) / 1000000).toFixed(2)}M${parseFloat(stockData.nextEarnings.revenue_estimate.toString()) > parseFloat(stockData.nextEarnings.revenue_prior.toString()) ? ', up from' : parseFloat(stockData.nextEarnings.revenue_estimate.toString()) < parseFloat(stockData.nextEarnings.revenue_prior.toString()) ? ', down from' : ', compared to'} $${(parseFloat(stockData.nextEarnings.revenue_prior.toString()) / 1000000).toFixed(2)}M in the prior period` : ''}.` : 'which will provide key insights into the company\'s financial performance.'} ${stockData.priceAction?.companyName || ticker} has a consensus ${stockData.consensusRatings.consensus_rating ? stockData.consensusRatings.consensus_rating.charAt(0) + stockData.consensusRatings.consensus_rating.slice(1).toLowerCase() : 'N/A'} rating among analysts${stockData.consensusRatings.consensus_price_target ? ` with an average price target of $${parseFloat(stockData.consensusRatings.consensus_price_target.toString()).toFixed(2)}` : ''}, ${stockData.consensusRatings.buy_percentage && parseFloat(stockData.consensusRatings.buy_percentage.toString()) > 50 ? `reflecting a bullish outlook from the analyst community with ${parseFloat(stockData.consensusRatings.buy_percentage.toString()).toFixed(0)}% buy ratings.` : stockData.consensusRatings.hold_percentage && parseFloat(stockData.consensusRatings.hold_percentage.toString()) > 50 ? `reflecting a cautious stance with ${parseFloat(stockData.consensusRatings.hold_percentage.toString()).toFixed(0)}% hold ratings.` : 'as investors monitor the stock ahead of the earnings release.'}"
+"Investors are looking ahead to the company's next earnings report, scheduled for ${formatEarningsDate(stockData.nextEarnings.date)}, ${stockData.nextEarnings.eps_estimate ? `with analysts expecting earnings per share of $${parseFloat(stockData.nextEarnings.eps_estimate.toString()).toFixed(2)}${stockData.nextEarnings.eps_prior ? `, ${parseFloat(stockData.nextEarnings.eps_estimate.toString()) > parseFloat(stockData.nextEarnings.eps_prior.toString()) ? 'up from' : parseFloat(stockData.nextEarnings.eps_estimate.toString()) < parseFloat(stockData.nextEarnings.eps_prior.toString()) ? 'down from' : 'compared to'} $${parseFloat(stockData.nextEarnings.eps_prior.toString()).toFixed(2)} from the same quarter last year` : ''}${stockData.nextEarnings.revenue_estimate && stockData.nextEarnings.revenue_prior ? ` and revenue of ${formatRevenue(stockData.nextEarnings.revenue_estimate)}${parseFloat(stockData.nextEarnings.revenue_estimate.toString()) > parseFloat(stockData.nextEarnings.revenue_prior.toString()) ? ', up from' : parseFloat(stockData.nextEarnings.revenue_estimate.toString()) < parseFloat(stockData.nextEarnings.revenue_prior.toString()) ? ', down from' : ', compared to'} ${formatRevenue(stockData.nextEarnings.revenue_prior)} from the same quarter last year` : ''}.` : 'which will provide key insights into the company\'s financial performance.'} ${stockData.priceAction?.companyName || ticker} has a consensus ${stockData.consensusRatings.consensus_rating ? stockData.consensusRatings.consensus_rating.charAt(0) + stockData.consensusRatings.consensus_rating.slice(1).toLowerCase() : 'N/A'} rating among analysts${stockData.consensusRatings.consensus_price_target ? ` with an average price target of $${parseFloat(stockData.consensusRatings.consensus_price_target.toString()).toFixed(2)}` : ''}, ${stockData.consensusRatings.buy_percentage && parseFloat(stockData.consensusRatings.buy_percentage.toString()) > 50 ? `reflecting a bullish outlook from the analyst community with ${parseFloat(stockData.consensusRatings.buy_percentage.toString()).toFixed(0)}% buy ratings.` : stockData.consensusRatings.hold_percentage && parseFloat(stockData.consensusRatings.hold_percentage.toString()) > 50 ? `reflecting a cautious stance with ${parseFloat(stockData.consensusRatings.hold_percentage.toString()).toFixed(0)}% hold ratings.` : 'as investors monitor the stock ahead of the earnings release.'}"
 ` : stockData.nextEarnings ? `
-"Investors are looking ahead to the company's next earnings report, scheduled for ${new Date(stockData.nextEarnings.date).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}, ${stockData.nextEarnings.eps_estimate ? `with analysts expecting earnings per share of $${parseFloat(stockData.nextEarnings.eps_estimate.toString()).toFixed(2)}${stockData.nextEarnings.eps_prior ? `, ${parseFloat(stockData.nextEarnings.eps_estimate.toString()) > parseFloat(stockData.nextEarnings.eps_prior.toString()) ? 'up from' : parseFloat(stockData.nextEarnings.eps_estimate.toString()) < parseFloat(stockData.nextEarnings.eps_prior.toString()) ? 'down from' : 'compared to'} $${parseFloat(stockData.nextEarnings.eps_prior.toString()).toFixed(2)} in the previous quarter` : ''}${stockData.nextEarnings.revenue_estimate && stockData.nextEarnings.revenue_prior ? ` and revenue of $${(parseFloat(stockData.nextEarnings.revenue_estimate.toString()) / 1000000).toFixed(2)}M${parseFloat(stockData.nextEarnings.revenue_estimate.toString()) > parseFloat(stockData.nextEarnings.revenue_prior.toString()) ? ', up from' : parseFloat(stockData.nextEarnings.revenue_estimate.toString()) < parseFloat(stockData.nextEarnings.revenue_prior.toString()) ? ', down from' : ', compared to'} $${(parseFloat(stockData.nextEarnings.revenue_prior.toString()) / 1000000).toFixed(2)}M in the prior period` : ''}.` : 'which will provide key insights into the company\'s financial performance and outlook.'}"
+"Investors are looking ahead to the company's next earnings report, scheduled for ${formatEarningsDate(stockData.nextEarnings.date)}, ${stockData.nextEarnings.eps_estimate ? `with analysts expecting earnings per share of $${parseFloat(stockData.nextEarnings.eps_estimate.toString()).toFixed(2)}${stockData.nextEarnings.eps_prior ? `, ${parseFloat(stockData.nextEarnings.eps_estimate.toString()) > parseFloat(stockData.nextEarnings.eps_prior.toString()) ? 'up from' : parseFloat(stockData.nextEarnings.eps_estimate.toString()) < parseFloat(stockData.nextEarnings.eps_prior.toString()) ? 'down from' : 'compared to'} $${parseFloat(stockData.nextEarnings.eps_prior.toString()).toFixed(2)} from the same quarter last year` : ''}${stockData.nextEarnings.revenue_estimate && stockData.nextEarnings.revenue_prior ? ` and revenue of ${formatRevenue(stockData.nextEarnings.revenue_estimate)}${parseFloat(stockData.nextEarnings.revenue_estimate.toString()) > parseFloat(stockData.nextEarnings.revenue_prior.toString()) ? ', up from' : parseFloat(stockData.nextEarnings.revenue_estimate.toString()) < parseFloat(stockData.nextEarnings.revenue_prior.toString()) ? ', down from' : ', compared to'} ${formatRevenue(stockData.nextEarnings.revenue_prior)} from the same quarter last year` : ''}.` : 'which will provide key insights into the company\'s financial performance and outlook.'}"
 ` : stockData.consensusRatings ? `
 "${stockData.priceAction?.companyName || ticker} has a consensus ${stockData.consensusRatings.consensus_rating ? stockData.consensusRatings.consensus_rating.charAt(0) + stockData.consensusRatings.consensus_rating.slice(1).toLowerCase() : 'N/A'} rating among analysts${stockData.consensusRatings.consensus_price_target ? ` with an average price target of $${parseFloat(stockData.consensusRatings.consensus_price_target.toString()).toFixed(2)}` : ''}, ${stockData.consensusRatings.buy_percentage && parseFloat(stockData.consensusRatings.buy_percentage.toString()) > 50 ? `reflecting a bullish outlook from the analyst community with ${parseFloat(stockData.consensusRatings.buy_percentage.toString()).toFixed(0)}% buy ratings.` : stockData.consensusRatings.hold_percentage && parseFloat(stockData.consensusRatings.hold_percentage.toString()) > 50 ? `reflecting a cautious stance with ${parseFloat(stockData.consensusRatings.hold_percentage.toString()).toFixed(0)}% hold ratings.` : 'as analysts monitor the stock\'s performance.'} ${stockData.consensusRatings.total_analyst_count ? `${stockData.consensusRatings.total_analyst_count} analysts are currently covering the stock.` : ''}"
 ` : ''}
