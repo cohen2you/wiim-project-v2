@@ -3101,7 +3101,7 @@ ${!data.turningPoints || Object.keys(data.turningPoints).length === 0 ? '- No si
 
 ${consensusRatings || nextEarnings ? `
 EARNINGS AND ANALYST OUTLOOK SECTION (forward-looking):
-After the technical analysis section, include a forward-looking section that anticipates the upcoming earnings report and provides analyst outlook. This section should be forward-looking and set expectations.
+After the technical analysis section, you MUST include a separate section with the header "## Section: Earnings & Analyst Outlook". This section should be forward-looking and set expectations.
 
 ${nextEarnings ? `
 UPCOMING EARNINGS DATA:
@@ -3111,7 +3111,7 @@ ${typeof nextEarnings === 'object' && nextEarnings.eps_prior ? `- Previous EPS: 
 ${typeof nextEarnings === 'object' && nextEarnings.revenue_estimate ? `- Revenue Estimate: $${(parseFloat(nextEarnings.revenue_estimate.toString()) / 1000000).toFixed(2)}M` : ''}
 ${typeof nextEarnings === 'object' && nextEarnings.revenue_prior ? `- Previous Revenue: $${(parseFloat(nextEarnings.revenue_prior.toString()) / 1000000).toFixed(2)}M` : ''}
 
-CRITICAL: Write a forward-looking paragraph (2 sentences) that anticipates the upcoming earnings report. Mention the earnings date and any estimates if available. Format: "Investors are looking ahead to the company's next earnings report, scheduled for ${typeof nextEarnings === 'object' && nextEarnings.date ? new Date(nextEarnings.date).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : nextEarningsDate ? new Date(nextEarningsDate).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : 'a date to be announced'}. ${typeof nextEarnings === 'object' && nextEarnings.eps_estimate ? `Analysts are expecting earnings per share of $${parseFloat(nextEarnings.eps_estimate.toString()).toFixed(2)}${typeof nextEarnings === 'object' && nextEarnings.eps_prior ? `, compared to $${parseFloat(nextEarnings.eps_prior.toString()).toFixed(2)} in the previous quarter` : ''}.` : 'The report will provide key insights into the company\'s financial performance and outlook.'}"
+CRITICAL: This content MUST appear under "## Section: Earnings & Analyst Outlook" header. Write a forward-looking paragraph (2 sentences) that anticipates the upcoming earnings report. Mention the earnings date and any estimates if available. Format: "Investors are looking ahead to the company's next earnings report, scheduled for ${typeof nextEarnings === 'object' && nextEarnings.date ? new Date(nextEarnings.date).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : nextEarningsDate ? new Date(nextEarningsDate).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : 'a date to be announced'}. ${typeof nextEarnings === 'object' && nextEarnings.eps_estimate ? `Analysts are expecting earnings per share of $${parseFloat(nextEarnings.eps_estimate.toString()).toFixed(2)}${typeof nextEarnings === 'object' && nextEarnings.eps_prior ? `, compared to $${parseFloat(nextEarnings.eps_prior.toString()).toFixed(2)} in the previous quarter` : ''}.` : 'The report will provide key insights into the company\'s financial performance and outlook.'}"
 ` : ''}
 
 ${consensusRatings ? `
@@ -3125,15 +3125,17 @@ ${consensusRatings.buy_percentage ? `- Buy Rating: ${parseFloat(consensusRatings
 ${consensusRatings.hold_percentage ? `- Hold Rating: ${parseFloat(consensusRatings.hold_percentage.toString()).toFixed(1)}%` : ''}
 ${consensusRatings.sell_percentage ? `- Sell Rating: ${parseFloat(consensusRatings.sell_percentage.toString()).toFixed(1)}%` : ''}
 
-CRITICAL: Write a forward-looking paragraph (2 sentences) about analyst outlook. Include the consensus rating and price target. Format: "${data.companyName || data.symbol} has a consensus ${consensusRatings.consensus_rating ? consensusRatings.consensus_rating.charAt(0) + consensusRatings.consensus_rating.slice(1).toLowerCase() : 'N/A'} rating among analysts${consensusRatings.consensus_price_target ? ` with an average price target of $${parseFloat(consensusRatings.consensus_price_target.toString()).toFixed(2)}` : ''}. ${consensusRatings.buy_percentage ? `The analyst community shows ${parseFloat(consensusRatings.buy_percentage.toString()).toFixed(0)}% buy ratings, ` : ''}${consensusRatings.total_analyst_count ? `with ${consensusRatings.total_analyst_count} analysts covering the stock.` : 'Analysts are monitoring the stock\'s performance ahead of the upcoming earnings report.'}"
+CRITICAL: This content MUST appear under "## Section: Earnings & Analyst Outlook" header. Write a forward-looking paragraph (2 sentences) about analyst outlook. Include the consensus rating and price target. Format: "${data.companyName || data.symbol} has a consensus ${consensusRatings.consensus_rating ? consensusRatings.consensus_rating.charAt(0) + consensusRatings.consensus_rating.slice(1).toLowerCase() : 'N/A'} rating among analysts${consensusRatings.consensus_price_target ? ` with an average price target of $${parseFloat(consensusRatings.consensus_price_target.toString()).toFixed(2)}` : ''}. ${consensusRatings.buy_percentage ? `The analyst community shows ${parseFloat(consensusRatings.buy_percentage.toString()).toFixed(0)}% buy ratings, ` : ''}${consensusRatings.total_analyst_count ? `with ${consensusRatings.total_analyst_count} analysts covering the stock.` : 'Analysts are monitoring the stock\'s performance ahead of the upcoming earnings report.'}"
 ` : ''}
 
 ${peRatio !== null ? `
 P/E RATIO CONTEXT:
 - Current P/E Ratio: ${peRatio.toFixed(1)}
 
-CRITICAL: If P/E ratio is available, include it in the analyst outlook section. Format: "At current levels, the P/E ratio of ${peRatio.toFixed(1)} suggests the stock is ${peRatio > 25 ? 'overvalued' : peRatio < 15 ? 'undervalued' : 'fairly valued'} relative to peers."
+CRITICAL: If P/E ratio is available, include it in the "## Section: Earnings & Analyst Outlook" section. Format: "At current levels, the P/E ratio of ${peRatio.toFixed(1)} suggests the stock is ${peRatio > 25 ? 'overvalued' : peRatio < 15 ? 'undervalued' : 'fairly valued'} relative to peers."
 ` : ''}
+
+MANDATORY: You MUST include "## Section: Earnings & Analyst Outlook" as a separate section header AFTER "## Section: Technical Analysis" and BEFORE "## Section: Price Action". This section should contain all earnings and analyst outlook information.
 ` : ''}
 
 ${newsContext && (newsContext.scrapedContent || (newsContext.selectedArticles && newsContext.selectedArticles.length > 0)) ? `
@@ -3222,7 +3224,7 @@ CRITICAL INSTRUCTIONS FOR NEWS INTEGRATION:
 
 TASK: ${newsContext && (newsContext.scrapedContent || (newsContext.selectedArticles && newsContext.selectedArticles.length > 0)) ? `Write a conversational WGO article that helps readers understand "What's Going On" with the stock. LEAD with the current price move (direction and day of week, e.g., "shares are tumbling on Monday" or "shares are surging on Tuesday"). Use ONLY the day name (e.g., "on Thursday", "on Monday") - DO NOT include the date (e.g., do NOT use "on Thursday, December 18, 2025" or any date format). DO NOT include the percentage in the first paragraph. Then reference the news article provided above AND broader market context to explain what's going on - either the news is contributing to the move, OR the stock is moving despite positive/negative news (suggesting larger market elements may be at play). ${marketContext ? 'Use the broader market context (indices, sectors, market breadth) to provide additional context - is the stock moving with or against broader market trends? Reference specific sector performance when relevant (e.g., "Technology stocks are broadly lower today, contributing to the decline" or "Despite a strong market day, the stock is down, suggesting company-specific concerns").' : ''} Include the appropriate hyperlink in the first paragraph (three-word for Benzinga, one-word with outlet credit for others). When mentioning other companies in the article, always include their ticker symbol with exchange (e.g., "Snowflake Inc. (NYSE:SNOW)").
 
-MANDATORY: You MUST include section markers in your output. Insert "## Section: The Catalyst" AFTER the "Also Read" section (which comes after the FIRST paragraph), "## Section: Technical Analysis" after news paragraphs, "## Section: Analyst Ratings" if analyst overview is included, and "## Section: Price Action" before the final price paragraph. These are REQUIRED - do not skip them.
+MANDATORY: You MUST include section markers in your output. Insert "## Section: The Catalyst" AFTER the "Also Read" section (which comes after the FIRST paragraph), "## Section: Technical Analysis" after news paragraphs, "## Section: Earnings & Analyst Outlook" if earnings or analyst data is available (MANDATORY if consensus ratings or earnings date data is provided), and "## Section: Price Action" before the final price paragraph. These are REQUIRED - do not skip them.
 
 CRITICAL: The second paragraph (which appears AFTER "## Section: The Catalyst") and optionally third paragraph MUST include detailed, specific information from the news source article. Do NOT just summarize or use vague language. Extract and include:
 - Specific numbers, figures, percentages, dates, or metrics from the article
@@ -3258,7 +3260,7 @@ Rules for Headers:
 2. Placement (MANDATORY):
    - Insert "## Section: The Catalyst" AFTER the "Also Read" section (which appears after the first paragraph) and BEFORE the detailed news paragraphs (Paragraph 2 with the specific details).
    - Insert "## Section: Technical Analysis" immediately after the news paragraphs and BEFORE the transition to technical data.
-   - Insert "## Section: Analyst Ratings" ONLY IF you have included a specific Analyst Overview section.
+   - Insert "## Section: Earnings & Analyst Outlook" AFTER "## Section: Technical Analysis" if earnings data or analyst consensus ratings are available (this is MANDATORY when earnings/analyst data is provided).
    - Insert "## Section: Price Action" BEFORE the final paragraph summarizing the current price/closing data.
 
 CRITICAL: 
@@ -3832,9 +3834,64 @@ export async function POST(request: Request) {
             }
           }
           
-          // First, ensure "## Section: Price Action" marker exists before price action line
+          // Check if "## Section: Earnings & Analyst Outlook" marker exists
+          const earningsAnalystSectionMarker = /##\s*Section:\s*Earnings\s*&\s*Analyst\s*Outlook/i;
+          const hasEarningsAnalystMarker = !!analysisWithPriceAction.match(earningsAnalystSectionMarker);
+          
+          // Find the "## Section: Technical Analysis" marker position
+          const technicalAnalysisMarker = /##\s*Section:\s*Technical\s*Analysis/i;
+          const technicalAnalysisMatch = analysisWithPriceAction.match(technicalAnalysisMarker);
+          
+          // Find the "## Section: Price Action" marker position
           const priceActionSectionMarker = /##\s*Section:\s*Price Action/i;
-          const hasPriceActionMarker = !!analysisWithPriceAction.match(priceActionSectionMarker);
+          const priceActionMarkerMatch = analysisWithPriceAction.match(priceActionSectionMarker);
+          const hasPriceActionMarker = !!priceActionMarkerMatch;
+          
+          // If earnings/analyst data exists but marker is missing, inject it
+          if ((consensusRatings || nextEarnings) && !hasEarningsAnalystMarker) {
+            console.log('Adding "## Section: Earnings & Analyst Outlook" marker');
+            let insertPosition = -1;
+            
+            // Try to insert after "## Section: Technical Analysis"
+            if (technicalAnalysisMatch && technicalAnalysisMatch.index !== undefined) {
+              // Find the end of the technical analysis section (look for next section marker or price action)
+              const afterTechnicalMarker = analysisWithPriceAction.substring(technicalAnalysisMatch.index);
+              const nextSectionMatch = afterTechnicalMarker.match(/(##\s*Section:|Price Action:)/);
+              
+              if (nextSectionMatch && nextSectionMatch.index !== undefined) {
+                insertPosition = technicalAnalysisMatch.index + technicalAnalysisMatch[0].length + nextSectionMatch.index;
+              } else {
+                // No next section found, insert before price action
+                if (priceActionMarkerMatch && priceActionMarkerMatch.index !== undefined) {
+                  insertPosition = priceActionMarkerMatch.index;
+                } else {
+                  // Find price action text instead
+                  const priceActionTextMatch = analysisWithPriceAction.match(/<strong>.*?Price Action:<\/strong>/i);
+                  if (priceActionTextMatch && priceActionTextMatch.index !== undefined) {
+                    insertPosition = priceActionTextMatch.index;
+                  }
+                }
+              }
+            } else if (priceActionMarkerMatch && priceActionMarkerMatch.index !== undefined) {
+              // Insert before "## Section: Price Action"
+              insertPosition = priceActionMarkerMatch.index;
+            } else {
+              // Find price action text
+              const priceActionTextMatch = analysisWithPriceAction.match(/<strong>.*?Price Action:<\/strong>/i);
+              if (priceActionTextMatch && priceActionTextMatch.index !== undefined) {
+                insertPosition = priceActionTextMatch.index;
+              }
+            }
+            
+            if (insertPosition !== -1) {
+              const beforeInsert = analysisWithPriceAction.substring(0, insertPosition).trim();
+              const afterInsert = analysisWithPriceAction.substring(insertPosition);
+              analysisWithPriceAction = `${beforeInsert}\n\n## Section: Earnings & Analyst Outlook\n\n${afterInsert}`;
+              console.log('✅ Added "## Section: Earnings & Analyst Outlook" marker');
+            }
+          }
+          
+          // First, ensure "## Section: Price Action" marker exists before price action line
           
           // Find the price action line position
           const priceActionRegex = /<strong>.*?Price Action:<\/strong>/i;
