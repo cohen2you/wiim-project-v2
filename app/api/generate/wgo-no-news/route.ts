@@ -313,8 +313,8 @@ async function fetchConsensusRatings(ticker: string) {
     params.append('token', BENZINGA_API_KEY);
     params.append('parameters[tickers]', ticker);
     
-    // Use calendar/consensus-ratings endpoint as specified
-    const consensusUrl = `https://api.benzinga.com/api/v2/calendar/consensus-ratings?${params.toString()}`;
+    // Try consensus-ratings endpoint (without calendar prefix) - if 404, fallback to analyst/insights aggregation
+    const consensusUrl = `https://api.benzinga.com/api/v2/consensus-ratings?${params.toString()}`;
     
     console.log('WGO No News: Fetching consensus ratings from:', consensusUrl);
     const consensusRes = await fetch(consensusUrl, {
@@ -376,6 +376,76 @@ async function fetchConsensusRatings(ticker: string) {
           return consensus;
         }
       }
+    } else if (consensusRes.status === 404) {
+      // If 404, try analyst/insights endpoint and aggregate consensus data
+      console.log('WGO No News: 404 on consensus-ratings endpoint, trying analyst/insights endpoint');
+      const insightsUrl = `https://api.benzinga.com/api/v2/analyst/insights?token=${BENZINGA_API_KEY}&symbols=${encodeURIComponent(ticker)}&pageSize=100`;
+      const insightsRes = await fetch(insightsUrl, {
+        method: 'GET',
+        headers: { 'Accept': 'application/json' }
+      });
+      
+      if (insightsRes.ok) {
+        const insightsData = await insightsRes.json();
+        console.log(`WGO No News: Fetched ${Array.isArray(insightsData) ? insightsData.length : 0} analyst insights`);
+        
+        if (Array.isArray(insightsData) && insightsData.length > 0) {
+          // Aggregate consensus from individual insights (same logic as technical-analysis route)
+          const validInsights = insightsData.filter((insight: any) => insight.rating || insight.pt);
+          if (validInsights.length > 0) {
+            const ratingCounts: { [key: string]: number } = {};
+            const priceTargets: number[] = [];
+            
+            validInsights.forEach((insight: any) => {
+              if (insight.rating) {
+                const rating = insight.rating.toUpperCase();
+                ratingCounts[rating] = (ratingCounts[rating] || 0) + 1;
+              }
+              if (insight.pt) {
+                const pt = parseFloat(insight.pt);
+                if (!isNaN(pt) && pt > 0) {
+                  priceTargets.push(pt);
+                }
+              }
+            });
+            
+            let consensusRating = null;
+            let maxCount = 0;
+            Object.keys(ratingCounts).forEach(rating => {
+              if (ratingCounts[rating] > maxCount) {
+                maxCount = ratingCounts[rating];
+                consensusRating = rating;
+              }
+            });
+            
+            const consensusPriceTarget = priceTargets.length > 0 
+              ? priceTargets.reduce((sum, pt) => sum + pt, 0) / priceTargets.length 
+              : null;
+            
+            const totalRatings = validInsights.length;
+            const buyCount = Object.keys(ratingCounts).filter(r => ['BUY', 'STRONG BUY', 'OVERWEIGHT', 'POSITIVE'].includes(r)).reduce((sum, r) => sum + ratingCounts[r], 0);
+            const holdCount = Object.keys(ratingCounts).filter(r => ['HOLD', 'NEUTRAL', 'EQUAL WEIGHT'].includes(r)).reduce((sum, r) => sum + ratingCounts[r], 0);
+            const sellCount = Object.keys(ratingCounts).filter(r => ['SELL', 'STRONG SELL', 'UNDERWEIGHT', 'NEGATIVE'].includes(r)).reduce((sum, r) => sum + ratingCounts[r], 0);
+            
+            if (consensusRating || consensusPriceTarget) {
+              const consensus = {
+                consensus_rating: consensusRating,
+                consensus_price_target: consensusPriceTarget,
+                total_analyst_count: totalRatings,
+                buy_percentage: totalRatings > 0 ? (buyCount / totalRatings) * 100 : null,
+                hold_percentage: totalRatings > 0 ? (holdCount / totalRatings) * 100 : null,
+                sell_percentage: totalRatings > 0 ? (sellCount / totalRatings) * 100 : null,
+                high_price_target: priceTargets.length > 0 ? Math.max(...priceTargets) : null,
+                low_price_target: priceTargets.length > 0 ? Math.min(...priceTargets) : null,
+              };
+              
+              console.log('WGO No News: Successfully aggregated consensus from insights:', consensus);
+              return consensus;
+            }
+          }
+        }
+      }
+      console.log('WGO No News: Could not aggregate consensus from insights, returning null');
     } else {
       const errorText = await consensusRes.text().catch(() => '');
       console.log('WGO No News: Consensus ratings API failed:', consensusRes.status, 'Error:', errorText.substring(0, 300));
