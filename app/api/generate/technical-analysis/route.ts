@@ -3834,6 +3834,12 @@ export async function POST(request: Request) {
             }
           }
           
+          // Fetch consensus ratings and earnings to check if section marker should exist
+          const [consensusRatingsCheck, nextEarningsCheck] = await Promise.all([
+            fetchConsensusRatings(ticker),
+            fetchNextEarningsDate(ticker)
+          ]);
+          
           // Check if "## Section: Earnings & Analyst Outlook" marker exists
           const earningsAnalystSectionMarker = /##\s*Section:\s*Earnings\s*&\s*Analyst\s*Outlook/i;
           const hasEarningsAnalystMarker = !!analysisWithPriceAction.match(earningsAnalystSectionMarker);
@@ -3848,7 +3854,7 @@ export async function POST(request: Request) {
           const hasPriceActionMarker = !!priceActionMarkerMatch;
           
           // If earnings/analyst data exists but marker is missing, inject it
-          if ((consensusRatings || nextEarnings) && !hasEarningsAnalystMarker) {
+          if ((consensusRatingsCheck || nextEarningsCheck) && !hasEarningsAnalystMarker) {
             console.log('Adding "## Section: Earnings & Analyst Outlook" marker');
             let insertPosition = -1;
             
