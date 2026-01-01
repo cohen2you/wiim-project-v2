@@ -69,15 +69,15 @@ export default function EarningsPreviewGenerator() {
       const data = await response.json();
 
       if (data.success && data.newsSection) {
-        // Replace the section header with the desired name
+        // Replace the section header with the desired name (format: ## Recent Developments & Catalysts - no "Section:" prefix to match placeholder format)
         let newsSection = data.newsSection.replace(
-          /##\s*(Latest News on Stock|Section:\s*Latest News on Stock)/gi,
-          '## Section: Recent Developments & Catalysts'
+          /##\s*(Section:\s*)?Latest News on Stock/gi,
+          '## Recent Developments & Catalysts'
         );
         
         // If the header wasn't found with the above pattern, try to replace any markdown H2 header at the start
-        if (!newsSection.includes('## Section: Recent Developments & Catalysts')) {
-          newsSection = newsSection.replace(/^##\s*.+$/m, '## Section: Recent Developments & Catalysts');
+        if (!newsSection.includes('## Recent Developments & Catalysts')) {
+          newsSection = newsSection.replace(/^##\s*(Section:\s*)?.+$/m, '## Recent Developments & Catalysts');
         }
         
         // Insert the news section between "Historical Performance" and "Analyst Sentiment"
