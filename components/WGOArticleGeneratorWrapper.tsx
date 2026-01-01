@@ -1,6 +1,7 @@
 'use client';
 
 import TechnicalAnalysisGenerator from './TechnicalAnalysisGenerator';
+import EarningsPreviewGenerator from './EarningsPreviewGenerator';
 
 export default function WGOArticleGeneratorWrapper() {
   return (
@@ -11,6 +12,7 @@ export default function WGOArticleGeneratorWrapper() {
       boxSizing: 'border-box'
     }}>
       <TechnicalAnalysisGenerator />
+      <EarningsPreviewGenerator />
     </div>
   );
 }

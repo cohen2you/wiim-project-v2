@@ -2713,10 +2713,10 @@ function formatRevenue(revenue: number | string | null | undefined): string {
     // If >= 1000 million, format as billions
     if (millions >= 1000) {
       const billions = millions / 1000;
-      return `$${billions.toFixed(2)}B`;
+      return `$${billions.toFixed(2)} billion`;
     } else {
       // Otherwise format as millions
-      return `$${millions.toFixed(2)}M`;
+      return `$${millions.toFixed(2)} million`;
     }
   } catch (error) {
     console.error('Error formatting revenue:', error);
@@ -4504,10 +4504,39 @@ export async function POST(request: Request) {
               }
               
               if (revenueEstimateMatch) {
-                const revEst = revenueEstimateMatch[1];
-                const revPrior = revenuePriorMatch ? revenuePriorMatch[1] : null;
-                const direction = revPrior ? (parseFloat(revEst.replace(/[$,BM]/g, '')) > parseFloat(revPrior.replace(/[$,BM]/g, '')) ? 'Up' : parseFloat(revEst.replace(/[$,BM]/g, '')) < parseFloat(revPrior.replace(/[$,BM]/g, '')) ? 'Down' : '') : '';
-                hardNumbers.push(`<strong>Revenue Estimate</strong>: ${revEst}${revPrior && direction ? ` (${direction} from ${revPrior} YoY)` : ''}`);
+                // Helper to parse revenue string (e.g., "$24.89 b" or "$24.89 billion") to number in millions
+                const parseRevenueString = (revStr: string): number | null => {
+                  try {
+                    const cleanStr = revStr.replace(/[$,]/g, '').trim();
+                    const numMatch = cleanStr.match(/^([\d.]+)/);
+                    if (!numMatch) return null;
+                    
+                    const num = parseFloat(numMatch[1]);
+                    if (isNaN(num)) return null;
+                    
+                    // Check for billion indicator (b, B, billion, Billion, BILLION)
+                    if (/b(?:illion)?/i.test(cleanStr)) {
+                      return num * 1000; // Convert billions to millions
+                    }
+                    // Check for million indicator (m, M, million, Million, MILLION)
+                    if (/m(?:illion)?/i.test(cleanStr)) {
+                      return num; // Already in millions
+                    }
+                    // Default: assume billions if number >= 1, millions otherwise
+                    return num >= 1 ? num * 1000 : num;
+                  } catch {
+                    return null;
+                  }
+                };
+                
+                const revEstParsed = parseRevenueString(revenueEstimateMatch[1]);
+                const revPriorParsed = revenuePriorMatch ? parseRevenueString(revenuePriorMatch[1]) : null;
+                
+                const revEstFormatted = revEstParsed ? formatRevenue(revEstParsed) : revenueEstimateMatch[1];
+                const revPriorFormatted = revPriorParsed ? formatRevenue(revPriorParsed) : (revenuePriorMatch ? revenuePriorMatch[1] : null);
+                
+                const direction = revEstParsed && revPriorParsed ? (revEstParsed > revPriorParsed ? 'Up' : revEstParsed < revPriorParsed ? 'Down' : '') : '';
+                hardNumbers.push(`<strong>Revenue Estimate</strong>: ${revEstFormatted}${revPriorFormatted && direction ? ` (${direction} from ${revPriorFormatted} YoY)` : ''}`);
               }
               
               // Add P/E ratio if available (use post-processing values)
