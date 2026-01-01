@@ -69,8 +69,50 @@ export default function EarningsPreviewGenerator() {
       const data = await response.json();
 
       if (data.success && data.newsSection) {
-        // Append the news section to the article
-        const updatedArticle = preview.preview + '\n\n' + data.newsSection;
+        // Replace the section header with the desired name
+        let newsSection = data.newsSection.replace(
+          /##\s*(Latest News on Stock|Section:\s*Latest News on Stock)/gi,
+          '## Section: Recent Developments & Catalysts'
+        );
+        
+        // If the header wasn't found with the above pattern, try to replace any markdown H2 header at the start
+        if (!newsSection.includes('## Section: Recent Developments & Catalysts')) {
+          newsSection = newsSection.replace(/^##\s*.+$/m, '## Section: Recent Developments & Catalysts');
+        }
+        
+        // Insert the news section between "Historical Performance" and "Analyst Sentiment"
+        let updatedArticle = preview.preview;
+        
+        // Find the position to insert: after "Historical Performance" section, before "Analyst Sentiment"
+        const analystSentimentMarker = /##\s*Section:\s*Analyst Sentiment/i;
+        
+        // Check if "Analyst Sentiment" section exists
+        if (analystSentimentMarker.test(updatedArticle)) {
+          // Find the position right before "Analyst Sentiment"
+          const match = updatedArticle.match(analystSentimentMarker);
+          if (match && match.index !== undefined) {
+            // Insert news section before "Analyst Sentiment"
+            const beforeAnalyst = updatedArticle.substring(0, match.index).trim();
+            const afterAnalyst = updatedArticle.substring(match.index);
+            updatedArticle = beforeAnalyst + '\n\n' + newsSection + '\n\n' + afterAnalyst;
+          } else {
+            // Fallback: append at end if insertion point not found
+            updatedArticle = updatedArticle + '\n\n' + newsSection;
+          }
+        } else {
+          // If "Analyst Sentiment" doesn't exist, try to find "Historical Performance" and insert after it
+          const historicalPerformanceMarker = /(##\s*Section:\s*Historical Performance[\s\S]*?)(?=##\s*Section:|$)/i;
+          if (historicalPerformanceMarker.test(updatedArticle)) {
+            updatedArticle = updatedArticle.replace(
+              historicalPerformanceMarker,
+              `$1\n\n${newsSection}\n\n`
+            );
+          } else {
+            // Fallback: append at end if neither section is found
+            updatedArticle = updatedArticle + '\n\n' + newsSection;
+          }
+        }
+        
         updatePreviewText(index, updatedArticle);
         setNewsErrors(prev => ({ ...prev, [index]: null }));
       } else {
