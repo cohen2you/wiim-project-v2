@@ -19,6 +19,8 @@ export default function EarningsPreviewGenerator() {
   const [provider, setProvider] = useState<'openai' | 'gemini'>('openai');
 
   const previewRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const [addingNewsIndex, setAddingNewsIndex] = useState<number | null>(null);
+  const [newsErrors, setNewsErrors] = useState<{ [key: number]: string | null }>({});
 
   // Get backend URL from environment variable
   const NEWS_AGENT_URL = process.env.NEXT_PUBLIC_NEWS_AGENT_URL || 'http://localhost:3000';
@@ -33,6 +35,57 @@ export default function EarningsPreviewGenerator() {
     setPreviews(prev => prev.map((preview, i) =>
       i === index ? { ...preview, preview: newText } : preview
     ));
+  };
+
+  // Function to add Benzinga news to an article
+  const handleAddBenzingaNews = async (index: number) => {
+    const preview = previews[index];
+    if (!preview || !preview.preview || preview.error) {
+      setNewsErrors(prev => ({ ...prev, [index]: 'No article available to add news to' }));
+      return;
+    }
+
+    setAddingNewsIndex(index);
+    setNewsErrors(prev => ({ ...prev, [index]: null }));
+
+    try {
+      const response = await fetch(`${NEWS_AGENT_URL}/api/enrichment/add-news`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          ticker: preview.ticker.toUpperCase(),
+          articleText: preview.preview,
+          storyType: 'earnings-preview'
+        })
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => '');
+        throw new Error(`HTTP ${response.status}: ${response.statusText}${errorText ? `. ${errorText.substring(0, 200)}` : ''}`);
+      }
+
+      const data = await response.json();
+
+      if (data.success && data.newsSection) {
+        // Append the news section to the article
+        const updatedArticle = preview.preview + '\n\n' + data.newsSection;
+        updatePreviewText(index, updatedArticle);
+        setNewsErrors(prev => ({ ...prev, [index]: null }));
+      } else {
+        throw new Error(data.error || 'Failed to add news section');
+      }
+    } catch (error) {
+      console.error('Error calling enrichment API:', error);
+      if (error instanceof Error) {
+        setNewsErrors(prev => ({ ...prev, [index]: `Failed to add news: ${error.message}` }));
+      } else {
+        setNewsErrors(prev => ({ ...prev, [index]: 'Failed to add news. Check browser console for details.' }));
+      }
+    } finally {
+      setAddingNewsIndex(null);
+    }
   };
 
   const copyPreviewHTML = async (index: number) => {
@@ -188,39 +241,41 @@ export default function EarningsPreviewGenerator() {
         }}
       />
 
-      <button
-        onClick={generateEarningsPreview}
-        disabled={loading || !tickers.trim()}
-        style={{
-          padding: '12px 24px',
-          backgroundColor: loading || !tickers.trim() ? '#9ca3af' : '#8b5cf6',
-          color: 'white',
-          border: 'none',
-          borderRadius: '8px',
-          fontSize: '15px',
-          fontWeight: '600',
-          cursor: loading || !tickers.trim() ? 'not-allowed' : 'pointer',
-          transition: 'all 0.2s',
-          boxShadow: loading || !tickers.trim() ? 'none' : '0 2px 4px rgba(139, 92, 246, 0.3)',
-          width: '100%'
-        }}
-        onMouseEnter={(e) => {
-          if (!loading && tickers.trim()) {
-            e.currentTarget.style.backgroundColor = '#7c3aed';
-            e.currentTarget.style.transform = 'translateY(-1px)';
-            e.currentTarget.style.boxShadow = '0 4px 8px rgba(139, 92, 246, 0.4)';
-          }
-        }}
-        onMouseLeave={(e) => {
-          if (!loading && tickers.trim()) {
-            e.currentTarget.style.backgroundColor = '#8b5cf6';
-            e.currentTarget.style.transform = 'translateY(0)';
-            e.currentTarget.style.boxShadow = '0 2px 4px rgba(139, 92, 246, 0.3)';
-          }
-        }}
-      >
-        {loading ? 'Generating Preview...' : 'Generate Earnings Preview'}
-      </button>
+      <div style={{ display: 'flex', gap: '12px', marginBottom: '20px' }}>
+        <button
+          onClick={generateEarningsPreview}
+          disabled={loading || !tickers.trim()}
+          style={{
+            padding: '12px 24px',
+            backgroundColor: loading || !tickers.trim() ? '#9ca3af' : '#8b5cf6',
+            color: 'white',
+            border: 'none',
+            borderRadius: '8px',
+            fontSize: '15px',
+            fontWeight: '600',
+            cursor: loading || !tickers.trim() ? 'not-allowed' : 'pointer',
+            transition: 'all 0.2s',
+            boxShadow: loading || !tickers.trim() ? 'none' : '0 2px 4px rgba(139, 92, 246, 0.3)',
+            flex: 1
+          }}
+          onMouseEnter={(e) => {
+            if (!loading && tickers.trim()) {
+              e.currentTarget.style.backgroundColor = '#7c3aed';
+              e.currentTarget.style.transform = 'translateY(-1px)';
+              e.currentTarget.style.boxShadow = '0 4px 8px rgba(139, 92, 246, 0.4)';
+            }
+          }}
+          onMouseLeave={(e) => {
+            if (!loading && tickers.trim()) {
+              e.currentTarget.style.backgroundColor = '#8b5cf6';
+              e.currentTarget.style.transform = 'translateY(0)';
+              e.currentTarget.style.boxShadow = '0 2px 4px rgba(139, 92, 246, 0.3)';
+            }
+          }}
+        >
+          {loading ? 'Generating Preview...' : 'Generate Earnings Preview'}
+        </button>
+      </div>
 
       {error && (
         <div style={{
@@ -291,6 +346,37 @@ export default function EarningsPreviewGenerator() {
                   MozUserSelect: 'none',
                   msUserSelect: 'none'
                 }}>
+                  <button
+                    onClick={() => handleAddBenzingaNews(i)}
+                    disabled={addingNewsIndex === i || !preview.preview || !!preview.error}
+                    style={{
+                      padding: '8px 16px',
+                      backgroundColor: addingNewsIndex === i || !preview.preview || !!preview.error ? '#9ca3af' : '#6366f1',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '6px',
+                      fontSize: '13px',
+                      fontWeight: '500',
+                      cursor: addingNewsIndex === i || !preview.preview || !!preview.error ? 'not-allowed' : 'pointer',
+                      transition: 'all 0.2s',
+                      userSelect: 'none',
+                      WebkitUserSelect: 'none',
+                      MozUserSelect: 'none',
+                      msUserSelect: 'none'
+                    }}
+                    onMouseEnter={(e) => {
+                      if (addingNewsIndex !== i && preview.preview && !preview.error) {
+                        e.currentTarget.style.backgroundColor = '#4f46e5';
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      if (addingNewsIndex !== i && preview.preview && !preview.error) {
+                        e.currentTarget.style.backgroundColor = '#6366f1';
+                      }
+                    }}
+                  >
+                    {addingNewsIndex === i ? 'Adding News...' : 'Add Benzinga News'}
+                  </button>
                   <AddSubheadsButton
                     articleText={preview.preview || ''}
                     onArticleUpdate={(newText) => updatePreviewText(i, newText)}
@@ -327,6 +413,17 @@ export default function EarningsPreviewGenerator() {
                     {copiedIndex === i ? '✓ Copied!' : 'Copy'}
                   </button>
                 </div>
+                {newsErrors[i] && (
+                  <div style={{
+                    padding: '8px 12px',
+                    backgroundColor: '#fef2f2',
+                    border: '1px solid #fecaca',
+                    borderRadius: '6px',
+                    marginBottom: '12px'
+                  }}>
+                    <p style={{ color: '#dc2626', fontSize: '12px', margin: 0 }}>{newsErrors[i]}</p>
+                  </div>
+                )}
 
                 <div style={{
                   color: '#111827',
