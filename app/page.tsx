@@ -33,6 +33,7 @@ export default function PRStoryGeneratorPage() {
   const [showManualInput, setShowManualInput] = useState(false);
   const [addingNews, setAddingNews] = useState(false);
   const [newsError, setNewsError] = useState<string | null>(null);
+  const [lastGeneratedStoryType, setLastGeneratedStoryType] = useState<'wiiim' | 'wgo' | 'wgoNoNews' | null>(null);
   const [showUploadSection, setShowUploadSection] = useState(false);
   const [showCustomizeModal, setShowCustomizeModal] = useState(false);
   const [loadingCustomContext, setLoadingCustomContext] = useState(false);
@@ -386,6 +387,7 @@ export default function PRStoryGeneratorPage() {
     setLoadingBaseStory(false);
     setPrFetchAttempted(false);
     setLastPrTicker('');
+    setLastGeneratedStoryType(null);
   };
 
   const handleStandardStoryGeneration = async (type: 'wiiim' | 'wgo' | 'wgoNoNews') => {
@@ -424,6 +426,7 @@ export default function PRStoryGeneratorPage() {
       if (!res.ok || !data.story) throw new Error(data.error || `Failed to generate ${type} story`);
 
       setArticle(data.story);
+      setLastGeneratedStoryType(type);
     } catch (err: any) {
       setStandardStoryError(err.message || `Failed to generate ${type} story`);
     } finally {
@@ -1109,34 +1112,36 @@ export default function PRStoryGeneratorPage() {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
             <h3 style={{ fontSize: '18px', fontWeight: '600' }}>Generated Story</h3>
             <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-              <button
-                onClick={handleAddBenzingaNews}
-                disabled={addingNews || !article}
-                style={{
-                  padding: '8px 16px',
-                  backgroundColor: addingNews || !article ? '#9ca3af' : '#6366f1',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '6px',
-                  fontSize: '13px',
-                  fontWeight: '500',
-                  cursor: addingNews || !article ? 'not-allowed' : 'pointer',
-                  transition: 'all 0.2s',
-                  userSelect: 'none'
-                }}
-                onMouseEnter={(e) => {
-                  if (!addingNews && article) {
-                    e.currentTarget.style.backgroundColor = '#4f46e5';
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  if (!addingNews && article) {
-                    e.currentTarget.style.backgroundColor = '#6366f1';
-                  }
-                }}
-              >
-                {addingNews ? 'Adding News...' : 'Add Benzinga News'}
-              </button>
+              {(lastGeneratedStoryType === 'wgoNoNews' || lastGeneratedStoryType === 'wgo') && (
+                <button
+                  onClick={handleAddBenzingaNews}
+                  disabled={addingNews || !article}
+                  style={{
+                    padding: '8px 16px',
+                    backgroundColor: addingNews || !article ? '#9ca3af' : '#6366f1',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '6px',
+                    fontSize: '13px',
+                    fontWeight: '500',
+                    cursor: addingNews || !article ? 'not-allowed' : 'pointer',
+                    transition: 'all 0.2s',
+                    userSelect: 'none'
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!addingNews && article) {
+                      e.currentTarget.style.backgroundColor = '#4f46e5';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!addingNews && article) {
+                      e.currentTarget.style.backgroundColor = '#6366f1';
+                    }
+                  }}
+                >
+                  {addingNews ? 'Adding News...' : 'Add Benzinga News'}
+                </button>
+              )}
               <button
                 onClick={() => {
                   navigator.clipboard.writeText(article);

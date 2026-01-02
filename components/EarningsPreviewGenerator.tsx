@@ -8,6 +8,7 @@ interface EarningsPreviewResult {
   preview?: string;
   earningsDate?: string | null;
   error?: string;
+  enrichFirst?: boolean; // Track if enrich first was used
 }
 
 export default function EarningsPreviewGenerator() {
@@ -180,7 +181,7 @@ export default function EarningsPreviewGenerator() {
     }
   };
 
-  const generateEarningsPreview = async () => {
+  const generateEarningsPreview = async (enrichFirst: boolean = false) => {
     if (!tickers.trim()) {
       setError('Please enter ticker(s) first.');
       return;
@@ -206,7 +207,12 @@ export default function EarningsPreviewGenerator() {
       }
 
       const data = await res.json();
-      setPreviews(data.previews || []);
+      // Mark previews with enrichFirst flag
+      const previewsWithFlag = (data.previews || []).map((preview: EarningsPreviewResult) => ({
+        ...preview,
+        enrichFirst
+      }));
+      setPreviews(previewsWithFlag);
     } catch (error: unknown) {
       console.error('Error generating earnings preview:', error);
       if (error instanceof Error) setError(error.message);
@@ -291,7 +297,7 @@ export default function EarningsPreviewGenerator() {
 
       <div style={{ display: 'flex', gap: '12px', marginBottom: '20px' }}>
         <button
-          onClick={generateEarningsPreview}
+          onClick={() => generateEarningsPreview(false)}
           disabled={loading || !tickers.trim()}
           style={{
             padding: '12px 24px',
@@ -322,6 +328,39 @@ export default function EarningsPreviewGenerator() {
           }}
         >
           {loading ? 'Generating Preview...' : 'Generate Earnings Preview'}
+        </button>
+        <button
+          onClick={() => generateEarningsPreview(true)}
+          disabled={loading || !tickers.trim()}
+          style={{
+            padding: '12px 24px',
+            backgroundColor: loading || !tickers.trim() ? '#9ca3af' : '#6366f1',
+            color: 'white',
+            border: 'none',
+            borderRadius: '8px',
+            fontSize: '15px',
+            fontWeight: '600',
+            cursor: loading || !tickers.trim() ? 'not-allowed' : 'pointer',
+            transition: 'all 0.2s',
+            boxShadow: loading || !tickers.trim() ? 'none' : '0 2px 4px rgba(99, 102, 241, 0.3)',
+            flex: 1
+          }}
+          onMouseEnter={(e) => {
+            if (!loading && tickers.trim()) {
+              e.currentTarget.style.backgroundColor = '#4f46e5';
+              e.currentTarget.style.transform = 'translateY(-1px)';
+              e.currentTarget.style.boxShadow = '0 4px 8px rgba(99, 102, 241, 0.4)';
+            }
+          }}
+          onMouseLeave={(e) => {
+            if (!loading && tickers.trim()) {
+              e.currentTarget.style.backgroundColor = '#6366f1';
+              e.currentTarget.style.transform = 'translateY(0)';
+              e.currentTarget.style.boxShadow = '0 2px 4px rgba(99, 102, 241, 0.3)';
+            }
+          }}
+        >
+          {loading ? 'Enriching & Generating...' : 'Enrich First Earnings Preview'}
         </button>
       </div>
 
@@ -394,37 +433,39 @@ export default function EarningsPreviewGenerator() {
                   MozUserSelect: 'none',
                   msUserSelect: 'none'
                 }}>
-                  <button
-                    onClick={() => handleAddBenzingaNews(i)}
-                    disabled={addingNewsIndex === i || !preview.preview || !!preview.error}
-                    style={{
-                      padding: '8px 16px',
-                      backgroundColor: addingNewsIndex === i || !preview.preview || !!preview.error ? '#9ca3af' : '#6366f1',
-                      color: 'white',
-                      border: 'none',
-                      borderRadius: '6px',
-                      fontSize: '13px',
-                      fontWeight: '500',
-                      cursor: addingNewsIndex === i || !preview.preview || !!preview.error ? 'not-allowed' : 'pointer',
-                      transition: 'all 0.2s',
-                      userSelect: 'none',
-                      WebkitUserSelect: 'none',
-                      MozUserSelect: 'none',
-                      msUserSelect: 'none'
-                    }}
-                    onMouseEnter={(e) => {
-                      if (addingNewsIndex !== i && preview.preview && !preview.error) {
-                        e.currentTarget.style.backgroundColor = '#4f46e5';
-                      }
-                    }}
-                    onMouseLeave={(e) => {
-                      if (addingNewsIndex !== i && preview.preview && !preview.error) {
-                        e.currentTarget.style.backgroundColor = '#6366f1';
-                      }
-                    }}
-                  >
-                    {addingNewsIndex === i ? 'Adding News...' : 'Add Benzinga News'}
-                  </button>
+                  {!preview.enrichFirst && (
+                    <button
+                      onClick={() => handleAddBenzingaNews(i)}
+                      disabled={addingNewsIndex === i || !preview.preview || !!preview.error}
+                      style={{
+                        padding: '8px 16px',
+                        backgroundColor: addingNewsIndex === i || !preview.preview || !!preview.error ? '#9ca3af' : '#6366f1',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '6px',
+                        fontSize: '13px',
+                        fontWeight: '500',
+                        cursor: addingNewsIndex === i || !preview.preview || !!preview.error ? 'not-allowed' : 'pointer',
+                        transition: 'all 0.2s',
+                        userSelect: 'none',
+                        WebkitUserSelect: 'none',
+                        MozUserSelect: 'none',
+                        msUserSelect: 'none'
+                      }}
+                      onMouseEnter={(e) => {
+                        if (addingNewsIndex !== i && preview.preview && !preview.error) {
+                          e.currentTarget.style.backgroundColor = '#4f46e5';
+                        }
+                      }}
+                      onMouseLeave={(e) => {
+                        if (addingNewsIndex !== i && preview.preview && !preview.error) {
+                          e.currentTarget.style.backgroundColor = '#6366f1';
+                        }
+                      }}
+                    >
+                      {addingNewsIndex === i ? 'Adding News...' : 'Add Benzinga News'}
+                    </button>
+                  )}
                   <AddSubheadsButton
                     articleText={preview.preview || ''}
                     onArticleUpdate={(newText) => updatePreviewText(i, newText)}
