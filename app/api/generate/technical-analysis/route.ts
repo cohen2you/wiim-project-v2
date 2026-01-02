@@ -4371,7 +4371,7 @@ export async function POST(request: Request) {
               // Fetch recent analyst actions
               recentAnalystActionsForPost = await fetchRecentAnalystActions(ticker, 3);
               
-              // Determine Forward P/E if we have earnings data
+              // Fetch earnings data for post-processing (we'll use this for revenue formatting too)
               const nextEarningsCheck = await fetchNextEarningsDate(ticker);
               if (nextEarningsCheck && typeof nextEarningsCheck === 'object') {
                 const trailingEPS = nextEarningsCheck.eps_prior ? parseFloat(nextEarningsCheck.eps_prior.toString()) : null;
@@ -4523,7 +4523,16 @@ export async function POST(request: Request) {
                 hardNumbers.push(`<strong>EPS Estimate</strong>: $${epsEst}${epsPrior && direction ? ` (${direction} from $${epsPrior} YoY)` : ''}`);
               }
               
-              if (revenueEstimateMatch) {
+              // Use actual earnings data if available, otherwise fall back to extraction
+              if (nextEarningsCheck && typeof nextEarningsCheck === 'object' && nextEarningsCheck.revenue_estimate !== null && nextEarningsCheck.revenue_estimate !== undefined) {
+                // Use actual formatted revenue values from API (this fixes the "$0.08 million" issue)
+                const revEstFormatted = formatRevenue(nextEarningsCheck.revenue_estimate as string | number | null);
+                const revPriorFormatted = nextEarningsCheck.revenue_prior ? formatRevenue(nextEarningsCheck.revenue_prior as string | number | null) : null;
+                const revEstNum = typeof nextEarningsCheck.revenue_estimate === 'string' ? parseFloat(nextEarningsCheck.revenue_estimate) : nextEarningsCheck.revenue_estimate;
+                const revPriorNum = nextEarningsCheck.revenue_prior ? (typeof nextEarningsCheck.revenue_prior === 'string' ? parseFloat(nextEarningsCheck.revenue_prior) : nextEarningsCheck.revenue_prior) : null;
+                const direction = revPriorNum !== null ? (revEstNum > revPriorNum ? 'Up' : revEstNum < revPriorNum ? 'Down' : '') : '';
+                hardNumbers.push(`<strong>Revenue Estimate</strong>: ${revEstFormatted}${revPriorFormatted && direction ? ` (${direction} from ${revPriorFormatted} YoY)` : ''}`);
+              } else if (revenueEstimateMatch) {
                 // Helper to parse revenue string (e.g., "$24.89 b" or "$24.89 billion") to number in millions
                 const parseRevenueString = (revStr: string): number | null => {
                   try {

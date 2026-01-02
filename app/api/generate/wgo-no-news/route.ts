@@ -983,8 +983,8 @@ UPCOMING EARNINGS DATA:
 - Next Earnings Date: ${formatEarningsDate(stockData.nextEarnings.date)}
 ${stockData.nextEarnings.eps_estimate ? `- EPS Estimate: $${parseFloat(stockData.nextEarnings.eps_estimate.toString()).toFixed(2)}` : ''}
 ${stockData.nextEarnings.eps_prior ? `- Previous EPS: $${parseFloat(stockData.nextEarnings.eps_prior.toString()).toFixed(2)}` : ''}
-${stockData.nextEarnings.revenue_estimate ? `- Revenue Estimate: $${(parseFloat(stockData.nextEarnings.revenue_estimate.toString()) / 1000000).toFixed(2)}M` : ''}
-${stockData.nextEarnings.revenue_prior ? `- Previous Revenue: $${(parseFloat(stockData.nextEarnings.revenue_prior.toString()) / 1000000).toFixed(2)}M` : ''}
+${stockData.nextEarnings.revenue_estimate ? `- Revenue Estimate: ${formatRevenue(stockData.nextEarnings.revenue_estimate as string | number | null)}` : ''}
+${stockData.nextEarnings.revenue_prior ? `- Previous Revenue: ${formatRevenue(stockData.nextEarnings.revenue_prior as string | number | null)}` : ''}
 
 ` : ''}
 
@@ -1139,115 +1139,101 @@ Generate the basic technical story now.`;
       
       // Check if content is already formatted (has bullet points with <strong> tags for labels)
       if (!earningsContent.includes('<ul>') && !earningsContent.includes('<strong>EPS Estimate</strong>') && !earningsContent.includes('<strong>Revenue Estimate</strong>')) {
-        // Extract earnings data from the content - handle multiple date patterns
-        // First try to match full date format: "on February 26, 2026"
-        let earningsDateMatch = earningsContent.match(/(?:scheduled for|on|report on|earnings report on) ([A-Za-z]+ \d{1,2}, \d{4})/i);
-        if (!earningsDateMatch) {
-          // Fallback to partial date: "on February 26"
-          earningsDateMatch = earningsContent.match(/(?:scheduled for|on|report on|earnings report on) ([^,]+?)(?:,|\.|$)/i);
-        }
-        
-        // Try narrative format first
-        let epsEstimateMatch = earningsContent.match(/earnings per share of \$([\d.-]+)/i);
-        let epsPriorMatch = earningsContent.match(/(?:up from|down from|compared to|from the same quarter last year|from a loss of) \$([\d.-]+)/i);
-        let revenueEstimateMatch = earningsContent.match(/revenue of (\$[\d.]+[BM])/i);
-        let revenuePriorMatch = earningsContent.match(/revenue.*?(?:up from|down from|compared to|from the same quarter last year|from the prior-year period) (\$[\d.]+[BM])/i);
-        let consensusRatingMatch = earningsContent.match(/(?:consensus|has a) ([A-Za-z]+) rating/i);
-        let priceTargetMatch = earningsContent.match(/price target of \$([\d.]+)/i);
-        
-        // Check if content already has formatted lines (e.g., "EPS Estimate: $0.73")
-        const formattedLines: string[] = [];
-        const epsLineMatch = earningsContent.match(/^EPS Estimate:\s*(.+?)(?:\n|$)/im);
-        const revenueLineMatch = earningsContent.match(/^Revenue Estimate:\s*(.+?)(?:\n|$)/im);
-        const consensusLineMatch = earningsContent.match(/^Analyst Consensus:\s*(.+?)(?:\n|$)/im);
-        
-        if (epsLineMatch || revenueLineMatch || consensusLineMatch) {
-          // Content is already formatted - just extract and wrap in HTML
-          if (epsLineMatch) {
-            formattedLines.push(`<strong>EPS Estimate</strong>: ${epsLineMatch[1].trim()}`);
-          }
-          if (revenueLineMatch) {
-            formattedLines.push(`<strong>Revenue Estimate</strong>: ${revenueLineMatch[1].trim()}`);
-          }
-          if (consensusLineMatch) {
-            formattedLines.push(`<strong>Analyst Consensus</strong>: ${consensusLineMatch[1].trim()}`);
-          }
-        }
-        
-        console.log('[EARNINGS FORMAT] Extracting data:', {
-          hasDate: !!earningsDateMatch,
-          dateMatch: earningsDateMatch ? earningsDateMatch[1] : null,
-          hasEPS: !!epsEstimateMatch,
-          hasRevenue: !!revenueEstimateMatch,
-          hasConsensus: !!consensusRatingMatch,
-          hasPriceTarget: !!priceTargetMatch,
-          hasFormattedLines: formattedLines.length > 0,
-          contentSample: earningsContent.substring(0, 500)
-        });
-        
-        // Build formatted lines with bold labels
+        // Build formatted lines with bold labels using actual data from stockData.nextEarnings when available
         const lines: string[] = [];
         let intro = '';
         let priceTargetNote = '';
         
-        // Use pre-formatted lines if found, otherwise extract from narrative format
-        if (formattedLines.length > 0) {
-          lines.push(...formattedLines);
-          // Extract intro sentence from the beginning of the content
-          const introMatch = earningsContent.match(/^(.+?\.)(?:\n\n|\nEPS Estimate:|$)/m);
-          intro = introMatch ? introMatch[1].trim() : 'Investors are looking ahead to the next earnings report.';
-        }
-        
-        if (lines.length === 0 && earningsDateMatch) {
-          intro = `Investors are looking ahead to the next earnings report on ${earningsDateMatch[1].trim()}.`;
+        // Use actual earnings data if available, otherwise fall back to extraction
+        if (stockData.nextEarnings) {
+          intro = `Investors are looking ahead to the next earnings report on ${formatEarningsDate(stockData.nextEarnings.date)}.`;
           
-          if (epsEstimateMatch) {
-            const epsEst = epsEstimateMatch[1];
-            const epsPrior = epsPriorMatch ? epsPriorMatch[1] : null;
-            const direction = epsPrior ? (parseFloat(epsEst) > parseFloat(epsPrior) ? 'Up' : parseFloat(epsEst) < parseFloat(epsPrior) ? 'Down' : '') : '';
-            lines.push(`<strong>EPS Estimate</strong>: $${epsEst}${epsPrior && direction ? ` (${direction} from $${epsPrior} YoY)` : ''}`);
+          // Use actual formatted EPS values
+          if (stockData.nextEarnings.eps_estimate !== null && stockData.nextEarnings.eps_estimate !== undefined) {
+            const epsEst = parseFloat(stockData.nextEarnings.eps_estimate.toString());
+            const epsPrior = stockData.nextEarnings.eps_prior ? parseFloat(stockData.nextEarnings.eps_prior.toString()) : null;
+            const direction = epsPrior !== null ? (epsEst > epsPrior ? 'Up' : epsEst < epsPrior ? 'Down' : '') : '';
+            lines.push(`<strong>EPS Estimate</strong>: $${epsEst.toFixed(2)}${epsPrior !== null && direction ? ` (${direction} from $${epsPrior.toFixed(2)} YoY)` : ''}`);
           }
           
-          if (revenueEstimateMatch) {
-            const revEst = revenueEstimateMatch[1];
-            const revPrior = revenuePriorMatch ? revenuePriorMatch[1] : null;
-            const direction = revPrior ? (parseFloat(revEst.replace(/[$,BM]/g, '')) > parseFloat(revPrior.replace(/[$,BM]/g, '')) ? 'Up' : parseFloat(revEst.replace(/[$,BM]/g, '')) < parseFloat(revPrior.replace(/[$,BM]/g, '')) ? 'Down' : '') : '';
-            lines.push(`<strong>Revenue Estimate</strong>: ${revEst}${revPrior && direction ? ` (${direction} from ${revPrior} YoY)` : ''}`);
+          // Use actual formatted revenue values (this fixes the "$0.08 million" issue)
+          if (stockData.nextEarnings.revenue_estimate !== null && stockData.nextEarnings.revenue_estimate !== undefined) {
+            const revEstFormatted = formatRevenue(stockData.nextEarnings.revenue_estimate as string | number | null);
+            const revPriorFormatted = stockData.nextEarnings.revenue_prior ? formatRevenue(stockData.nextEarnings.revenue_prior as string | number | null) : null;
+            const revEstNum = typeof stockData.nextEarnings.revenue_estimate === 'string' ? parseFloat(stockData.nextEarnings.revenue_estimate) : stockData.nextEarnings.revenue_estimate;
+            const revPriorNum = stockData.nextEarnings.revenue_prior ? (typeof stockData.nextEarnings.revenue_prior === 'string' ? parseFloat(stockData.nextEarnings.revenue_prior) : stockData.nextEarnings.revenue_prior) : null;
+            const direction = revPriorNum !== null ? (revEstNum > revPriorNum ? 'Up' : revEstNum < revPriorNum ? 'Down' : '') : '';
+            lines.push(`<strong>Revenue Estimate</strong>: ${revEstFormatted}${revPriorFormatted && direction ? ` (${direction} from ${revPriorFormatted} YoY)` : ''}`);
           }
           
-          if (consensusRatingMatch && priceTargetMatch) {
+          // Extract consensus rating and price target from AI text or use actual data
+          let consensusRatingMatch = earningsContent.match(/(?:consensus|has a) ([A-Za-z]+) rating/i);
+          let priceTargetMatch = earningsContent.match(/price target of \$([\d.]+)/i);
+          
+          // Use actual consensus data if available
+          if (stockData.consensusRatings) {
+            const rating = stockData.consensusRatings.consensus_rating ? stockData.consensusRatings.consensus_rating.charAt(0) + stockData.consensusRatings.consensus_rating.slice(1).toLowerCase() : null;
+            const target = stockData.consensusRatings.consensus_price_target ? parseFloat(stockData.consensusRatings.consensus_price_target.toString()) : null;
+            
+            if (rating && target) {
+              lines.push(`<strong>Analyst Consensus</strong>: ${rating} Rating ($${target.toFixed(2)} Avg Price Target)`);
+              
+              // Add price comparison logic note
+              if (stockData.priceAction?.last) {
+                const currentPrice = stockData.priceAction.last;
+                const priceDiff = ((target - currentPrice) / currentPrice) * 100;
+                if (priceDiff > 0) {
+                  priceTargetNote = `\n\n<strong>Note:</strong> <em>The average price target implies significant upside potential from current levels.</em>`;
+                } else {
+                  priceTargetNote = `\n\n<strong>Note:</strong> <em>The average price target suggests the stock is trading at a premium to analyst targets.</em>`;
+                }
+              }
+            } else if (rating) {
+              lines.push(`<strong>Analyst Consensus</strong>: ${rating} Rating`);
+            } else if (target) {
+              lines.push(`<strong>Analyst Consensus</strong>: $${target.toFixed(2)} Avg Price Target`);
+            }
+          } else if (consensusRatingMatch && priceTargetMatch) {
+            // Fallback to extraction if no actual data
             const rating = consensusRatingMatch[1].charAt(0) + consensusRatingMatch[1].slice(1).toLowerCase();
             const target = parseFloat(priceTargetMatch[1]);
             lines.push(`<strong>Analyst Consensus</strong>: ${rating} Rating ($${target.toFixed(2)} Avg Price Target)`);
+          }
+        } else {
+          // Fallback to extraction if no earnings data available
+          let earningsDateMatch = earningsContent.match(/(?:scheduled for|on|report on|earnings report on) ([A-Za-z]+ \d{1,2}, \d{4})/i);
+          if (!earningsDateMatch) {
+            earningsDateMatch = earningsContent.match(/(?:scheduled for|on|report on|earnings report on) ([^,]+?)(?:,|\.|$)/i);
+          }
+          
+          let epsEstimateMatch = earningsContent.match(/earnings per share of \$([\d.-]+)/i);
+          let epsPriorMatch = earningsContent.match(/(?:up from|down from|compared to|from the same quarter last year|from a loss of) \$([\d.-]+)/i);
+          let revenueEstimateMatch = earningsContent.match(/revenue of (\$[\d.]+[BM])/i);
+          let revenuePriorMatch = earningsContent.match(/revenue.*?(?:up from|down from|compared to|from the same quarter last year|from the prior-year period) (\$[\d.]+[BM])/i);
+          let consensusRatingMatch = earningsContent.match(/(?:consensus|has a) ([A-Za-z]+) rating/i);
+          let priceTargetMatch = earningsContent.match(/price target of \$([\d.]+)/i);
+          
+          if (earningsDateMatch) {
+            intro = `Investors are looking ahead to the next earnings report on ${earningsDateMatch[1].trim()}.`;
             
-            // Add price comparison logic note
-            if (stockData.priceAction?.last) {
-              const currentPrice = stockData.priceAction.last;
-              const priceDiff = ((target - currentPrice) / currentPrice) * 100;
-              if (priceDiff > 0) {
-                // Target is above current price = upside potential
-                priceTargetNote = `\n\n<strong>Note:</strong> <em>The average price target implies significant upside potential from current levels.</em>`;
-              } else {
-                // Target is below current price = trading at premium
-                priceTargetNote = `\n\n<strong>Note:</strong> <em>The average price target suggests the stock is trading at a premium to analyst targets.</em>`;
-              }
+            if (epsEstimateMatch) {
+              const epsEst = epsEstimateMatch[1];
+              const epsPrior = epsPriorMatch ? epsPriorMatch[1] : null;
+              const direction = epsPrior ? (parseFloat(epsEst) > parseFloat(epsPrior) ? 'Up' : parseFloat(epsEst) < parseFloat(epsPrior) ? 'Down' : '') : '';
+              lines.push(`<strong>EPS Estimate</strong>: $${epsEst}${epsPrior && direction ? ` (${direction} from $${epsPrior} YoY)` : ''}`);
             }
-          } else if (consensusRatingMatch) {
-            const rating = consensusRatingMatch[1].charAt(0) + consensusRatingMatch[1].slice(1).toLowerCase();
-            lines.push(`<strong>Analyst Consensus</strong>: ${rating} Rating`);
-          } else if (priceTargetMatch) {
-            const target = parseFloat(priceTargetMatch[1]);
-            lines.push(`<strong>Analyst Consensus</strong>: $${target.toFixed(2)} Avg Price Target`);
             
-            // Add price comparison logic note
-            if (stockData.priceAction?.last) {
-              const currentPrice = stockData.priceAction.last;
-              const priceDiff = ((target - currentPrice) / currentPrice) * 100;
-              if (priceDiff > 0) {
-                priceTargetNote = `\n\n<strong>Note:</strong> <em>The average price target implies significant upside potential from current levels.</em>`;
-              } else {
-                priceTargetNote = `\n\n<strong>Note:</strong> <em>The average price target suggests the stock is trading at a premium to analyst targets.</em>`;
-              }
+            if (revenueEstimateMatch) {
+              const revEst = revenueEstimateMatch[1];
+              const revPrior = revenuePriorMatch ? revenuePriorMatch[1] : null;
+              const direction = revPrior ? (parseFloat(revEst.replace(/[$,BM]/g, '')) > parseFloat(revPrior.replace(/[$,BM]/g, '')) ? 'Up' : parseFloat(revEst.replace(/[$,BM]/g, '')) < parseFloat(revPrior.replace(/[$,BM]/g, '')) ? 'Down' : '') : '';
+              lines.push(`<strong>Revenue Estimate</strong>: ${revEst}${revPrior && direction ? ` (${direction} from ${revPrior} YoY)` : ''}`);
+            }
+            
+            if (consensusRatingMatch && priceTargetMatch) {
+              const rating = consensusRatingMatch[1].charAt(0) + consensusRatingMatch[1].slice(1).toLowerCase();
+              const target = parseFloat(priceTargetMatch[1]);
+              lines.push(`<strong>Analyst Consensus</strong>: ${rating} Rating ($${target.toFixed(2)} Avg Price Target)`);
             }
           }
         }
@@ -1259,7 +1245,7 @@ Generate the basic technical story now.`;
           const beforeEarnings = story.substring(0, earningsSectionMatch.index + earningsSectionMatch[0].length);
           const afterEarnings = story.substring(earningsSectionMatch.index + earningsSectionMatch[0].length + earningsSectionEnd);
           story = `${beforeEarnings}\n\n${formattedSection}\n\n${afterEarnings}`;
-          console.log('✅ Formatted Earnings & Analyst Outlook section with bold labels and bullet points');
+          console.log('✅ Formatted Earnings & Analyst Outlook section with bold labels and bullet points using actual data');
         } else if (lines.length > 0) {
           // We have lines but no intro - use default
           intro = 'Investors are looking ahead to the next earnings report.';

@@ -993,6 +993,16 @@ async function generateEarningsPreview(
   const revenueEstimate = typeof nextEarnings === 'object' && nextEarnings.revenue_estimate ? nextEarnings.revenue_estimate : null;
   const revenuePrior = typeof nextEarnings === 'object' && nextEarnings.revenue_prior ? nextEarnings.revenue_prior : null;
   
+  // Debug logging for revenue values
+  console.log(`[EARNINGS PREVIEW] ${ticker}: Revenue values before formatting:`, {
+    revenueEstimate_raw: revenueEstimate,
+    revenueEstimate_type: typeof revenueEstimate,
+    revenuePrior_raw: revenuePrior,
+    revenuePrior_type: typeof revenuePrior,
+    revenueEstimate_formatted: revenueEstimate ? formatRevenue(revenueEstimate) : null,
+    revenuePrior_formatted: revenuePrior ? formatRevenue(revenuePrior) : null
+  });
+  
   // Determine Forward P/E vs P/E Ratio
   let useForwardPE = false;
   if (epsPrior !== null && epsEstimate !== null) {
