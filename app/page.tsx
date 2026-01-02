@@ -31,6 +31,8 @@ export default function PRStoryGeneratorPage() {
   const [scrapingUrl, setScrapingUrl] = useState(false);
   const [scrapingError, setScrapingError] = useState('');
   const [showManualInput, setShowManualInput] = useState(false);
+  const [addingNews, setAddingNews] = useState(false);
+  const [newsError, setNewsError] = useState<string | null>(null);
   const [showUploadSection, setShowUploadSection] = useState(false);
   const [showCustomizeModal, setShowCustomizeModal] = useState(false);
   const [loadingCustomContext, setLoadingCustomContext] = useState(false);
@@ -426,6 +428,106 @@ export default function PRStoryGeneratorPage() {
       setStandardStoryError(err.message || `Failed to generate ${type} story`);
     } finally {
       setLoadingStandardStory(false);
+    }
+  };
+
+  // Function to add Benzinga news to WGO No News article
+  const handleAddBenzingaNews = async () => {
+    if (!article || !ticker.trim()) {
+      setNewsError('No article available to add news to');
+      return;
+    }
+
+    setAddingNews(true);
+    setNewsError(null);
+
+    try {
+      const NEWS_AGENT_URL = process.env.NEXT_PUBLIC_NEWS_AGENT_URL || 'http://localhost:3000';
+      
+      const response = await fetch(`${NEWS_AGENT_URL}/api/enrichment/add-news`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          ticker: ticker.toUpperCase(),
+          articleText: article,
+          storyType: 'wgo'
+        })
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => '');
+        throw new Error(`HTTP ${response.status}: ${response.statusText}${errorText ? `. ${errorText.substring(0, 200)}` : ''}`);
+      }
+
+      const data = await response.json();
+
+      if (data.success && data.newsSection) {
+        // Ensure the section has the correct header (format: ## Recent Developments & Catalysts)
+        let newsSection = data.newsSection.trim();
+        
+        // Replace existing headers with our desired header
+        newsSection = newsSection.replace(
+          /##\s*(Section:\s*)?(Latest News on Stock|Recent Developments & Catalysts)/gi,
+          '## Recent Developments & Catalysts'
+        );
+        
+        // If the header doesn't exist at the start, add it
+        if (!newsSection.startsWith('## Recent Developments & Catalysts')) {
+          // Remove any existing markdown H2 header at the start
+          newsSection = newsSection.replace(/^##\s*(Section:\s*)?.+\n?/m, '');
+          // Add our header at the beginning
+          newsSection = '## Recent Developments & Catalysts\n\n' + newsSection.trim();
+        }
+        
+        // Insert the news section after "The Catalyst" section and before "Technical Analysis"
+        let updatedArticle = article;
+        
+        // Find the position to insert: after "The Catalyst" section, before "Technical Analysis"
+        const technicalAnalysisMarker = /##\s*Section:\s*Technical Analysis/i;
+        
+        // Check if "Technical Analysis" section exists
+        if (technicalAnalysisMarker.test(updatedArticle)) {
+          // Find the position right before "Technical Analysis"
+          const match = updatedArticle.match(technicalAnalysisMarker);
+          if (match && match.index !== undefined) {
+            // Insert news section before "Technical Analysis"
+            const beforeTechnical = updatedArticle.substring(0, match.index).trim();
+            const afterTechnical = updatedArticle.substring(match.index);
+            updatedArticle = beforeTechnical + '\n\n' + newsSection + '\n\n' + afterTechnical;
+          } else {
+            // Fallback: append at end if insertion point not found
+            updatedArticle = updatedArticle + '\n\n' + newsSection;
+          }
+        } else {
+          // If "Technical Analysis" doesn't exist, try to find "The Catalyst" and insert after it
+          const catalystMarker = /(##\s*Section:\s*The Catalyst[\s\S]*?)(?=##\s*Section:|$)/i;
+          if (catalystMarker.test(updatedArticle)) {
+            updatedArticle = updatedArticle.replace(
+              catalystMarker,
+              `$1\n\n${newsSection}\n\n`
+            );
+          } else {
+            // Fallback: append at end if neither section is found
+            updatedArticle = updatedArticle + '\n\n' + newsSection;
+          }
+        }
+        
+        setArticle(updatedArticle);
+        setNewsError(null);
+      } else {
+        throw new Error(data.error || 'Failed to add news section');
+      }
+    } catch (error) {
+      console.error('Error calling enrichment API:', error);
+      if (error instanceof Error) {
+        setNewsError(`Failed to add news: ${error.message}`);
+      } else {
+        setNewsError('Failed to add news. Check browser console for details.');
+      }
+    } finally {
+      setAddingNews(false);
     }
   };
 
@@ -1006,26 +1108,61 @@ export default function PRStoryGeneratorPage() {
         <div style={{ marginBottom: 20, backgroundColor: 'white', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '16px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
             <h3 style={{ fontSize: '18px', fontWeight: '600' }}>Generated Story</h3>
-            <button
-              onClick={() => {
-                navigator.clipboard.writeText(article);
-                setCopied(true);
-                setTimeout(() => setCopied(false), 2000);
-              }}
-              style={{
-                padding: '8px 16px',
-                backgroundColor: copied ? '#059669' : '#2563eb',
-                color: 'white',
-                border: 'none',
-                borderRadius: '4px',
-                fontSize: '14px',
-                cursor: 'pointer',
-                transition: 'background-color 0.2s'
-              }}
-            >
-              {copied ? 'Copied!' : 'Copy Story'}
-            </button>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <button
+                onClick={handleAddBenzingaNews}
+                disabled={addingNews || !article}
+                style={{
+                  padding: '8px 16px',
+                  backgroundColor: addingNews || !article ? '#9ca3af' : '#6366f1',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '6px',
+                  fontSize: '13px',
+                  fontWeight: '500',
+                  cursor: addingNews || !article ? 'not-allowed' : 'pointer',
+                  transition: 'all 0.2s',
+                  userSelect: 'none'
+                }}
+                onMouseEnter={(e) => {
+                  if (!addingNews && article) {
+                    e.currentTarget.style.backgroundColor = '#4f46e5';
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (!addingNews && article) {
+                    e.currentTarget.style.backgroundColor = '#6366f1';
+                  }
+                }}
+              >
+                {addingNews ? 'Adding News...' : 'Add Benzinga News'}
+              </button>
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(article);
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 2000);
+                }}
+                style={{
+                  padding: '8px 16px',
+                  backgroundColor: copied ? '#059669' : '#2563eb',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '4px',
+                  fontSize: '14px',
+                  cursor: 'pointer',
+                  transition: 'background-color 0.2s'
+                }}
+              >
+                {copied ? 'Copied!' : 'Copy Story'}
+              </button>
+            </div>
           </div>
+          {newsError && (
+            <div style={{ color: '#dc2626', fontSize: '14px', marginBottom: '12px', padding: '8px', backgroundColor: '#fef2f2', borderRadius: '4px', border: '1px solid #fecaca' }}>
+              {newsError}
+            </div>
+          )}
           <div
             style={{ 
               maxHeight: '400px', 

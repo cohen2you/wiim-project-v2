@@ -567,9 +567,29 @@ async function fetchRecentAnalystActions(ticker: string, limit: number = 3) {
       }
       
       // Convert map back to array (already sorted by most recent)
-      const recentActions = Array.from(firmMap.values());
+      let recentActions = Array.from(firmMap.values());
       
-      console.log(`[ANALYST ACTIONS] ${ticker}: Returning ${recentActions.length} deduplicated actions (from ${sortedActions.length} total)`);
+      // Limit to last 5-7 actions OR actions within the last 30-45 days (whichever is more restrictive)
+      const thirtyDaysAgo = new Date();
+      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 45); // Use 45 days as the cutoff
+      const thirtyDaysAgoTime = thirtyDaysAgo.getTime();
+      
+      // First filter by date (last 45 days)
+      const actionsWithin45Days = recentActions.filter((action: any) => {
+        if (!action.date) return false;
+        const dateTime = new Date(action.date).getTime();
+        return dateTime >= thirtyDaysAgoTime;
+      });
+      
+      // Take the first 7 actions (most recent) from either the 45-day filtered list or all actions
+      // Prefer 45-day filtered if it has at least 5 actions, otherwise use all actions but limit to 7
+      if (actionsWithin45Days.length >= 5) {
+        recentActions = actionsWithin45Days.slice(0, 7);
+      } else {
+        recentActions = recentActions.slice(0, 7);
+      }
+      
+      console.log(`[ANALYST ACTIONS] ${ticker}: Returning ${recentActions.length} limited actions (from ${firmMap.size} deduplicated, ${actionsWithin45Days.length} within 45 days)`);
       return recentActions;
     } else {
       const errorText = await analystRes.text().catch(() => '');
@@ -933,19 +953,20 @@ ${consensusRatings ? `- Consensus Rating: ${consensusRatings.consensus_rating ? 
 - Buy/Hold/Sell: ${consensusRatings.buy_percentage ? parseFloat(consensusRatings.buy_percentage.toString()).toFixed(1) : '0'}% Buy, ${consensusRatings.hold_percentage ? parseFloat(consensusRatings.hold_percentage.toString()).toFixed(1) : '0'}% Hold, ${consensusRatings.sell_percentage ? parseFloat(consensusRatings.sell_percentage.toString()).toFixed(1) : '0'}% Sell
 - Total Analysts: ${consensusRatings.total_analyst_count || 'N/A'}` : '- No consensus data available'}
 
-${recentAnalystActions && recentAnalystActions.length > 0 ? `RECENT ANALYST ACTIONS (Last 3 Months):
+${recentAnalystActions && recentAnalystActions.length > 0 ? `NOTABLE RECENT ANALYST MOVES (Last 5-7 Actions):
 ${recentAnalystActions.map((action: any) => {
   let dateStr = '';
   if (action.date) {
     try {
       const date = new Date(action.date);
-      dateStr = ` (${date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })})`;
+      dateStr = ` (${date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })})`;
     } catch (e) {
       // If date parsing fails, skip date
     }
   }
   return `- ${action.firm}: ${action.action}${dateStr}`;
-}).join('\n')}` : ''}
+}).join('\n')}
+Note: Full analyst coverage indicates ${consensusRatings?.total_analyst_count ? `a wide range of opinions from ${consensusRatings.total_analyst_count} analysts` : 'divergent views on valuation'}, reflecting the market's split view on ${companyName}'s valuation.` : ''}
 
 CURRENT STOCK DATA:
 - Current Price: $${currentPrice.toFixed(2)}
@@ -1032,19 +1053,19 @@ ${historicalEarnings && historicalEarnings.quarters && historicalEarnings.quarte
    - Consensus rating and average price target
    - Recent analyst moves if available, formatted as:
      <strong>Analyst Consensus & Recent Actions:</strong>
-     The stock carries a [Rating] Rating with an average price target of $[Target].
-     ${recentAnalystActions && recentAnalystActions.length > 0 ? `Recent analyst moves (last 3 months) include:\n<ul>\n${recentAnalystActions.map((action: any) => {
+     The stock carries a [Rating] Rating with an average price target of $[Target]. Notable recent moves include:
+     ${recentAnalystActions && recentAnalystActions.length > 0 ? `\n<ul>\n${recentAnalystActions.map((action: any) => {
        let dateStr = '';
        if (action.date) {
          try {
            const date = new Date(action.date);
-           dateStr = ` (${date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })})`;
+           dateStr = ` (${date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })})`;
          } catch (e) {
            // If date parsing fails, skip date
          }
        }
        return `<li><strong>${action.firm}</strong>: ${action.action}${dateStr}</li>`;
-     }).join('\n')}\n</ul>` : ''}
+     }).join('\n')}\n</ul>\nFull analyst coverage indicates ${consensusRatings?.total_analyst_count ? `a wide divergence in price targets from ${consensusRatings.total_analyst_count} analysts` : 'a wide divergence in price targets'}, reflecting the market's split view on ${companyName}'s valuation.` : ''}
    - Valuation Insight (if P/E and consensus available): Bold "Valuation Insight:" and italicize the rest
 
 ${historicalEarnings && historicalEarnings.quarters && historicalEarnings.quarters.length > 0 ? '7' : '6'}. **SECTION: Key Metrics to Watch**:

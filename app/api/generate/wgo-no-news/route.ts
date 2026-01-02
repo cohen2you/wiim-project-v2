@@ -608,6 +608,61 @@ async function fetchNextEarningsDate(ticker: string) {
   }
 }
 
+// Generate price action line programmatically using correct session data
+async function generatePriceActionLine(ticker: string, companyName: string, stockData: any): Promise<string> {
+  try {
+    const marketStatus = getMarketStatus();
+    const dayOfWeek = getCurrentDayName();
+    
+    let changePercent = 0;
+    let displayPrice = 0;
+    let marketStatusPhrase = '';
+    const previousClose = stockData.priceAction?.previousClose || 0;
+    
+    if (marketStatus === 'premarket' && stockData.priceAction?.premarket?.last && stockData.priceAction.premarket.last > 0) {
+      // Use premarket data when in premarket
+      displayPrice = stockData.priceAction.premarket.last;
+      // Calculate premarket change from previous close if changePercent is not available
+      if (stockData.priceAction.premarket.changePercent !== undefined && stockData.priceAction.premarket.changePercent !== 0) {
+        changePercent = stockData.priceAction.premarket.changePercent;
+      } else if (previousClose > 0) {
+        changePercent = ((displayPrice - previousClose) / previousClose) * 100;
+      }
+      marketStatusPhrase = ' during premarket trading';
+    } else if (marketStatus === 'afterhours' && stockData.priceAction?.afterHours?.last && stockData.priceAction.afterHours.last > 0) {
+      // Use after-hours data when in after-hours
+      displayPrice = stockData.priceAction.afterHours.last;
+      // Calculate after-hours change if changePercent is not available
+      if (stockData.priceAction.afterHours.changePercent !== undefined && stockData.priceAction.afterHours.changePercent !== 0) {
+        changePercent = stockData.priceAction.afterHours.changePercent;
+      } else if (stockData.priceAction?.regularHours?.close && stockData.priceAction.regularHours.close > 0) {
+        const regularClose = stockData.priceAction.regularHours.close;
+        changePercent = ((displayPrice - regularClose) / regularClose) * 100;
+      }
+      marketStatusPhrase = ' during after-hours trading';
+    } else if (marketStatus === 'closed') {
+      // Use regular session data when market is closed
+      changePercent = stockData.priceAction?.changePercent || 0;
+      displayPrice = stockData.priceAction?.last || stockData.priceAction?.regularHours?.close || 0;
+      marketStatusPhrase = ' while the market was closed';
+    } else {
+      // Use regular session data during regular hours
+      changePercent = stockData.priceAction?.changePercent || 0;
+      displayPrice = stockData.priceAction?.last || stockData.priceAction?.regularHours?.close || 0;
+      marketStatusPhrase = '';
+    }
+    
+    const upDown = changePercent > 0 ? 'up' : changePercent < 0 ? 'down' : 'unchanged';
+    const absChange = Math.abs(changePercent).toFixed(2);
+    const formattedPrice = displayPrice.toFixed(2);
+    
+    return `<strong>${ticker.toUpperCase()} Price Action:</strong> ${companyName} shares were ${upDown} ${absChange}% at $${formattedPrice}${marketStatusPhrase} at the time of publication on ${dayOfWeek}, according to <a href="https://pro.benzinga.com">Benzinga Pro</a> data.`;
+  } catch (error) {
+    console.error(`Error generating price action line for ${ticker}:`, error);
+    return '';
+  }
+}
+
 async function fetchStockData(ticker: string) {
   try {
     // Fetch up to 2 relevant recent articles
@@ -1279,6 +1334,30 @@ Generate the basic technical story now.`;
             story = `${beforeTechnical}\n\n${updatedTechnicalContent}${afterTechnical}`;
             console.log('✅ Extracted and formatted Key Levels from Technical Analysis');
           }
+        }
+      }
+    }
+
+    // Generate and replace price action line with programmatically generated one
+    const companyName = stockData.priceAction?.companyName || ticker.toUpperCase();
+    const programmaticPriceAction = await generatePriceActionLine(ticker, companyName, stockData);
+    
+    if (programmaticPriceAction) {
+      // Find and replace the AI-generated price action line
+      const priceActionPattern = /<strong>.*?Price Action:.*?<\/strong>.*?according to.*?Benzinga Pro.*?data\./i;
+      if (priceActionPattern.test(story)) {
+        story = story.replace(priceActionPattern, programmaticPriceAction);
+        console.log('✅ Replaced AI-generated price action line with programmatic one');
+      } else {
+        // If pattern not found, try simpler pattern
+        const simplePattern = /.*?Price Action:.*?according to.*?Benzinga Pro.*?data\./i;
+        if (simplePattern.test(story)) {
+          story = story.replace(simplePattern, programmaticPriceAction);
+          console.log('✅ Replaced AI-generated price action line (simple pattern)');
+        } else {
+          // If still not found, append at the end
+          story += '\n\n' + programmaticPriceAction;
+          console.log('✅ Added programmatic price action line at the end');
         }
       }
     }
