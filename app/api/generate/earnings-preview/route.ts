@@ -819,6 +819,48 @@ async function injectSEOSubheads(articleText: string, backendUrl?: string): Prom
   }
 }
 
+// Fetch context brief from external news agent
+async function fetchContextBrief(ticker: string, backendUrl?: string): Promise<any | null> {
+  if (!backendUrl) {
+    console.log(`⚠️ [CONTEXT BRIEF] ${ticker}: NEWS_AGENT_BACKEND_URL not configured, skipping context brief fetch`);
+    return null;
+  }
+
+  try {
+    const apiUrl = `${backendUrl}/api/enrichment/context-brief`;
+    
+    console.log(`[CONTEXT BRIEF] ${ticker}: Fetching context brief from ${apiUrl}`);
+    
+    const response = await fetch(apiUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        ticker: ticker.toUpperCase(),
+      }),
+    });
+
+    if (!response.ok) {
+      console.error(`⚠️ [CONTEXT BRIEF] ${ticker}: API returned ${response.status}`);
+      return null;
+    }
+
+    const data = await response.json();
+    
+    console.log(`[CONTEXT BRIEF] ${ticker}: Received context brief:`, {
+      hasData: !!data,
+      majorEventDetected: data?.major_event_detected || false,
+      sentiment: data?.sentiment || null
+    });
+    
+    return data;
+  } catch (error) {
+    console.error(`[CONTEXT BRIEF] ${ticker}: Error fetching context brief:`, error);
+    return null;
+  }
+}
+
 // Inject quarter context using news-agent-project (Phase 4)
 async function injectQuarterContext({
   articleText,
@@ -879,6 +921,7 @@ async function generateEarningsPreview(
   peRatio: number | null,
   currentPrice: number,
   historicalEarnings: any,
+  contextBrief: any | null,
   provider?: AIProvider
 ): Promise<string> {
   const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -929,7 +972,27 @@ async function generateEarningsPreview(
   const beatRate = quarters > 0 ? Math.round((beats / quarters) * 100) : null;
   const trackRecord = beatRate !== null && beatRate < 50 ? 'mixed' : beatRate !== null && beatRate >= 75 ? 'strong' : 'mixed';
   
-  leadInstructions = `**ACT AS:** A Senior Financial News Editor.
+  // Check for major events from context brief
+  const majorEventDetected = contextBrief?.major_event_detected === true;
+  const contextSentiment = contextBrief?.sentiment || null;
+  
+  if (majorEventDetected) {
+    // CRITICAL: Major event detected - must mention in first paragraph
+    leadInstructions = `**ACT AS:** A Senior Financial News Editor.
+**TASK:** Write a 2-sentence Lead Paragraph for a ${companyName} earnings preview.
+**GOAL:** Balance the financial expectations with the major event that has occurred.
+
+**CRITICAL INSTRUCTION - MAJOR EVENT DETECTED:**
+A major event has been detected (e.g., lawsuit, recall, crash, significant negative news). You MUST mention this event in the first paragraph as a counter-weight to the financial expectations. Do NOT bury this news. The lead paragraph must acknowledge both the financial expectations AND the major event.
+
+**INSTRUCTIONS:**
+1. **Sentence 1 (The Context):** Open with the earnings date and acknowledge the major event. Use company name with exchange (e.g., "${companyName} (NASDAQ:${ticker})" or similar format based on the company's exchange). Reference the major event directly (use the context_brief data provided below to understand what the event is).
+2. **Sentence 2 (The Expectations vs Reality):** Pivot to the financial expectations while acknowledging how the major event may impact the results. ${revenueGrowth && revenueGrowth > 0 ? `Mention the ${revenueGrowth}% year-over-year revenue surge expectations (${formatRevenue(revenueEstimate)})` : revenueEstimate ? `Reference the revenue expectations (${formatRevenue(revenueEstimate)})` : `Mention the earnings expectations`}, but frame it in context of the major event - how will investors weigh the financial metrics against the event's impact?
+
+**TONE:** Write in a journalistic, editorial style. Use strong, engaging language. Balance the financial story with the reality of the major event. Do not ignore or minimize the major event.`;
+  } else {
+    // Standard flow - focus purely on financial metrics
+    leadInstructions = `**ACT AS:** A Senior Financial News Editor.
 **TASK:** Write a 2-sentence Lead Paragraph for a ${companyName} earnings preview.
 **GOAL:** Focus on the "Growth Story" and the pressure to deliver results.
 
@@ -938,10 +1001,16 @@ async function generateEarningsPreview(
 2. **Sentence 2 (The Execution Risk):** Pivot to the "Execution Risk" and pressure to deliver. ${currentPrice && priceTarget && priceVsTarget ? `Mention that with shares trading ${priceVsTarget} the average analyst target (current price ~$${currentPrice.toFixed(0)} vs target $${priceTarget.toFixed(0)})` : currentPrice ? `With shares trading near $${currentPrice.toFixed(0)}` : `With current market positioning`}, ${trackRecord === 'mixed' && quarters > 0 ? `the company faces ${beats === 1 && quarters === 4 ? 'significant' : 'high'} pressure to deliver given its mixed track record of ${beats} beat${beats !== 1 ? 's' : ''} in the last ${quarters} quarters` : trackRecord === 'strong' ? `the company needs to maintain its strong track record` : `the company faces pressure to deliver`}. ${epsEstimate !== null && epsPrior !== null ? epsEstimate > epsPrior && epsEstimate < 0 ? `Focus on the need to narrow losses to the expected $${Math.abs(epsEstimate).toFixed(2)} per share` : epsEstimate > 0 && epsPrior < 0 ? `The company must demonstrate profitability with EPS of $${epsEstimate.toFixed(2)}` : `EPS expectations are $${epsEstimate.toFixed(2)} per share` : epsEstimate !== null ? `EPS expectations are $${epsEstimate.toFixed(2)} per share` : ''}${priceVsTarget === 'above' && priceTarget ? ` and bridge the gap between its stock price and analyst targets` : ''}.
 
 **TONE:** Write in a journalistic, editorial style. Use strong, engaging language (e.g., "banking on", "faces pressure", "validate", "deliver a clean beat"). Avoid generic phrases like "investors are watching" or "analysts expect".`;
+  }
   
   const prompt = `You are a professional financial journalist writing an earnings preview article for ${companyName} (${ticker}). Today is ${dayOfWeek}.
 
-UPCOMING EARNINGS:
+${contextBrief ? `CONTEXT BRIEF (Recent News & Events):
+${JSON.stringify(contextBrief, null, 2)}
+
+CRITICAL CONTEXT INSTRUCTION: Review the context_brief data above. If major_event_detected is TRUE (e.g., a lawsuit, recall, crash, or significant negative news), you MUST mention this event in the first paragraph as a counter-weight to the financial expectations. Do not bury this news. If major_event_detected is FALSE, focus the lead paragraph purely on the financial growth/decline metrics.
+
+` : ''}UPCOMING EARNINGS:
 - Earnings Date: ${earningsDate}
 ${epsEstimate !== null ? `- EPS Estimate: $${epsEstimate.toFixed(2)}${epsPrior !== null ? ` (${epsEstimate > epsPrior ? 'Up' : epsEstimate < epsPrior ? 'Down' : 'Flat'} from $${epsPrior.toFixed(2)} YoY)` : ''}` : ''}
 ${revenueEstimate ? `- Revenue Estimate: ${formatRevenue(revenueEstimate)}${revenuePrior ? ` (${parseFloat(revenueEstimate.toString()) > parseFloat(revenuePrior.toString()) ? 'Up' : parseFloat(revenueEstimate.toString()) < parseFloat(revenuePrior.toString()) ? 'Down' : 'Flat'} from ${formatRevenue(revenuePrior)} YoY)` : ''}` : ''}
@@ -1127,7 +1196,10 @@ export async function POST(request: Request) {
     const previews = await Promise.all(
       tickerList.map(async (ticker: string) => {
         try {
-          // Fetch all data in parallel
+          // Step 1: Fetch context brief first (NEW FLOW)
+          const contextBrief = await fetchContextBrief(ticker, backendUrl);
+          
+          // Step 2: Fetch all financial data in parallel
           const [basicStockData, nextEarnings, consensusRatings, recentAnalystActions, peRatio, historicalEarnings] = await Promise.all([
             fetchBasicStockData(ticker),
             fetchNextEarningsDate(ticker),
@@ -1164,7 +1236,7 @@ export async function POST(request: Request) {
             firstQuarter: historicalEarnings?.quarters?.[0] || null
           });
 
-          // Generate initial earnings preview article
+          // Generate initial earnings preview article (with context brief)
           let preview = await generateEarningsPreview(
             ticker,
             companyName,
@@ -1174,6 +1246,7 @@ export async function POST(request: Request) {
             peRatio,
             currentPrice,
             historicalEarnings,
+            contextBrief,
             aiProviderOption
           );
 

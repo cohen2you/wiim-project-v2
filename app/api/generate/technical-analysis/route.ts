@@ -249,23 +249,43 @@ async function generatePriceAction(ticker: string): Promise<string> {
     
     // For premarket, calculate premarket change (current price vs previous close)
     let premarketChange = 0;
+    let premarketPrice = 0;
     if (marketStatus === 'premarket' && quotePreviousClose && quotePreviousClose > 0 && quote.lastTradePrice) {
-      const premarketPrice = typeof quote.lastTradePrice === 'number' ? quote.lastTradePrice : parseFloat(quote.lastTradePrice);
+      premarketPrice = typeof quote.lastTradePrice === 'number' ? quote.lastTradePrice : parseFloat(quote.lastTradePrice);
       if (!isNaN(premarketPrice)) {
         premarketChange = ((premarketPrice - quotePreviousClose) / quotePreviousClose) * 100;
         console.log(`[PRICE ACTION] Premarket change: ${premarketChange.toFixed(2)}% (premarketPrice: ${premarketPrice}, previousClose: ${quotePreviousClose})`);
       }
     }
     
-    // Calculate change percent
-    const changePercent = regularSessionChange !== 0 ? regularSessionChange : (typeof quote.changePercent === 'number' ? quote.changePercent : 0);
+    // Determine which change percent and price to use based on market status
+    let changePercent = 0;
+    let displayPrice = 0;
+    
+    if (marketStatus === 'premarket' && premarketChange !== 0 && premarketPrice > 0) {
+      // Use premarket data when in premarket
+      changePercent = premarketChange;
+      displayPrice = premarketPrice;
+    } else if (marketStatus === 'afterhours' && hasAfterHoursData && afterHoursChange !== 0 && quote.lastTradePrice) {
+      // Use after-hours data when in after-hours
+      const lastTrade = typeof quote.lastTradePrice === 'number' ? quote.lastTradePrice : parseFloat(quote.lastTradePrice);
+      if (!isNaN(lastTrade)) {
+        changePercent = afterHoursChange;
+        displayPrice = lastTrade;
+      }
+    } else {
+      // Use regular session data
+      changePercent = regularSessionChange !== 0 ? regularSessionChange : (typeof quote.changePercent === 'number' ? quote.changePercent : 0);
+      displayPrice = regularSessionClose || quoteClose || (quote.lastTradePrice ? (typeof quote.lastTradePrice === 'number' ? quote.lastTradePrice : parseFloat(quote.lastTradePrice)) : 0);
+    }
+    
     const upDown = changePercent > 0 ? 'up' : changePercent < 0 ? 'down' : 'unchanged';
     const absChange = Math.abs(changePercent).toFixed(2);
-    const displayPrice = formatPriceValue(regularSessionClose || quoteClose || quote.lastTradePrice);
+    const formattedPrice = formatPriceValue(displayPrice);
     
     // Build simple 1-sentence price action: Current Price, % Change (no volume)
-    // Note: dayOfWeek is already calculated earlier in the function
-    return `<strong>${symbol} Price Action:</strong> ${companyName} shares were ${upDown} ${absChange}% at $${displayPrice} at the time of publication on ${dayOfWeek}, according to Benzinga Pro data.`;
+    // Note: dayOfWeek and marketStatusPhrase are already calculated earlier in the function
+    return `<strong>${symbol} Price Action:</strong> ${companyName} shares were ${upDown} ${absChange}% at $${formattedPrice}${marketStatusPhrase} at the time of publication on ${dayOfWeek}, according to <a href="https://pro.benzinga.com">Benzinga Pro</a> data.`;
   } catch (error) {
     console.error(`Error generating price action for ${ticker}:`, error);
     return '';
