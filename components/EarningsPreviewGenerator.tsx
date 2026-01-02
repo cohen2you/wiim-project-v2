@@ -205,6 +205,7 @@ export default function EarningsPreviewGenerator() {
         // Fetch context brief for each ticker
         for (const ticker of tickerList) {
           try {
+            console.log(`[ENRICH FIRST] ${ticker}: Fetching context brief from ${NEWS_AGENT_URL}/api/enrichment/context-brief`);
             const contextRes = await fetch(`${NEWS_AGENT_URL}/api/enrichment/context-brief`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -213,12 +214,20 @@ export default function EarningsPreviewGenerator() {
             
             if (contextRes.ok) {
               const contextData = await contextRes.json();
+              console.log(`[ENRICH FIRST] ${ticker}: Successfully fetched context brief:`, {
+                hasData: !!contextData,
+                majorEventDetected: contextData?.major_event_detected || false,
+                sentiment: contextData?.sentiment || null,
+                hasSummary: !!contextData?.summary_of_events,
+                articleCount: contextData?.articles?.length || 0
+              });
               contextBriefsMap[ticker] = contextData;
             } else {
-              console.warn(`Failed to fetch context brief for ${ticker}:`, contextRes.status);
+              const errorText = await contextRes.text().catch(() => '');
+              console.warn(`[ENRICH FIRST] ${ticker}: Failed to fetch context brief:`, contextRes.status, errorText.substring(0, 200));
             }
           } catch (error) {
-            console.error(`Error fetching context brief for ${ticker}:`, error);
+            console.error(`[ENRICH FIRST] ${ticker}: Error fetching context brief:`, error);
           }
         }
         

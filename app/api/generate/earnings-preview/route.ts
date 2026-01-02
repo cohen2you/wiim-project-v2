@@ -861,6 +861,64 @@ async function fetchContextBrief(ticker: string, backendUrl?: string): Promise<a
   }
 }
 
+// Fetch news section from add-news enrichment endpoint
+async function fetchNewsSection(ticker: string, articleText: string, backendUrl?: string): Promise<string | null> {
+  if (!backendUrl) {
+    console.log(`⚠️ [ADD NEWS] ${ticker}: NEWS_AGENT_BACKEND_URL not configured, skipping news section fetch`);
+    return null;
+  }
+
+  try {
+    const apiUrl = `${backendUrl}/api/enrichment/add-news`;
+    
+    console.log(`[ADD NEWS] ${ticker}: Fetching news section from ${apiUrl}`);
+    
+    const response = await fetch(apiUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        ticker: ticker.toUpperCase(),
+        articleText: articleText,
+        storyType: 'earnings-preview'
+      }),
+    });
+
+    if (!response.ok) {
+      console.error(`⚠️ [ADD NEWS] ${ticker}: API returned ${response.status}`);
+      return null;
+    }
+
+    const data = await response.json();
+    
+    if (data.success && data.newsSection) {
+      // Ensure the section has the correct header
+      let newsSection = data.newsSection.trim();
+      
+      // Replace existing headers with our desired header
+      newsSection = newsSection.replace(
+        /##\s*(Section:\s*)?(Latest News on Stock|Recent Developments & Catalysts)/gi,
+        '## Recent Developments & Catalysts'
+      );
+      
+      // If the header doesn't exist at the start, add it
+      if (!newsSection.startsWith('## Recent Developments & Catalysts')) {
+        newsSection = newsSection.replace(/^##\s*(Section:\s*)?.+\n?/m, '');
+        newsSection = '## Recent Developments & Catalysts\n\n' + newsSection.trim();
+      }
+      
+      console.log(`✅ [ADD NEWS] ${ticker}: Received news section`);
+      return newsSection;
+    }
+    
+    return null;
+  } catch (error) {
+    console.error(`[ADD NEWS] ${ticker}: Error fetching news section:`, error);
+    return null;
+  }
+}
+
 // Inject quarter context using news-agent-project (Phase 4)
 async function injectQuarterContext({
   articleText,
@@ -1198,7 +1256,15 @@ export async function POST(request: Request) {
         try {
           // Step 1: Use provided context brief if available, otherwise fetch it
           let contextBrief = contextBriefs && contextBriefs[ticker] ? contextBriefs[ticker] : null;
-          if (!contextBrief) {
+          if (contextBrief) {
+            console.log(`[CONTEXT BRIEF] ${ticker}: Using provided context brief from frontend:`, {
+              hasData: !!contextBrief,
+              majorEventDetected: contextBrief?.major_event_detected || false,
+              sentiment: contextBrief?.sentiment || null,
+              hasSummary: !!contextBrief?.summary_of_events,
+              articleCount: contextBrief?.articles?.length || 0
+            });
+          } else {
             contextBrief = await fetchContextBrief(ticker, backendUrl);
           }
           
@@ -1275,6 +1341,43 @@ export async function POST(request: Request) {
                 paragraphs.splice(1, 0, `Also Read: <a href="${alsoReadArticle.url}">${alsoReadArticle.headline}</a>`);
                 preview = paragraphs.join('\n\n');
               }
+            }
+          }
+
+          // If contextBriefs were provided (Enrich First mode), automatically add news section
+          if (contextBriefs && contextBriefs[ticker]) {
+            try {
+              const newsSection = await fetchNewsSection(ticker, preview, backendUrl);
+              if (newsSection) {
+                // Insert the news section between "Historical Performance" and "Analyst Sentiment"
+                const analystSentimentMarker = /##\s*Section:\s*Analyst Sentiment/i;
+                
+                if (analystSentimentMarker.test(preview)) {
+                  const match = preview.match(analystSentimentMarker);
+                  if (match && match.index !== undefined) {
+                    const beforeAnalyst = preview.substring(0, match.index).trim();
+                    const afterAnalyst = preview.substring(match.index);
+                    preview = beforeAnalyst + '\n\n' + newsSection + '\n\n' + afterAnalyst;
+                    console.log(`✅ [ENRICH FIRST] ${ticker}: Inserted news section before Analyst Sentiment`);
+                  }
+                } else {
+                  // Fallback: try to insert after Historical Performance
+                  const historicalPerformanceMarker = /(##\s*Section:\s*Historical Performance[\s\S]*?)(?=##\s*Section:|$)/i;
+                  if (historicalPerformanceMarker.test(preview)) {
+                    preview = preview.replace(
+                      historicalPerformanceMarker,
+                      `$1\n\n${newsSection}\n\n`
+                    );
+                    console.log(`✅ [ENRICH FIRST] ${ticker}: Inserted news section after Historical Performance`);
+                  } else {
+                    // Last resort: append at end
+                    preview += `\n\n${newsSection}`;
+                    console.log(`✅ [ENRICH FIRST] ${ticker}: Appended news section at end`);
+                  }
+                }
+              }
+            } catch (newsError) {
+              console.error(`Error fetching news section for ${ticker}:`, newsError);
             }
           }
 
