@@ -1178,7 +1178,7 @@ Generate the earnings preview article:`;
 
 export async function POST(request: Request) {
   try {
-    const { tickers, provider, skipQuarterContext, skipSEOSubheads } = await request.json();
+    const { tickers, provider, skipQuarterContext, skipSEOSubheads, contextBriefs } = await request.json();
 
     if (!tickers || !tickers.trim()) {
       return NextResponse.json({ error: 'Please provide ticker(s)' }, { status: 400 });
@@ -1196,8 +1196,11 @@ export async function POST(request: Request) {
     const previews = await Promise.all(
       tickerList.map(async (ticker: string) => {
         try {
-          // Step 1: Fetch context brief first (NEW FLOW)
-          const contextBrief = await fetchContextBrief(ticker, backendUrl);
+          // Step 1: Use provided context brief if available, otherwise fetch it
+          let contextBrief = contextBriefs && contextBriefs[ticker] ? contextBriefs[ticker] : null;
+          if (!contextBrief) {
+            contextBrief = await fetchContextBrief(ticker, backendUrl);
+          }
           
           // Step 2: Fetch all financial data in parallel
           const [basicStockData, nextEarnings, consensusRatings, recentAnalystActions, peRatio, historicalEarnings] = await Promise.all([

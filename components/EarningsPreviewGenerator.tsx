@@ -192,13 +192,44 @@ export default function EarningsPreviewGenerator() {
     setLoading(true);
 
     try {
+      let requestBody: any = { 
+        tickers, 
+        provider
+      };
+
+      // If enrichFirst is true, fetch context brief from external agent first
+      if (enrichFirst) {
+        const tickerList = tickers.split(',').map(t => t.trim().toUpperCase());
+        const contextBriefsMap: { [key: string]: any } = {};
+        
+        // Fetch context brief for each ticker
+        for (const ticker of tickerList) {
+          try {
+            const contextRes = await fetch(`${NEWS_AGENT_URL}/api/enrichment/context-brief`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ ticker: ticker.toUpperCase() })
+            });
+            
+            if (contextRes.ok) {
+              const contextData = await contextRes.json();
+              contextBriefsMap[ticker] = contextData;
+            } else {
+              console.warn(`Failed to fetch context brief for ${ticker}:`, contextRes.status);
+            }
+          } catch (error) {
+            console.error(`Error fetching context brief for ${ticker}:`, error);
+          }
+        }
+        
+        // Pass context briefs to the API
+        requestBody.contextBriefs = contextBriefsMap;
+      }
+
       const res = await fetch('/api/generate/earnings-preview', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          tickers, 
-          provider
-        }),
+        body: JSON.stringify(requestBody),
       });
 
       if (!res.ok) {
