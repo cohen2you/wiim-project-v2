@@ -1259,7 +1259,8 @@ export async function POST(request: Request) {
 
     const backendUrl = process.env.NEWS_AGENT_BACKEND_URL;
     const enableQuarterContext = process.env.ENABLE_QUARTER_CONTEXT_INJECTION !== 'false' && !skipQuarterContext;
-    const enableSEOSubheads = !skipSEOSubheads;
+    // Skip SEO subheads if contextBriefs are provided (Enrich First mode) - subheads should be added separately
+    const enableSEOSubheads = !skipSEOSubheads && !contextBriefs;
 
     const previews = await Promise.all(
       tickerList.map(async (ticker: string) => {
@@ -1356,38 +1357,45 @@ export async function POST(request: Request) {
 
           // If contextBriefs were provided (Enrich First mode), automatically add news section
           if (contextBriefs && contextBriefs[ticker]) {
-            try {
-              const newsSection = await fetchNewsSection(ticker, preview, backendUrl);
-              if (newsSection) {
-                // Insert the news section between "Historical Performance" and "Analyst Sentiment"
-                const analystSentimentMarker = /##\s*Section:\s*Analyst Sentiment/i;
-                
-                if (analystSentimentMarker.test(preview)) {
-                  const match = preview.match(analystSentimentMarker);
-                  if (match && match.index !== undefined) {
-                    const beforeAnalyst = preview.substring(0, match.index).trim();
-                    const afterAnalyst = preview.substring(match.index);
-                    preview = beforeAnalyst + '\n\n' + newsSection + '\n\n' + afterAnalyst;
-                    console.log(`✅ [ENRICH FIRST] ${ticker}: Inserted news section before Analyst Sentiment`);
+            if (!backendUrl) {
+              console.log(`⚠️ [ENRICH FIRST] ${ticker}: NEWS_AGENT_BACKEND_URL not configured, cannot fetch news section. Please configure NEWS_AGENT_BACKEND_URL environment variable.`);
+            } else {
+              try {
+                console.log(`[ENRICH FIRST] ${ticker}: Fetching news section for Enrich First mode...`);
+                const newsSection = await fetchNewsSection(ticker, preview, backendUrl);
+                if (newsSection) {
+                  // Insert the news section between "Historical Performance" and "Analyst Sentiment"
+                  const analystSentimentMarker = /##\s*Section:\s*Analyst Sentiment/i;
+                  
+                  if (analystSentimentMarker.test(preview)) {
+                    const match = preview.match(analystSentimentMarker);
+                    if (match && match.index !== undefined) {
+                      const beforeAnalyst = preview.substring(0, match.index).trim();
+                      const afterAnalyst = preview.substring(match.index);
+                      preview = beforeAnalyst + '\n\n' + newsSection + '\n\n' + afterAnalyst;
+                      console.log(`✅ [ENRICH FIRST] ${ticker}: Inserted news section before Analyst Sentiment`);
+                    }
+                  } else {
+                    // Fallback: try to insert after Historical Performance
+                    const historicalPerformanceMarker = /(##\s*Section:\s*Historical Performance[\s\S]*?)(?=##\s*Section:|$)/i;
+                    if (historicalPerformanceMarker.test(preview)) {
+                      preview = preview.replace(
+                        historicalPerformanceMarker,
+                        `$1\n\n${newsSection}\n\n`
+                      );
+                      console.log(`✅ [ENRICH FIRST] ${ticker}: Inserted news section after Historical Performance`);
+                    } else {
+                      // Last resort: append at end
+                      preview += `\n\n${newsSection}`;
+                      console.log(`✅ [ENRICH FIRST] ${ticker}: Appended news section at end`);
+                    }
                   }
                 } else {
-                  // Fallback: try to insert after Historical Performance
-                  const historicalPerformanceMarker = /(##\s*Section:\s*Historical Performance[\s\S]*?)(?=##\s*Section:|$)/i;
-                  if (historicalPerformanceMarker.test(preview)) {
-                    preview = preview.replace(
-                      historicalPerformanceMarker,
-                      `$1\n\n${newsSection}\n\n`
-                    );
-                    console.log(`✅ [ENRICH FIRST] ${ticker}: Inserted news section after Historical Performance`);
-                  } else {
-                    // Last resort: append at end
-                    preview += `\n\n${newsSection}`;
-                    console.log(`✅ [ENRICH FIRST] ${ticker}: Appended news section at end`);
-                  }
+                  console.log(`⚠️ [ENRICH FIRST] ${ticker}: fetchNewsSection returned null, news section not added`);
                 }
+              } catch (newsError) {
+                console.error(`❌ [ENRICH FIRST] ${ticker}: Error fetching news section:`, newsError);
               }
-            } catch (newsError) {
-              console.error(`Error fetching news section for ${ticker}:`, newsError);
             }
           }
 
