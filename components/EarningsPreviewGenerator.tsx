@@ -90,33 +90,111 @@ export default function EarningsPreviewGenerator() {
         // Insert the news section between "Historical Performance" and "Analyst Sentiment"
         let updatedArticle = preview.preview;
         
-        // Find the position to insert: after "Historical Performance" section, before "Analyst Sentiment"
-        const analystSentimentMarker = /##\s*Section:\s*Analyst Sentiment/i;
-        
-        // Check if "Analyst Sentiment" section exists
-        if (analystSentimentMarker.test(updatedArticle)) {
-          // Find the position right before "Analyst Sentiment"
-          const match = updatedArticle.match(analystSentimentMarker);
+        // Check if "Recent Developments & Catalysts" already exists and replace it
+        const existingNewsSectionMarker = /##\s*Recent Developments & Catalysts[\s\S]*?(?=\n##\s*|<h2>|Read Next:|$)/i;
+        if (existingNewsSectionMarker.test(updatedArticle)) {
+          updatedArticle = updatedArticle.replace(existingNewsSectionMarker, newsSection);
+        } else {
+          // Find the position to insert: after "Historical Performance" section, before "Analyst Sentiment"
+          // Try multiple patterns to find the analyst section (could be SEO-optimized heading or section marker)
+          let insertionPoint = -1;
+          let match: RegExpMatchArray | null = null;
+          
+          // Pattern 1: Look for section marker "## Section: Analyst Sentiment"
+          const analystSentimentMarker = /##\s*Section:\s*Analyst Sentiment/i;
+          match = updatedArticle.match(analystSentimentMarker);
           if (match && match.index !== undefined) {
-            // Insert news section before "Analyst Sentiment"
-            const beforeAnalyst = updatedArticle.substring(0, match.index).trim();
-            const afterAnalyst = updatedArticle.substring(match.index);
+            insertionPoint = match.index;
+          } else {
+            // Pattern 2: Look for SEO-optimized HTML heading with "Analyst" in it (e.g., "<h2>Analyst Ratings Highlight...</h2>")
+            // Handle whitespace/newlines in HTML tags
+            const analystHeadingHTMLPattern = /<h2>\s*[^<]*(?:Analyst|Rating)[^<]*\s*<\/h2>/i;
+            match = updatedArticle.match(analystHeadingHTMLPattern);
+            if (match && match.index !== undefined) {
+              insertionPoint = match.index;
+              console.log('[Add News] Found analyst section via HTML heading pattern at index', insertionPoint);
+            } else {
+              // Pattern 3: Look for markdown heading with "Analyst" (e.g., "## Analyst Ratings Highlight...")
+              const analystHeadingMarkdownPattern = /^##\s+[^\n]*(?:Analyst|Rating)[^\n]*$/m;
+              match = updatedArticle.match(analystHeadingMarkdownPattern);
+              if (match && match.index !== undefined) {
+                insertionPoint = match.index;
+              } else {
+                // Pattern 4: Look for content that starts analyst section (e.g., "The stock carries a Buy Rating")
+                // This is more reliable as it finds the actual content start
+                const analystContentPattern = /(?:^|\n\n)\s*The stock carries (?:a|an) (?:Buy|Sell|Hold|Neutral|Overweight|Underweight|Outperform|Underperform) Rating/i;
+                match = updatedArticle.match(analystContentPattern);
+                if (match && match.index !== undefined) {
+                  // Go back to find the start of this section (look for heading before this content)
+                  let searchStart = match.index;
+                  let sectionStart = searchStart;
+                  // Search backwards up to 1000 characters for the section heading
+                  const searchWindow = Math.max(0, searchStart - 1000);
+                  for (let i = searchStart - 1; i >= searchWindow; i--) {
+                    const remaining = updatedArticle.substring(i);
+                    // Look for HTML heading
+                    if (remaining.match(/^<h2>/)) {
+                      sectionStart = i;
+                      break;
+                    }
+                    // Look for markdown heading
+                    if (remaining.match(/^##\s+/)) {
+                      sectionStart = i;
+                      break;
+                    }
+                    // Look for paragraph break that might precede a heading
+                    if (remaining.startsWith('\n\n') && i < searchStart - 2) {
+                      const beforeBreak = updatedArticle.substring(0, i);
+                      const lastHeadingMatch = beforeBreak.match(/(<h2>[^<]*<\/h2>|##\s+[^\n]+)\s*$/);
+                      if (lastHeadingMatch && lastHeadingMatch.index !== undefined) {
+                        sectionStart = lastHeadingMatch.index;
+                        break;
+                      }
+                    }
+                  }
+                  insertionPoint = sectionStart > 0 ? sectionStart : match.index;
+                  console.log('[Add News] Found analyst section via content pattern, insertion point at index', insertionPoint);
+                }
+              }
+            }
+          }
+          
+          if (insertionPoint !== -1 && insertionPoint > 0) {
+            // Insert news section before the analyst section
+            const beforeAnalyst = updatedArticle.substring(0, insertionPoint).trim();
+            const afterAnalyst = updatedArticle.substring(insertionPoint);
             updatedArticle = beforeAnalyst + '\n\n' + newsSection + '\n\n' + afterAnalyst;
           } else {
-            // Fallback: append at end if insertion point not found
-            updatedArticle = updatedArticle + '\n\n' + newsSection;
-          }
-        } else {
-          // If "Analyst Sentiment" doesn't exist, try to find "Historical Performance" and insert after it
-          const historicalPerformanceMarker = /(##\s*Section:\s*Historical Performance[\s\S]*?)(?=##\s*Section:|$)/i;
-          if (historicalPerformanceMarker.test(updatedArticle)) {
-            updatedArticle = updatedArticle.replace(
-              historicalPerformanceMarker,
-              `$1\n\n${newsSection}\n\n`
-            );
-          } else {
-            // Fallback: append at end if neither section is found
-            updatedArticle = updatedArticle + '\n\n' + newsSection;
+            // Fallback: try to find "Historical Performance" section and insert after it
+            // Try section marker first
+            const historicalPerformanceMarker = /(##\s*Section:\s*Historical Performance[\s\S]*?)(?=\n##\s*|<h2>|Read Next:|$)/i;
+            if (historicalPerformanceMarker.test(updatedArticle)) {
+              updatedArticle = updatedArticle.replace(
+                historicalPerformanceMarker,
+                `$1\n\n${newsSection}\n\n`
+              );
+            } else {
+              // Try to find SEO-optimized heading with "Earnings" or "Performance" or "Quarter"
+              const historicalHeadingPattern = /(<h2>[^<]*(?:Earnings|Performance|Quarter|Surprise)[^<]*<\/h2>[\s\S]*?)(?=<h2>|Read Next:|$)/i;
+              if (historicalHeadingPattern.test(updatedArticle)) {
+                updatedArticle = updatedArticle.replace(
+                  historicalHeadingPattern,
+                  `$1\n\n${newsSection}\n\n`
+                );
+              } else {
+                // Last resort: append before "Read Next" or at the end
+                const readNextMarker = /\n\nRead Next:/i;
+                const readNextMatch = updatedArticle.match(readNextMarker);
+                if (readNextMatch && readNextMatch.index !== undefined) {
+                  const beforeReadNext = updatedArticle.substring(0, readNextMatch.index).trim();
+                  const afterReadNext = updatedArticle.substring(readNextMatch.index + 2); // Skip \n\n
+                  updatedArticle = beforeReadNext + '\n\n' + newsSection + '\n\n' + afterReadNext;
+                } else {
+                  // Final fallback: append at end
+                  updatedArticle = updatedArticle + '\n\n' + newsSection;
+                }
+              }
+            }
           }
         }
         

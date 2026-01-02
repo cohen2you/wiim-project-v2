@@ -1044,22 +1044,43 @@ async function generateEarningsPreview(
   const majorEventDetected = contextBrief?.major_event_detected === true;
   const contextSentiment = contextBrief?.sentiment || null;
   
-  if (majorEventDetected) {
-    // CRITICAL: Major event detected - must mention in first paragraph
-    leadInstructions = `**ACT AS:** A Senior Financial News Editor.
-**TASK:** Write a 2-sentence Lead Paragraph for a ${companyName} earnings preview.
-**GOAL:** Balance the financial expectations with the major event that has occurred.
+  // NARRATIVE-FIRST PROMPT: Only apply when contextBrief is provided (Enrich First mode)
+  if (contextBrief) {
+    // NARRATIVE-FIRST APPROACH: Use context as the "Main Character" to frame the earnings story
+    if (majorEventDetected) {
+      // Major event detected - frame earnings as the "verdict" on the event
+      leadInstructions = `**ACT AS:** A senior market analyst writing for high-net-worth traders.
 
-**CRITICAL INSTRUCTION - MAJOR EVENT DETECTED:**
-A major event has been detected (e.g., lawsuit, recall, crash, significant negative news). You MUST mention this event in the first paragraph as a counter-weight to the financial expectations. Do NOT bury this news. The lead paragraph must acknowledge both the financial expectations AND the major event.
+**TASK:** Write a compelling 2-3 sentence Lead Paragraph that frames the upcoming earnings report as a "verdict" on the major event or challenge facing ${companyName}.
+
+**CRITICAL NARRATIVE RULE - START WITH THE CONFLICT:**
+Do NOT start with "Company X is scheduled to report earnings on [date]." Instead, START WITH THE CONFLICT from the Context Dossier. Frame the earnings report as the test/verdict on that challenge.
 
 **INSTRUCTIONS:**
-1. **Sentence 1 (The Context):** Open with the earnings date and acknowledge the major event. Use company name with exchange (e.g., "${companyName} (NASDAQ:${ticker})" or similar format based on the company's exchange). Reference the major event directly (use the context_brief data provided below to understand what the event is).
-2. **Sentence 2 (The Expectations vs Reality):** Pivot to the financial expectations while acknowledging how the major event may impact the results. ${revenueGrowth && revenueGrowth > 0 ? `Mention the ${revenueGrowth}% year-over-year revenue surge expectations (${formatRevenue(revenueEstimate)})` : revenueEstimate ? `Reference the revenue expectations (${formatRevenue(revenueEstimate)})` : `Mention the earnings expectations`}, but frame it in context of the major event - how will investors weigh the financial metrics against the event's impact?
+1. **Sentence 1 (The Thesis/Conflict):** Open with the single biggest challenge, opportunity, or event from the Context Dossier (e.g., "As the AI war with Google intensifies..." or "Facing mounting pressure from [event]..."). Use company name with exchange (e.g., "${companyName} (NASDAQ:${ticker})"). Frame the earnings date as a "prove-it moment," "critical test," or "verdict" on this challenge. Include the earnings date naturally within this narrative frame.
 
-**TONE:** Write in a journalistic, editorial style. Use strong, engaging language. Balance the financial story with the reality of the major event. Do not ignore or minimize the major event.`;
+2. **Sentence 2-3 (The Stakes):** Synthesize the financial data into the narrative. Do NOT just list numbers. Instead, connect them to the conflict. ${revenueEstimate && revenueGrowth ? `Rather than saying "Revenue is expected to be ${formatRevenue(revenueEstimate)}," frame it as: "To justify its premium ${peRatio ? `${peRatio.toFixed(1)}x ` : ''}valuation, ${companyName} must clear the high bar of ${formatRevenue(revenueEstimate)} in revenue${revenueGrowth > 0 ? `, a ${revenueGrowth}% surge that depends on [context-specific driver from Context Dossier]` : ''}."` : revenueEstimate ? `Frame revenue expectations (${formatRevenue(revenueEstimate)}) in context of the major event - what does this number mean given the current challenge?` : `Connect EPS expectations to the event - how will this metric validate or challenge the narrative?`} ${currentPrice && priceTarget ? `With shares trading at $${currentPrice.toFixed(0)}${priceVsTarget === 'below' ? `, significantly below the $${priceTarget.toFixed(0)} analyst target` : priceVsTarget === 'above' ? `, well above the $${priceTarget.toFixed(0)} analyst target` : ''}, the report becomes crucial for ${priceVsTarget === 'below' ? 'closing the valuation gap' : 'validating the premium valuation'}.` : ''}
+
+**TONE:** Write like you're explaining a high-stakes situation to a sophisticated trader. Use phrases like "faces a critical test," "prove-it moment," "the verdict on," "must clear the high bar." Create intrigue and urgency. Do NOT minimize or bury the major event - it is the central narrative.`;
+    } else {
+      // No major event, but context exists - use it to create narrative tension
+      leadInstructions = `**ACT AS:** A senior market analyst writing for high-net-worth traders.
+
+**TASK:** Write a compelling 2-3 sentence Lead Paragraph that uses the Context Dossier to frame the earnings story around the single biggest challenge or opportunity facing ${companyName}.
+
+**CRITICAL NARRATIVE RULE - START WITH THE THESIS:**
+Do NOT start with "Company X is scheduled to report earnings on [date]." Instead, START WITH THE CHALLENGE or OPPORTUNITY from the Context Dossier. Frame the earnings report as the test/verdict on that issue.
+
+**INSTRUCTIONS:**
+1. **Sentence 1 (The Thesis):** Open with the single biggest challenge, opportunity, or competitive dynamic from the Context Dossier (e.g., "As ${companyName} battles for AI dominance..." or "With investors demanding proof that [strategy] is yielding results..."). Use company name with exchange (e.g., "${companyName} (NASDAQ:${ticker})"). Frame the earnings date (${earningsDate}) as a "prove-it moment," "critical test," or "validation point" on this challenge/opportunity.
+
+2. **Sentence 2-3 (The Stakes):** Synthesize the financial data into the narrative. Do NOT just list numbers. Instead, connect them to the thesis. ${revenueEstimate && revenueGrowth && revenueGrowth > 0 ? `Rather than saying "Revenue is expected to grow ${revenueGrowth}% to ${formatRevenue(revenueEstimate)}," frame it as: "The real story isn't the ${revenueGrowth}% revenue surge to ${formatRevenue(revenueEstimate)} - it's whether the company's [context-specific strategy from Context Dossier] is finally translating into profitable growth."` : revenueEstimate ? `Frame revenue expectations (${formatRevenue(revenueEstimate)}) in context of the challenge/opportunity - what does this number mean for the narrative?` : `Connect EPS expectations to the narrative - how does this metric validate or challenge the thesis?`} ${peRatio ? `With a ${peRatio.toFixed(1)}x P/E ratio${peRatio > 25 ? ` signaling premium valuation` : peRatio < 15 ? ` suggesting value opportunity` : ''}, investors are scrutinizing not just for a "beat," but for signs that ${companyName} is [winning/executing on the challenge from Context Dossier].` : ''} ${currentPrice && priceTarget && priceVsTarget === 'below' ? `Shares trading at $${currentPrice.toFixed(0)} - well below the $${priceTarget.toFixed(0)} analyst target - signal skepticism that needs to be addressed.` : ''}
+
+**TONE:** Write like you're explaining a high-stakes situation to a sophisticated trader. Use phrases like "faces a prove-it moment," "the real story isn't X, it's Y," "scrutinizing not just for a beat, but for signs that..." Create narrative tension around the challenge/opportunity.`;
+    }
   } else {
-    // Standard flow - focus purely on financial metrics
+    // STANDARD FLOW: No context brief provided (regular "Generate Earnings Preview" button)
+    // Keep existing logic for non-enriched articles
     leadInstructions = `**ACT AS:** A Senior Financial News Editor.
 **TASK:** Write a 2-sentence Lead Paragraph for a ${companyName} earnings preview.
 **GOAL:** Focus on the "Growth Story" and the pressure to deliver results.
@@ -1151,7 +1172,7 @@ CRITICAL STRUCTURAL REQUIREMENTS:
 
 1. **HEADLINE**: Write a clear, engaging headline in the style: "[Company Name] Earnings Preview: What to Expect" (plain text, no markdown)
 
-2. **LEAD PARAGRAPH** (exactly 2 sentences):
+2. **LEAD PARAGRAPH** (${contextBrief ? '2-3 sentences' : 'exactly 2 sentences'}):
    ${leadInstructions}
    
    **CRITICAL:** Include a THREE-WORD hyperlink to the Benzinga earnings page in the first sentence. Format: <a href="https://www.benzinga.com/quote/${ticker}/earnings">[three consecutive words]</a>. Embed it naturally (e.g., "is scheduled to <a href="https://www.benzinga.com/quote/${ticker}/earnings">report earnings on</a> February 26").
@@ -1167,13 +1188,21 @@ CRITICAL STRUCTURAL REQUIREMENTS:
    - Insert "## Section: Price Action" immediately before the automatically-generated price action line
 
 4. **SECTION: What to Expect**:
-   - Start with ONE introductory sentence referencing the earnings date
+   ${contextBrief ? `- CRITICAL: Do NOT just list numbers. Synthesize the data into the narrative established in the lead paragraph.
+   - Start with ONE sentence that connects the earnings date to the central challenge/opportunity from the Context Dossier.
+   - Format earnings data as HTML bullet points, but frame each metric in context of the narrative:
+     <ul>
+     <li><strong>EPS Estimate</strong>: $X.XX (Up/Down from $X.XX YoY) - but frame it: "EPS expectations of $X.XX represent [what this means for the challenge/opportunity]"</li>
+     <li><strong>Revenue Estimate</strong>: $X.XX billion/million (Up/Down from $X.XX billion/million YoY) - connect to the narrative: "Revenue of $X.XX would validate/invalidate [the central thesis from Context Dossier]"</li>
+     ${peRatio !== null ? `<li><strong>Valuation</strong>: ${useForwardPE ? 'Forward' : ''} P/E of ${peRatio.toFixed(1)}x - explain what this means for the narrative: "${peRatio > 25 ? 'Premium' : peRatio < 15 ? 'Value' : 'Fair'} valuation suggests investors are [betting on/challenging] [the central thesis]"</li>` : ''}
+     </ul>
+   - Every number should answer "Why does this matter for the story?"` : `- Start with ONE introductory sentence referencing the earnings date
    - Format earnings data as HTML bullet points with bold labels:
      <ul>
      <li><strong>EPS Estimate</strong>: $X.XX (Up/Down from $X.XX YoY)</li>
      <li><strong>Revenue Estimate</strong>: $X.XX billion/million (Up/Down from $X.XX billion/million YoY)</li>
      ${peRatio !== null ? `<li><strong>Valuation</strong>: ${useForwardPE ? 'Forward' : ''} P/E of ${peRatio.toFixed(1)}x (Indicates ${peRatio > 25 ? 'premium valuation' : peRatio < 15 ? 'value opportunity' : 'fair valuation'})</li>` : ''}
-     </ul>
+     </ul>`}
 
 ${historicalEarnings && historicalEarnings.quarters && historicalEarnings.quarters.length > 0 ? `5. **SECTION: Historical Performance** (MANDATORY - CRITICAL: Historical data has been provided above and you MUST use it):
    - CRITICAL INSTRUCTION: The "HISTORICAL EARNINGS PERFORMANCE" section above contains DATA with specific quarterly results (actuals and/or estimates). You MUST use this data. Do NOT write "specific historical performance data is not provided" or similar phrases - the data IS provided above.
