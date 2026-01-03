@@ -1404,6 +1404,27 @@ Generate the basic technical story now.`;
         console.log('No related articles available');
       }
 
+    // Post-process to add hyperlinks to earnings/analyst text (for both structured sections and paragraph format)
+    // Add hyperlink to "next earnings report" if it appears in paragraph format (enriched flow)
+    // Match: "Investors are looking ahead to the company's next earnings report on [DATE]"
+    if (!story.match(/next earnings report.*?<a href="https:\/\/www\.benzinga\.com\/quote\/[^"]+\/earnings">/i)) {
+      story = story.replace(/(Investors are looking ahead to the company's )next earnings report( on [^,\.]+(?:,|\.))/gi, 
+        `$1<a href="https://www.benzinga.com/quote/${tickerUpper}/earnings">next earnings report</a>$2`);
+    }
+    
+    // Add hyperlink to "average price target" if it appears in paragraph format
+    // Match: "with an average price target of $421.79"
+    if (!story.match(/average price target.*?<a href="https:\/\/www\.benzinga\.com\/quote\/[^"]+\/analyst-ratings">/i)) {
+      story = story.replace(/(with an )average price target( of \$[\d.]+)/gi, 
+        `$1<a href="https://www.benzinga.com/quote/${tickerUpper}/analyst-ratings">average price target</a>$2`);
+    }
+    
+    // Also handle "Avg Price Target" format (structured format)
+    if (!story.match(/Avg Price Target.*?<a href="https:\/\/www\.benzinga\.com\/quote\/[^"]+\/analyst-ratings">/i)) {
+      story = story.replace(/(\(\$[\d.]+ )Avg Price Target(\))/gi, 
+        `$1<a href="https://www.benzinga.com/quote/${tickerUpper}/analyst-ratings">Avg Price Target</a>$2`);
+    }
+
     // Post-process Earnings & Analyst Outlook section to format as bullet points
     const earningsSectionMarker = /##\s*Section:\s*Earnings\s*&\s*Analyst\s*Outlook/i;
     const earningsSectionMatch = story.match(earningsSectionMarker);
@@ -1612,20 +1633,44 @@ Generate the basic technical story now.`;
     
     if (programmaticPriceAction) {
       // Find and replace the AI-generated price action line
-      const priceActionPattern = /<strong>.*?Price Action:.*?<\/strong>.*?according to.*?Benzinga Pro.*?data\./i;
-      if (priceActionPattern.test(story)) {
-        story = story.replace(priceActionPattern, programmaticPriceAction);
-        console.log('✅ Replaced AI-generated price action line with programmatic one');
+      // Try multiple patterns to catch different formats (structured, enriched, etc.)
+      // Pattern 1: With <strong> tags and "Benzinga Pro data."
+      const priceActionPattern1 = /<strong>.*?Price Action:.*?<\/strong>.*?according to.*?Benzinga Pro.*?(?:data\.|\.)/is;
+      // Pattern 2: Without <strong> tags but with "Benzinga Pro" or "Benzinga Pro data"
+      const priceActionPattern2 = /Price Action:.*?according to.*?Benzinga Pro(?: data)?\./is;
+      // Pattern 3: More flexible - just "Price Action:" to "Benzinga Pro."
+      const priceActionPattern3 = /Price Action:.*?Benzinga Pro\./is;
+      
+      if (priceActionPattern1.test(story)) {
+        story = story.replace(priceActionPattern1, programmaticPriceAction);
+        console.log('✅ Replaced AI-generated price action line with programmatic one (pattern 1)');
+      } else if (priceActionPattern2.test(story)) {
+        story = story.replace(priceActionPattern2, programmaticPriceAction);
+        console.log('✅ Replaced AI-generated price action line with programmatic one (pattern 2)');
+      } else if (priceActionPattern3.test(story)) {
+        story = story.replace(priceActionPattern3, programmaticPriceAction);
+        console.log('✅ Replaced AI-generated price action line with programmatic one (pattern 3)');
       } else {
-        // If pattern not found, try simpler pattern
-        const simplePattern = /.*?Price Action:.*?according to.*?Benzinga Pro.*?data\./i;
-        if (simplePattern.test(story)) {
-          story = story.replace(simplePattern, programmaticPriceAction);
-          console.log('✅ Replaced AI-generated price action line (simple pattern)');
+        // If pattern not found, try to find "Price Action:" and replace the line
+        const priceActionIndex = story.indexOf('Price Action:');
+        if (priceActionIndex !== -1) {
+          // Find the end of the sentence (period or newline)
+          const afterPriceAction = story.substring(priceActionIndex);
+          const endMatch = afterPriceAction.match(/.*?\.(?=\s|$)/s);
+          if (endMatch) {
+            const beforePriceAction = story.substring(0, priceActionIndex);
+            const afterPriceActionLine = story.substring(priceActionIndex + endMatch[0].length);
+            story = beforePriceAction + programmaticPriceAction + afterPriceActionLine;
+            console.log('✅ Replaced AI-generated price action line by finding Price Action: marker');
+          } else {
+            // If still not found, append at the end
+            story += '\n\n' + programmaticPriceAction;
+            console.log('✅ Added programmatic price action line at the end (fallback)');
+          }
         } else {
           // If still not found, append at the end
           story += '\n\n' + programmaticPriceAction;
-          console.log('✅ Added programmatic price action line at the end');
+          console.log('✅ Added programmatic price action line at the end (no marker found)');
         }
       }
     }
