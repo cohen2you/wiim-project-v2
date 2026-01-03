@@ -854,12 +854,170 @@ async function fetchStockData(ticker: string) {
   }
 }
 
+// Fetch context brief from external agent
+async function fetchContextBrief(ticker: string, backendUrl?: string): Promise<any | null> {
+  if (!backendUrl) {
+    console.log(`⚠️ [CONTEXT BRIEF] ${ticker}: NEWS_AGENT_BACKEND_URL not configured`);
+    return null;
+  }
+
+  try {
+    const apiUrl = `${backendUrl}/api/enrichment/context-brief`;
+    console.log(`[CONTEXT BRIEF] ${ticker}: Fetching from ${apiUrl}`);
+    
+    const response = await fetch(apiUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ ticker: ticker.toUpperCase() }),
+    });
+
+    if (!response.ok) {
+      console.error(`⚠️ [CONTEXT BRIEF] ${ticker}: API returned ${response.status}`);
+      return null;
+    }
+
+    const data = await response.json();
+    console.log(`✅ [CONTEXT BRIEF] ${ticker}: Received context brief`);
+    return data;
+  } catch (error) {
+    console.error(`[CONTEXT BRIEF] ${ticker}: Error fetching context brief:`, error);
+    return null;
+  }
+}
+
+// Inject SEO subheads using news-agent-project
+async function injectSEOSubheads(articleText: string, backendUrl?: string): Promise<string | null> {
+  if (!backendUrl) {
+    console.log('⚠️ NEWS_AGENT_BACKEND_URL not configured, skipping SEO subhead injection');
+    return null;
+  }
+
+  try {
+    const apiUrl = `${backendUrl}/api/seo/generate`;
+    
+    const response = await fetch(apiUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ articleText }),
+    });
+
+    if (!response.ok) {
+      console.error(`⚠️ SEO subhead API returned ${response.status}`);
+      return null;
+    }
+
+    const data = await response.json();
+    
+    if (data.optimizedText) {
+      // Clean up the optimized text: remove markdown wrappers, convert markdown headings to HTML
+      let cleanedText = data.optimizedText;
+      
+      // Remove markdown code block wrapper
+      cleanedText = cleanedText.replace(/^```markdown\s*/i, '').replace(/\s*```$/i, '');
+      cleanedText = cleanedText.replace(/^```\s*/, '').replace(/\s*```$/, '');
+      
+      // Convert markdown H2 (## Heading) to HTML H2 (<h2>Heading</h2>)
+      cleanedText = cleanedText.replace(/^##\s+(.+)$/gm, '<h2>$1</h2>');
+      
+      // Convert markdown H3 (### Heading) to HTML H3 (<h3>Heading</h3>)
+      cleanedText = cleanedText.replace(/^###\s+(.+)$/gm, '<h3>$1</h3>');
+      
+      // Remove trailing "..." if it exists at the very end
+      cleanedText = cleanedText.replace(/\s*\.{3,}\s*$/, '').trim();
+      
+      return cleanedText;
+    }
+    
+    return null;
+  } catch (error) {
+    console.error('Error calling SEO subhead injection API:', error);
+    return null;
+  }
+}
+
+// Fetch news section from add-news enrichment endpoint
+async function fetchNewsSection(ticker: string, articleText: string, backendUrl?: string): Promise<string | null> {
+  if (!backendUrl) {
+    console.log(`⚠️ [ADD NEWS] ${ticker}: NEWS_AGENT_BACKEND_URL not configured, skipping news section fetch`);
+    return null;
+  }
+
+  try {
+    const apiUrl = `${backendUrl}/api/enrichment/add-news`;
+    
+    console.log(`[ADD NEWS] ${ticker}: Fetching news section from ${apiUrl}`);
+    
+    const response = await fetch(apiUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        ticker: ticker.toUpperCase(),
+        articleText: articleText,
+        storyType: 'wgo'
+      }),
+    });
+
+    if (!response.ok) {
+      console.error(`⚠️ [ADD NEWS] ${ticker}: API returned ${response.status}`);
+      return null;
+    }
+
+    const data = await response.json();
+    
+    if (data.success && data.newsSection) {
+      // Ensure the section has the correct header
+      let newsSection = data.newsSection.trim();
+      
+      // Replace existing headers with our desired header
+      newsSection = newsSection.replace(
+        /##\s*(Section:\s*)?(Latest News on Stock|Recent Developments & Catalysts)/gi,
+        '## Recent Developments & Catalysts'
+      );
+      
+      // If the header doesn't exist at the start, add it
+      if (!newsSection.startsWith('## Recent Developments & Catalysts')) {
+        newsSection = newsSection.replace(/^##\s*(Section:\s*)?.+\n?/m, '');
+        newsSection = '## Recent Developments & Catalysts\n\n' + newsSection.trim();
+      }
+      
+      console.log(`✅ [ADD NEWS] ${ticker}: Received news section`);
+      return newsSection;
+    }
+    
+    return null;
+  } catch (error) {
+    console.error(`[ADD NEWS] ${ticker}: Error fetching news section:`, error);
+    return null;
+  }
+}
+
 export async function POST(request: Request) {
   try {
-    const { ticker } = await request.json();
+    const { ticker, contextBriefs, aiProvider } = await request.json();
     
     if (!ticker) {
       return NextResponse.json({ error: 'Ticker is required.' }, { status: 400 });
+    }
+
+    const backendUrl = process.env.NEWS_AGENT_BACKEND_URL;
+    const tickerUpper = ticker.toUpperCase();
+    
+    // Step 1: Use provided context brief if available
+    let contextBrief = contextBriefs && contextBriefs[tickerUpper] ? contextBriefs[tickerUpper] : null;
+    if (contextBrief) {
+      console.log(`[ENRICHED WGO] ${tickerUpper}: Using provided context brief from frontend:`, {
+        hasData: !!contextBrief,
+        majorEventDetected: contextBrief?.major_event_detected || false,
+        sentiment: contextBrief?.sentiment || null,
+        hasSummary: !!contextBrief?.summary_of_events,
+        articleCount: contextBrief?.articles?.length || 0
+      });
     }
 
          // Fetch stock data
@@ -911,14 +1069,93 @@ CRITICAL: Use the EXACT firm names from the data above. Do NOT use [FIRM NAME] p
      }
 
            // Generate WGO No News story
+           // Check for major events from context brief
+           const majorEventDetected = contextBrief?.major_event_detected === true;
+           const contextSentiment = contextBrief?.sentiment || null;
+           const companyName = stockData.priceAction?.companyName || ticker;
+           
+           // Build lead paragraph instructions based on whether context brief is provided
+           let leadInstructions = '';
+           let catalystInstructions = '';
+           
+           if (contextBrief) {
+             // NARRATIVE-FIRST APPROACH: Use context as the "Main Character"
+             if (majorEventDetected) {
+               leadInstructions = `**ACT AS:** A senior market analyst writing for high-net-worth traders.
+
+**TASK:** Write a compelling 2-3 sentence Lead Paragraph that frames the current price movement in context of the major event or challenge facing ${companyName}.
+
+**CRITICAL NARRATIVE RULE - START WITH THE CONFLICT:**
+Do NOT start with "${companyName} stock is up/down X%." Instead, START WITH THE CONFLICT from the Context Dossier. Frame the price movement as a reaction to or reflection of that challenge.
+
+**INSTRUCTIONS:**
+1. **Sentence 1 (The Thesis/Conflict):** Open with the single biggest challenge, opportunity, or event from the Context Dossier (e.g., "As the AI war with Google intensifies..." or "Facing mounting pressure from [event]..."). Use company name with exchange (e.g., "${companyName} (NASDAQ:${tickerUpper})"). Then naturally incorporate the price movement (${stockData.priceAction?.changePercent >= 0 ? 'up' : 'down'} ${Math.abs(stockData.priceAction?.changePercent || 0).toFixed(1)}%) as a reaction to this context.
+
+2. **Sentence 2-3 (The Stakes):** Connect the price movement to the broader narrative. Rather than just stating the percentage, explain what it means in context of the challenge/opportunity. ${sectorPerformance ? `Compare to sector performance (${sectorPerformance.sectorChange.toFixed(1)}% ${sectorPerformance.sectorChange >= 0 ? 'gain' : 'loss'} in ${sectorPerformance.sectorName}) to show whether the stock is moving WITH or AGAINST broader trends.` : ''}
+
+**TONE:** Write like you're explaining a high-stakes situation to a sophisticated trader. Use phrases like "faces mounting pressure," "amidst [challenge]," "as investors weigh [event]." Create intrigue and urgency. Do NOT minimize or bury the major event - it is the central narrative.`;
+
+               catalystInstructions = `**CATALYST SECTION (after "## Section: The Catalyst" marker):**
+- Use the Context Dossier to explain WHY the stock is moving. What recent events, news, or developments are driving the price action?
+- Connect the price movement to specific events from the Context Dossier (e.g., "The move comes as [specific event from context]")
+- Explain whether the stock is moving WITH or AGAINST broader market trends
+- Mention sector performance in context of the narrative
+- DO NOT mention specific Moving Averages (SMAs), RSI numbers, MACD, or any technical indicators here
+- Keep to 2-3 sentences that synthesize context with price action`;
+             } else {
+               // No major event, but context exists - use it to create narrative tension
+               leadInstructions = `**ACT AS:** A senior market analyst writing for high-net-worth traders.
+
+**TASK:** Write a compelling 2-3 sentence Lead Paragraph that uses the Context Dossier to frame the price movement around the single biggest challenge or opportunity facing ${companyName}.
+
+**CRITICAL NARRATIVE RULE - START WITH THE THESIS:**
+Do NOT start with "${companyName} stock is up/down X%." Instead, START WITH THE CHALLENGE or OPPORTUNITY from the Context Dossier. Frame the price movement as a reflection of that dynamic.
+
+**INSTRUCTIONS:**
+1. **Sentence 1 (The Thesis):** Open with the single biggest challenge, opportunity, or competitive dynamic from the Context Dossier (e.g., "As ${companyName} battles for AI dominance..." or "With investors demanding proof that [strategy] is yielding results..."). Use company name with exchange (e.g., "${companyName} (NASDAQ:${tickerUpper})"). Then naturally incorporate the price movement (${stockData.priceAction?.changePercent >= 0 ? 'up' : 'down'} ${Math.abs(stockData.priceAction?.changePercent || 0).toFixed(1)}%) as a reflection of this dynamic.
+
+2. **Sentence 2-3 (The Context):** Synthesize the price movement into the narrative. ${sectorPerformance ? `Compare to sector performance (${sectorPerformance.sectorChange.toFixed(1)}% ${sectorPerformance.sectorChange >= 0 ? 'gain' : 'loss'} in ${sectorPerformance.sectorName}) to show whether the stock is outperforming or underperforming relative to its sector.` : ''} Connect the movement to the challenge/opportunity from the Context Dossier.
+
+**TONE:** Write like you're explaining a high-stakes situation to a sophisticated trader. Use phrases like "faces a critical test," "as investors weigh [challenge]," "amidst [competitive dynamic]." Create narrative tension around the challenge/opportunity.`;
+
+               catalystInstructions = `**CATALYST SECTION (after "## Section: The Catalyst" marker):**
+- Use the Context Dossier to explain the driving forces behind the price movement
+- Connect recent developments from the Context Dossier to the current price action
+- Explain whether the stock is moving WITH or AGAINST broader market trends
+- Mention sector performance in context of the narrative
+- DO NOT mention specific Moving Averages (SMAs), RSI numbers, MACD, or any technical indicators here
+- Keep to 2-3 sentences that synthesize context with price action`;
+             }
+           } else {
+             // STANDARD FLOW: No context brief provided
+             leadInstructions = `**LEAD PARAGRAPH (exactly 2 sentences):**
+- First sentence: Start with company name and ticker, describe actual price movement (up/down/unchanged) with time context
+- Second sentence: Brief context about sector correlation or market context - do NOT mention technical indicators here`;
+
+             catalystInstructions = `**CATALYST SECTION (after section marker):**
+- Focus ONLY on sector correlation, market context, and relative strength/weakness
+- Explain whether the stock is moving WITH or AGAINST broader market trends
+- Mention sector performance (e.g., "defying broad declines in the Technology sector")
+- DO NOT mention specific Moving Averages (SMAs), RSI numbers, MACD, or any technical indicators here
+- DO NOT mention 12-month performance, 52-week ranges, or specific price levels here
+- Keep to 1-2 sentences focused on market/sector correlation`;
+           }
+           
              const prompt = `
-You are a financial journalist creating a WGO No News story for ${ticker}. Focus on technical analysis and market data.
+You are a financial journalist creating a WGO No News story for ${ticker}. ${contextBrief ? 'You have access to a Context Dossier with recent news and events that should inform your narrative.' : 'Focus on technical analysis and market data.'}
 
 CURRENT DATE: ${currentDateStr}
 CURRENT MARKET STATUS: ${marketStatus}
 
 STOCK DATA:
 ${JSON.stringify(stockData, null, 2)}
+
+${contextBrief ? `
+CONTEXT DOSSIER (USE THIS AS THE "MAIN CHARACTER" OF YOUR STORY):
+${JSON.stringify(contextBrief, null, 2)}
+
+CRITICAL: The Context Dossier contains recent news, events, and sentiment that should drive your narrative. Use it to explain WHY the stock is moving, not just that it is moving.
+` : ''}
 
 ${sectorPerformance ? `
 COMPARISON LINE (USE THIS EXACT FORMAT AT THE START OF THE ARTICLE, IMMEDIATELY AFTER THE HEADLINE):
@@ -933,19 +1170,11 @@ CRITICAL INSTRUCTIONS:
 
 2. ${sectorPerformance ? 'COMPARISON LINE (right after headline): Use the comparison line format provided above.' : ''}
 
-3. LEAD PARAGRAPH (exactly 2 sentences):
-- First sentence: Start with company name and ticker, describe actual price movement (up/down/unchanged) with time context
-- Second sentence: Brief context about sector correlation or market context - do NOT mention technical indicators here
+3. ${leadInstructions}
 
 4. SECTION MARKER: After the lead paragraph, insert "## Section: The Catalyst" on its own line.
 
-5. CATALYST SECTION (after section marker):
-- Focus ONLY on sector correlation, market context, and relative strength/weakness
-- Explain whether the stock is moving WITH or AGAINST broader market trends
-- Mention sector performance (e.g., "defying broad declines in the Technology sector")
-- DO NOT mention specific Moving Averages (SMAs), RSI numbers, MACD, or any technical indicators here
-- DO NOT mention 12-month performance, 52-week ranges, or specific price levels here
-- Keep to 1-2 sentences focused on market/sector correlation
+5. ${catalystInstructions}
 
 6. SECTION MARKER: After the Catalyst section, insert "## Section: Technical Analysis" on its own line.
 
@@ -1060,6 +1289,53 @@ Generate the basic technical story now.`;
 
     // Log story generation completion
     console.log(`Generated WGO No News story for ${ticker} focusing on technical data`);
+
+    // If contextBrief was provided (Enrich First mode), automatically add news section
+    if (contextBrief) {
+      if (!backendUrl) {
+        console.log(`⚠️ [ENRICHED WGO] ${tickerUpper}: NEWS_AGENT_BACKEND_URL not configured, cannot fetch news section. Please configure NEWS_AGENT_BACKEND_URL environment variable.`);
+      } else {
+        try {
+          console.log(`[ENRICHED WGO] ${tickerUpper}: Fetching news section for Enrich First mode...`);
+          const newsSection = await fetchNewsSection(tickerUpper, story, backendUrl);
+          if (newsSection) {
+            // Insert the news section after "The Catalyst" section and before "Technical Analysis"
+            const technicalAnalysisMarker = /##\s*Section:\s*Technical Analysis/i;
+            
+            if (technicalAnalysisMarker.test(story)) {
+              const match = story.match(technicalAnalysisMarker);
+              if (match && match.index !== undefined) {
+                const beforeTechnical = story.substring(0, match.index).trim();
+                const afterTechnical = story.substring(match.index);
+                story = `${beforeTechnical}\n\n${newsSection}\n\n${afterTechnical}`;
+                console.log(`✅ [ENRICHED WGO] ${tickerUpper}: Inserted news section before Technical Analysis`);
+              }
+            } else {
+              // Fallback: try to find "The Catalyst" section and insert after it
+              const catalystMarker = /(##\s*Section:\s*The Catalyst[\s\S]*?)(?=\n##\s*Section:|$)/i;
+              if (catalystMarker.test(story)) {
+                story = story.replace(catalystMarker, `$1\n\n${newsSection}\n\n`);
+                console.log(`✅ [ENRICHED WGO] ${tickerUpper}: Inserted news section after The Catalyst`);
+              } else {
+                // Last resort: append before "Read Next" or at the end
+                const readNextMarker = /\n\nRead Next:/i;
+                const readNextMatch = story.match(readNextMarker);
+                if (readNextMatch && readNextMatch.index !== undefined) {
+                  const beforeReadNext = story.substring(0, readNextMatch.index).trim();
+                  const afterReadNext = story.substring(readNextMatch.index + 2);
+                  story = `${beforeReadNext}\n\n${newsSection}\n\n${afterReadNext}`;
+                } else {
+                  story = story + '\n\n' + newsSection;
+                }
+                console.log(`✅ [ENRICHED WGO] ${tickerUpper}: Inserted news section at fallback location`);
+              }
+            }
+          }
+        } catch (error) {
+          console.error(`[ENRICHED WGO] ${tickerUpper}: Error adding news section:`, error);
+        }
+      }
+    }
 
     // Fetch related articles and add "Also Read" and "Read Next" sections
     const relatedArticles = await fetchRelatedArticles(ticker);
@@ -1393,6 +1669,20 @@ Generate the basic technical story now.`;
     } catch (etfError) {
       console.error(`Error fetching ETF data for ${ticker}:`, etfError);
       // Continue without ETF info if there's an error
+    }
+
+    // If contextBrief was provided (Enrich First mode), automatically inject SEO subheads
+    if (contextBrief && backendUrl) {
+      try {
+        console.log(`[ENRICHED WGO] ${tickerUpper}: Injecting SEO subheads...`);
+        const optimizedStory = await injectSEOSubheads(story, backendUrl);
+        if (optimizedStory) {
+          story = optimizedStory;
+          console.log(`✅ [ENRICHED WGO] ${tickerUpper}: SEO subheads injected`);
+        }
+      } catch (error) {
+        console.error(`[ENRICHED WGO] ${tickerUpper}: Error injecting SEO subheads:`, error);
+      }
     }
 
     return NextResponse.json({ 

@@ -43,6 +43,9 @@ export default function PRStoryGeneratorPage() {
   const [loadingBaseStory, setLoadingBaseStory] = useState(false);
   const [baseStoryError, setBaseStoryError] = useState('');
   const [standardStoryError, setStandardStoryError] = useState('');
+  const [loadingEnrichedWGO, setLoadingEnrichedWGO] = useState(false);
+  const [enrichedWGOError, setEnrichedWGOError] = useState('');
+  const [enrichedWGO, setEnrichedWGO] = useState(false);
   
   // URL-based source inputs
   const [primarySourceUrl, setPrimarySourceUrl] = useState('');
@@ -399,6 +402,7 @@ export default function PRStoryGeneratorPage() {
     setLoadingStandardStory(true);
     setStandardStoryError('');
     setArticle('');
+    setEnrichedWGO(false);
 
     try {
       let endpoint = '';
@@ -431,6 +435,69 @@ export default function PRStoryGeneratorPage() {
       setStandardStoryError(err.message || `Failed to generate ${type} story`);
     } finally {
       setLoadingStandardStory(false);
+    }
+  };
+
+  const handleEnrichedWGOGeneration = async () => {
+    if (!ticker.trim()) {
+      setTickerError('Please enter a stock ticker');
+      return;
+    }
+
+    setLoadingEnrichedWGO(true);
+    setEnrichedWGOError('');
+    setArticle('');
+    setEnrichedWGO(true);
+
+    try {
+      const NEWS_AGENT_URL = process.env.NEXT_PUBLIC_NEWS_AGENT_URL || 'http://localhost:3000';
+      const tickerUpper = ticker.toUpperCase();
+      
+      // Step 1: Fetch context brief from external agent
+      console.log(`[ENRICHED WGO] ${tickerUpper}: Fetching context brief from ${NEWS_AGENT_URL}/api/enrichment/context-brief`);
+      const contextRes = await fetch(`${NEWS_AGENT_URL}/api/enrichment/context-brief`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ticker: tickerUpper })
+      });
+      
+      let contextBrief = null;
+      if (contextRes.ok) {
+        contextBrief = await contextRes.json();
+        console.log(`[ENRICHED WGO] ${tickerUpper}: Successfully fetched context brief:`, {
+          hasData: !!contextBrief,
+          majorEventDetected: contextBrief?.major_event_detected || false,
+          sentiment: contextBrief?.sentiment || null,
+          hasSummary: !!contextBrief?.summary_of_events,
+          articleCount: contextBrief?.articles?.length || 0
+        });
+      } else {
+        const errorText = await contextRes.text().catch(() => '');
+        console.warn(`[ENRICHED WGO] ${tickerUpper}: Failed to fetch context brief:`, contextRes.status, errorText.substring(0, 200));
+      }
+
+      // Step 2: Call WGO No News endpoint with context brief
+      const requestBody: any = { 
+        ticker: tickerUpper, 
+        aiProvider,
+        contextBriefs: contextBrief ? { [tickerUpper]: contextBrief } : undefined
+      };
+
+      const res = await fetch('/api/generate/wgo-no-news', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.story) throw new Error(data.error || 'Failed to generate enriched WGO story');
+
+      setArticle(data.story);
+      setLastGeneratedStoryType('wgoNoNews');
+    } catch (err: any) {
+      setEnrichedWGOError(err.message || 'Failed to generate enriched WGO story');
+    } finally {
+      setLoadingEnrichedWGO(false);
     }
   };
 
@@ -973,6 +1040,23 @@ export default function PRStoryGeneratorPage() {
             >
               {loadingStandardStory ? 'Generating...' : 'WGO No News'}
             </button>
+            <button
+              onClick={handleEnrichedWGOGeneration}
+              disabled={loadingEnrichedWGO || loadingStandardStory}
+              style={{ 
+                padding: '8px 16px', 
+                backgroundColor: loadingEnrichedWGO || loadingStandardStory ? '#6b7280' : '#059669', 
+                color: 'white', 
+                border: 'none', 
+                borderRadius: '4px',
+                fontSize: '14px',
+                fontWeight: '500',
+                cursor: loadingEnrichedWGO || loadingStandardStory ? 'not-allowed' : 'pointer',
+                opacity: loadingEnrichedWGO || loadingStandardStory ? 0.5 : 1
+              }}
+            >
+              {loadingEnrichedWGO ? 'Enriching & Generating...' : 'Enriched No News WGO'}
+            </button>
           </div>
           <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '8px' }}>
             These buttons generate complete stories using the traditional step-by-step approach.
@@ -1112,7 +1196,7 @@ export default function PRStoryGeneratorPage() {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
             <h3 style={{ fontSize: '18px', fontWeight: '600' }}>Generated Story</h3>
             <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-              {(lastGeneratedStoryType === 'wgoNoNews' || lastGeneratedStoryType === 'wgo') && (
+              {(lastGeneratedStoryType === 'wgoNoNews' || lastGeneratedStoryType === 'wgo') && !enrichedWGO && (
                 <button
                   onClick={handleAddBenzingaNews}
                   disabled={addingNews || !article}
