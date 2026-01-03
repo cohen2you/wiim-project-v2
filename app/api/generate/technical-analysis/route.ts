@@ -285,7 +285,7 @@ async function generatePriceAction(ticker: string): Promise<string> {
     
     // Build simple 1-sentence price action: Current Price, % Change (no volume)
     // Note: dayOfWeek and marketStatusPhrase are already calculated earlier in the function
-    return `<strong>${symbol} Price Action:</strong> ${companyName} shares were ${upDown} ${absChange}% at $${formattedPrice}${marketStatusPhrase} at the time of publication on ${dayOfWeek}, according to <a href="https://pro.benzinga.com">Benzinga Pro</a> data.`;
+    return `<strong>${symbol} Price Action:</strong> ${companyName} shares were ${upDown} ${absChange}% at $${formattedPrice}${marketStatusPhrase} at the time of publication on ${dayOfWeek}, according to <a href="https://pro.benzinga.com/dashboard">Benzinga Pro data</a>.`;
   } catch (error) {
     console.error(`Error generating price action for ${ticker}:`, error);
     return '';
@@ -3319,7 +3319,7 @@ CRITICAL INSTRUCTIONS FOR THIS SECTION:
   </ul>
   
   <strong>Analyst Consensus & Recent Actions:</strong>
-  The stock carries a ${consensusRatings?.consensus_rating ? consensusRatings.consensus_rating.charAt(0) + consensusRatings.consensus_rating.slice(1).toLowerCase() : 'N/A'} Rating with an average price target of $${consensusRatings?.consensus_price_target ? parseFloat(consensusRatings.consensus_price_target.toString()).toFixed(2) : 'N/A'}. ${recentAnalystActions && recentAnalystActions.length > 0 ? `Recent analyst moves include:\n${recentAnalystActions.map((action: any) => `${action.firm}: ${action.action}`).join('\n')}` : 'No recent analyst actions available.'}
+  The stock carries a ${consensusRatings?.consensus_rating ? consensusRatings.consensus_rating.charAt(0) + consensusRatings.consensus_rating.slice(1).toLowerCase() : 'N/A'} Rating with an <a href="https://www.benzinga.com/quote/${data.symbol}/analyst-ratings">average price target</a> of $${consensusRatings?.consensus_price_target ? parseFloat(consensusRatings.consensus_price_target.toString()).toFixed(2) : 'N/A'}. ${recentAnalystActions && recentAnalystActions.length > 0 ? `Recent analyst moves include:\n${recentAnalystActions.map((action: any) => `${action.firm}: ${action.action}`).join('\n')}` : 'No recent analyst actions available.'}
 
 ${nextEarnings ? `
 UPCOMING EARNINGS DATA:
@@ -4504,13 +4504,19 @@ export async function POST(request: Request) {
               let intro = '';
               let priceTargetNote = '';
               
-              // Extract intro sentence
+              // Extract intro sentence with hyperlink
+              const tickerUpper = data.symbol.toUpperCase();
               if (earningsDateMatch && earningsDateMatch[1]) {
-                intro = `Investors are looking ahead to the next earnings report on ${earningsDateMatch[1].trim()}.`;
+                intro = `Investors are looking ahead to the <a href="https://www.benzinga.com/quote/${tickerUpper}/earnings">next earnings report</a> on ${earningsDateMatch[1].trim()}.`;
               } else {
                 // Try to extract intro from content
                 const introMatch = earningsContent.match(/^(.+?\.)(?:\n\n|\nEPS Estimate:|$)/m);
-                intro = introMatch ? introMatch[1].trim() : 'Investors are looking ahead to the next earnings report.';
+                if (introMatch) {
+                  // Replace "next earnings report" with hyperlinked version if it exists
+                  intro = introMatch[1].trim().replace(/next earnings report/gi, `<a href="https://www.benzinga.com/quote/${tickerUpper}/earnings">next earnings report</a>`);
+                } else {
+                  intro = `Investors are looking ahead to the <a href="https://www.benzinga.com/quote/${tickerUpper}/earnings">next earnings report</a>.`;
+                }
               }
               
               // Build "Hard Numbers" lines (EPS, Revenue, P/E)
@@ -4669,7 +4675,8 @@ export async function POST(request: Request) {
                   if (ratingValue && targetValue) {
                     const rating = ratingValue.charAt(0) + ratingValue.slice(1).toLowerCase();
                     const target = parseFloat(targetValue);
-                    formattedSection += `The stock carries a <strong>${rating}</strong> Rating with an average price target of <strong>$${target.toFixed(2)}</strong>.`;
+                    const tickerUpper = data.symbol.toUpperCase();
+                    formattedSection += `The stock carries a <strong>${rating}</strong> Rating with an <a href="https://www.benzinga.com/quote/${tickerUpper}/analyst-ratings">average price target</a> of <strong>$${target.toFixed(2)}</strong>.`;
                   } else if (ratingValue) {
                     const rating = ratingValue.charAt(0) + ratingValue.slice(1).toLowerCase();
                     formattedSection += `The stock carries a <strong>${rating}</strong> Rating.`;

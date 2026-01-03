@@ -919,56 +919,6 @@ async function fetchNewsSection(ticker: string, articleText: string, backendUrl?
   }
 }
 
-// Inject quarter context using news-agent-project (Phase 4)
-async function injectQuarterContext({
-  articleText,
-  ticker,
-  earningsDate,
-  backendUrl
-}: {
-  articleText: string;
-  ticker: string;
-  earningsDate: string;
-  backendUrl?: string;
-}): Promise<string | null> {
-  if (!backendUrl) {
-    console.log('⚠️ NEWS_AGENT_BACKEND_URL not configured, skipping quarter context injection');
-    return null;
-  }
-
-  try {
-    const apiUrl = `${backendUrl}/api/earnings/inject-quarter-context`;
-    
-    const response = await fetch(apiUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        articleText,
-        ticker,
-        earningsDate,
-      }),
-    });
-
-    if (!response.ok) {
-      console.error(`⚠️ Quarter context API returned ${response.status}`);
-      return null;
-    }
-
-    const data = await response.json();
-    
-    if (data.enhancedArticle) {
-      return data.enhancedArticle;
-    }
-    
-    return null;
-  } catch (error) {
-    console.error('Error calling quarter context injection API:', error);
-    return null;
-  }
-}
-
 // Generate earnings preview article
 async function generateEarningsPreview(
   ticker: string,
@@ -1275,7 +1225,7 @@ Generate the earnings preview article:`;
 
 export async function POST(request: Request) {
   try {
-    const { tickers, provider, skipQuarterContext, skipSEOSubheads, contextBriefs } = await request.json();
+    const { tickers, provider, skipSEOSubheads, contextBriefs } = await request.json();
 
     if (!tickers || !tickers.trim()) {
       return NextResponse.json({ error: 'Please provide ticker(s)' }, { status: 400 });
@@ -1287,9 +1237,9 @@ export async function POST(request: Request) {
       : undefined;
 
     const backendUrl = process.env.NEWS_AGENT_BACKEND_URL;
-    const enableQuarterContext = process.env.ENABLE_QUARTER_CONTEXT_INJECTION !== 'false' && !skipQuarterContext;
-    // Skip SEO subheads if contextBriefs are provided (Enrich First mode) - subheads should be added separately
-    const enableSEOSubheads = !skipSEOSubheads && !contextBriefs;
+    // Automatically enable SEO subheads for Enrich First mode (contextBriefs provided)
+    // For regular mode, enable if not skipped
+    const enableSEOSubheads = !skipSEOSubheads;
 
     const previews = await Promise.all(
       tickerList.map(async (ticker: string) => {
@@ -1466,36 +1416,21 @@ export async function POST(request: Request) {
             preview = `${preview.trim()}\n\nRead Next: <a href="${readNextArticle.url}">${readNextArticle.headline}</a>`;
           }
 
-          // Step 1: Inject quarter context (Phase 4, if enabled) - BEFORE SEO subheads
-          if (enableQuarterContext && backendUrl && nextEarnings && typeof nextEarnings === 'object' && nextEarnings.date) {
-            try {
-              const articleWithContext = await injectQuarterContext({
-                articleText: preview,
-                ticker: ticker,
-                earningsDate: nextEarnings.date,
-                backendUrl: backendUrl
-              });
-              
-              if (articleWithContext) {
-                preview = articleWithContext;
-                console.log('✅ Quarter context injected successfully');
-              }
-            } catch (error) {
-              console.error('⚠️ Quarter context injection failed, using original article:', error);
-            }
-          }
-
-          // Step 2: Inject SEO subheads (FINAL STEP, if enabled)
+          // Inject SEO subheads (FINAL STEP, if enabled)
+          // Automatically enabled for Enrich First mode, or if not skipped for regular mode
           if (enableSEOSubheads && backendUrl) {
             try {
+              console.log(`[SEO SUBHEADS] ${ticker}: Injecting SEO subheads${contextBriefs && contextBriefs[ticker] ? ' (Enrich First mode - automatic)' : ''}...`);
               const articleWithSubheads = await injectSEOSubheads(preview, backendUrl);
               if (articleWithSubheads) {
                 preview = articleWithSubheads;
-                console.log('✅ SEO subheads injected successfully (final step)');
+                console.log(`✅ [SEO SUBHEADS] ${ticker}: SEO subheads injected successfully (final step)`);
               }
             } catch (error) {
-              console.error('⚠️ SEO subhead injection failed, using original article:', error);
+              console.error(`⚠️ [SEO SUBHEADS] ${ticker}: SEO subhead injection failed, using original article:`, error);
             }
+          } else if (enableSEOSubheads && !backendUrl) {
+            console.log(`⚠️ [SEO SUBHEADS] ${ticker}: NEWS_AGENT_BACKEND_URL not configured, skipping SEO subhead injection`);
           }
 
           return {

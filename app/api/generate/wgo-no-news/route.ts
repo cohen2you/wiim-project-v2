@@ -656,7 +656,7 @@ async function generatePriceActionLine(ticker: string, companyName: string, stoc
     const absChange = Math.abs(changePercent).toFixed(2);
     const formattedPrice = displayPrice.toFixed(2);
     
-    return `<strong>${ticker.toUpperCase()} Price Action:</strong> ${companyName} shares were ${upDown} ${absChange}% at $${formattedPrice}${marketStatusPhrase} at the time of publication on ${dayOfWeek}, according to <a href="https://pro.benzinga.com">Benzinga Pro</a> data.`;
+    return `<strong>${ticker.toUpperCase()} Price Action:</strong> ${companyName} shares were ${upDown} ${absChange}% at $${formattedPrice}${marketStatusPhrase} at the time of publication on ${dayOfWeek}, according to <a href="https://pro.benzinga.com/dashboard">Benzinga Pro data</a>.`;
   } catch (error) {
     console.error(`Error generating price action line for ${ticker}:`, error);
     return '';
@@ -1146,7 +1146,8 @@ Generate the basic technical story now.`;
         
         // Use actual earnings data if available, otherwise fall back to extraction
         if (stockData.nextEarnings) {
-          intro = `Investors are looking ahead to the next earnings report on ${formatEarningsDate(stockData.nextEarnings.date)}.`;
+          const tickerUpper = ticker.toUpperCase();
+          intro = `Investors are looking ahead to the <a href="https://www.benzinga.com/quote/${tickerUpper}/earnings">next earnings report</a> on ${formatEarningsDate(stockData.nextEarnings.date)}.`;
           
           // Use actual formatted EPS values
           if (stockData.nextEarnings.eps_estimate !== null && stockData.nextEarnings.eps_estimate !== undefined) {
@@ -1176,7 +1177,8 @@ Generate the basic technical story now.`;
             const target = stockData.consensusRatings.consensus_price_target ? parseFloat(stockData.consensusRatings.consensus_price_target.toString()) : null;
             
             if (rating && target) {
-              lines.push(`<strong>Analyst Consensus</strong>: ${rating} Rating ($${target.toFixed(2)} Avg Price Target)`);
+              const tickerUpper = ticker.toUpperCase();
+              lines.push(`<strong>Analyst Consensus</strong>: ${rating} Rating (<a href="https://www.benzinga.com/quote/${tickerUpper}/analyst-ratings">$${target.toFixed(2)} Avg Price Target</a>)`);
               
               // Add price comparison logic note
               if (stockData.priceAction?.last) {
@@ -1191,7 +1193,8 @@ Generate the basic technical story now.`;
             } else if (rating) {
               lines.push(`<strong>Analyst Consensus</strong>: ${rating} Rating`);
             } else if (target) {
-              lines.push(`<strong>Analyst Consensus</strong>: $${target.toFixed(2)} Avg Price Target`);
+              const tickerUpper = ticker.toUpperCase();
+              lines.push(`<strong>Analyst Consensus</strong>: <a href="https://www.benzinga.com/quote/${tickerUpper}/analyst-ratings">$${target.toFixed(2)} Avg Price Target</a>`);
             }
           } else if (consensusRatingMatch && priceTargetMatch) {
             // Fallback to extraction if no actual data
@@ -1214,7 +1217,8 @@ Generate the basic technical story now.`;
           let priceTargetMatch = earningsContent.match(/price target of \$([\d.]+)/i);
           
           if (earningsDateMatch) {
-            intro = `Investors are looking ahead to the next earnings report on ${earningsDateMatch[1].trim()}.`;
+            const tickerUpper = ticker.toUpperCase();
+            intro = `Investors are looking ahead to the <a href="https://www.benzinga.com/quote/${tickerUpper}/earnings">next earnings report</a> on ${earningsDateMatch[1].trim()}.`;
             
             if (epsEstimateMatch) {
               const epsEst = epsEstimateMatch[1];
@@ -1233,7 +1237,8 @@ Generate the basic technical story now.`;
             if (consensusRatingMatch && priceTargetMatch) {
               const rating = consensusRatingMatch[1].charAt(0) + consensusRatingMatch[1].slice(1).toLowerCase();
               const target = parseFloat(priceTargetMatch[1]);
-              lines.push(`<strong>Analyst Consensus</strong>: ${rating} Rating ($${target.toFixed(2)} Avg Price Target)`);
+              const tickerUpper = ticker.toUpperCase();
+              lines.push(`<strong>Analyst Consensus</strong>: ${rating} Rating (<a href="https://www.benzinga.com/quote/${tickerUpper}/analyst-ratings">$${target.toFixed(2)} Avg Price Target</a>)`);
             }
           }
         }
@@ -1248,7 +1253,8 @@ Generate the basic technical story now.`;
           console.log('✅ Formatted Earnings & Analyst Outlook section with bold labels and bullet points using actual data');
         } else if (lines.length > 0) {
           // We have lines but no intro - use default
-          intro = 'Investors are looking ahead to the next earnings report.';
+          const tickerUpper = ticker.toUpperCase();
+          intro = `Investors are looking ahead to the <a href="https://www.benzinga.com/quote/${tickerUpper}/earnings">next earnings report</a>.`;
           const formattedSection = `${intro}\n\n<ul>\n${lines.map(l => `  <li>${l}</li>`).join('\n')}\n</ul>${priceTargetNote}`;
           const beforeEarnings = story.substring(0, earningsSectionMatch.index + earningsSectionMatch[0].length);
           const afterEarnings = story.substring(earningsSectionMatch.index + earningsSectionMatch[0].length + earningsSectionEnd);
