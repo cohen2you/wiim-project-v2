@@ -897,6 +897,12 @@ async function injectSEOSubheads(articleText: string, backendUrl?: string): Prom
   try {
     const apiUrl = `${backendUrl}/api/seo/generate`;
     
+    // Log the article text being sent to verify header format
+    const sectionHeaderMatches = articleText.match(/##\s*Section:\s*[^\n]+/gi);
+    console.log(`[SEO AGENT] Sending article to SEO agent with ${sectionHeaderMatches?.length || 0} section headers:`, sectionHeaderMatches);
+    console.log(`[SEO AGENT] Article text length: ${articleText.length} characters`);
+    console.log(`[SEO AGENT] Article preview (first 500 chars):`, articleText.substring(0, 500));
+    
     const response = await fetch(apiUrl, {
       method: 'POST',
       headers: {
@@ -916,6 +922,10 @@ async function injectSEOSubheads(articleText: string, backendUrl?: string): Prom
       // Clean up the optimized text: remove markdown wrappers, convert markdown headings to HTML
       let cleanedText = data.optimizedText;
       
+      // Log the raw response from SEO agent
+      console.log(`[SEO AGENT] Received optimized text, length: ${cleanedText.length}`);
+      console.log(`[SEO AGENT] Raw response preview (first 500 chars):`, cleanedText.substring(0, 500));
+      
       // Remove markdown code block wrapper
       cleanedText = cleanedText.replace(/^```markdown\s*/i, '').replace(/\s*```$/i, '');
       cleanedText = cleanedText.replace(/^```\s*/, '').replace(/\s*```$/, '');
@@ -928,6 +938,10 @@ async function injectSEOSubheads(articleText: string, backendUrl?: string): Prom
       
       // Remove trailing "..." if it exists at the very end
       cleanedText = cleanedText.replace(/\s*\.{3,}\s*$/, '').trim();
+      
+      // Log the final cleaned text to verify headers were converted
+      const htmlHeaderMatches = cleanedText.match(/<h2>[^<]+<\/h2>/gi);
+      console.log(`[SEO AGENT] After cleaning, found ${htmlHeaderMatches?.length || 0} HTML headers:`, htmlHeaderMatches);
       
       return cleanedText;
     }
