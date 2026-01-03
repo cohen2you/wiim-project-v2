@@ -4675,7 +4675,7 @@ export async function POST(request: Request) {
                   if (ratingValue && targetValue) {
                     const rating = ratingValue.charAt(0) + ratingValue.slice(1).toLowerCase();
                     const target = parseFloat(targetValue);
-                    const tickerUpper = data.symbol.toUpperCase();
+                    const tickerUpper = ticker.toUpperCase();
                     formattedSection += `The stock carries a <strong>${rating}</strong> Rating with an <a href="https://www.benzinga.com/quote/${tickerUpper}/analyst-ratings">average price target</a> of <strong>$${target.toFixed(2)}</strong>.`;
                   } else if (ratingValue) {
                     const rating = ratingValue.charAt(0) + ratingValue.slice(1).toLowerCase();
