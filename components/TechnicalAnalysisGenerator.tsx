@@ -82,6 +82,8 @@ const TechnicalAnalysisGenerator = forwardRef<TechnicalAnalysisGeneratorRef>((pr
   const [fetchingNews, setFetchingNews] = useState(false);
   const [addingNewsIndex, setAddingNewsIndex] = useState<number | null>(null);
   const [newsErrors, setNewsErrors] = useState<{ [key: number]: string | null }>({});
+  const [loadingEnrichedWGO, setLoadingEnrichedWGO] = useState(false);
+  const [enrichedWGOError, setEnrichedWGOError] = useState('');
 
   const analysisRefs = useRef<(HTMLDivElement | null)[]>([]);
 
@@ -315,6 +317,83 @@ const TechnicalAnalysisGenerator = forwardRef<TechnicalAnalysisGeneratorRef>((pr
   }));
 
 
+
+  const handleEnrichedWGOGeneration = async () => {
+    if (!tickers.trim()) {
+      setError('Please enter ticker(s) first.');
+      return;
+    }
+
+    setAnalyses([]);
+    setError('');
+    setLoadingEnrichedWGO(true);
+
+    try {
+      const tickerList = tickers.split(',').map(t => t.trim().toUpperCase());
+      const results: TechnicalAnalysisResult[] = [];
+
+      for (const ticker of tickerList) {
+        try {
+          // Step 1: Fetch context brief from external agent
+          console.log(`[ENRICHED WGO] ${ticker}: Fetching context brief from ${NEWS_AGENT_URL}/api/enrichment/context-brief`);
+          const contextRes = await fetch(`${NEWS_AGENT_URL}/api/enrichment/context-brief`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ticker })
+          });
+          
+          let contextBrief = null;
+          if (contextRes.ok) {
+            contextBrief = await contextRes.json();
+            console.log(`[ENRICHED WGO] ${ticker}: Successfully fetched context brief`);
+          }
+
+          // Step 2: Call WGO No News endpoint with context brief
+          const requestBody: any = { 
+            ticker, 
+            aiProvider: provider,
+            contextBriefs: contextBrief ? { [ticker]: contextBrief } : undefined
+          };
+
+          const res = await fetch('/api/generate/wgo-no-news', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(requestBody),
+          });
+
+          const data = await res.json();
+          if (!res.ok || !data.story) {
+            results.push({
+              ticker,
+              companyName: ticker,
+              error: data.error || 'Failed to generate enriched WGO story'
+            });
+            continue;
+          }
+
+          results.push({
+            ticker,
+            companyName: data.stockData?.priceAction?.companyName || ticker,
+            analysis: data.story
+          });
+        } catch (err: any) {
+          results.push({
+            ticker,
+            companyName: ticker,
+            error: err.message || 'Failed to generate enriched WGO story'
+          });
+        }
+      }
+
+      setAnalyses(results);
+    } catch (error: unknown) {
+      console.error('Error generating enriched WGO:', error);
+      if (error instanceof Error) setError(error.message);
+      else setError(String(error));
+    } finally {
+      setLoadingEnrichedWGO(false);
+    }
+  };
 
   async function generateTechnicalAnalysis() {
 
@@ -726,6 +805,39 @@ const TechnicalAnalysisGenerator = forwardRef<TechnicalAnalysisGeneratorRef>((pr
 
           WGO w/ News
 
+        </button>
+
+        <button
+          onClick={handleEnrichedWGOGeneration}
+          disabled={loadingEnrichedWGO || loading || !tickers.trim()}
+          style={{
+            padding: '12px 24px',
+            backgroundColor: loadingEnrichedWGO || loading || !tickers.trim() ? '#9ca3af' : '#059669',
+            color: 'white',
+            border: 'none',
+            borderRadius: '8px',
+            fontSize: '15px',
+            fontWeight: '600',
+            cursor: loadingEnrichedWGO || loading || !tickers.trim() ? 'not-allowed' : 'pointer',
+            transition: 'all 0.2s',
+            boxShadow: loadingEnrichedWGO || loading || !tickers.trim() ? 'none' : '0 2px 4px rgba(5, 150, 105, 0.3)'
+          }}
+          onMouseEnter={(e) => {
+            if (!loadingEnrichedWGO && !loading && tickers.trim()) {
+              e.currentTarget.style.backgroundColor = '#047857';
+              e.currentTarget.style.transform = 'translateY(-1px)';
+              e.currentTarget.style.boxShadow = '0 4px 8px rgba(5, 150, 105, 0.4)';
+            }
+          }}
+          onMouseLeave={(e) => {
+            if (!loadingEnrichedWGO && !loading && tickers.trim()) {
+              e.currentTarget.style.backgroundColor = '#059669';
+              e.currentTarget.style.transform = 'translateY(0)';
+              e.currentTarget.style.boxShadow = '0 2px 4px rgba(5, 150, 105, 0.3)';
+            }
+          }}
+        >
+          {loadingEnrichedWGO ? 'Enriching & Generating...' : 'Enriched No News WGO'}
         </button>
 
       </div>
