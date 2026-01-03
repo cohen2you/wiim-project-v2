@@ -1069,80 +1069,22 @@ CRITICAL: Use the EXACT firm names from the data above. Do NOT use [FIRM NAME] p
      }
 
            // Generate WGO No News story
-           // Check for major events from context brief
-           const majorEventDetected = contextBrief?.major_event_detected === true;
-           const contextSentiment = contextBrief?.sentiment || null;
-           const companyName = stockData.priceAction?.companyName || ticker;
-           
-           // Build lead paragraph instructions based on whether context brief is provided
-           let leadInstructions = '';
-           let catalystInstructions = '';
-           
-           if (contextBrief) {
-             // NARRATIVE-FIRST APPROACH: Use context as the "Main Character"
-             if (majorEventDetected) {
-               leadInstructions = `**ACT AS:** A senior market analyst writing for high-net-worth traders.
-
-**TASK:** Write a compelling 2-3 sentence Lead Paragraph that frames the current price movement in context of the major event or challenge facing ${companyName}.
-
-**CRITICAL NARRATIVE RULE - START WITH THE CONFLICT:**
-Do NOT start with "${companyName} stock is up/down X%." Instead, START WITH THE CONFLICT from the Context Dossier. Frame the price movement as a reaction to or reflection of that challenge.
-
-**INSTRUCTIONS:**
-1. **Sentence 1 (The Thesis/Conflict):** Open with the single biggest challenge, opportunity, or event from the Context Dossier (e.g., "As the AI war with Google intensifies..." or "Facing mounting pressure from [event]..."). Use company name with exchange (e.g., "${companyName} (NASDAQ:${tickerUpper})"). Then naturally incorporate the price movement (${stockData.priceAction?.changePercent >= 0 ? 'up' : 'down'} ${Math.abs(stockData.priceAction?.changePercent || 0).toFixed(1)}%) as a reaction to this context.
-
-2. **Sentence 2-3 (The Stakes):** Connect the price movement to the broader narrative. Rather than just stating the percentage, explain what it means in context of the challenge/opportunity. ${sectorPerformance ? `Compare to sector performance (${sectorPerformance.sectorChange.toFixed(1)}% ${sectorPerformance.sectorChange >= 0 ? 'gain' : 'loss'} in ${sectorPerformance.sectorName}) to show whether the stock is moving WITH or AGAINST broader trends.` : ''}
-
-**TONE:** Write like you're explaining a high-stakes situation to a sophisticated trader. Use phrases like "faces mounting pressure," "amidst [challenge]," "as investors weigh [event]." Create intrigue and urgency. Do NOT minimize or bury the major event - it is the central narrative.`;
-
-               catalystInstructions = `**CATALYST SECTION (after "## Section: The Catalyst" marker):**
-- Use the Context Dossier to explain WHY the stock is moving. What recent events, news, or developments are driving the price action?
-- Connect the price movement to specific events from the Context Dossier (e.g., "The move comes as [specific event from context]")
-- Explain whether the stock is moving WITH or AGAINST broader market trends
-- Mention sector performance in context of the narrative
-- DO NOT mention specific Moving Averages (SMAs), RSI numbers, MACD, or any technical indicators here
-- Keep to 2-3 sentences that synthesize context with price action`;
-             } else {
-               // No major event, but context exists - use it to create narrative tension
-               leadInstructions = `**ACT AS:** A senior market analyst writing for high-net-worth traders.
-
-**TASK:** Write a compelling 2-3 sentence Lead Paragraph that uses the Context Dossier to frame the price movement around the single biggest challenge or opportunity facing ${companyName}.
-
-**CRITICAL NARRATIVE RULE - START WITH THE THESIS:**
-Do NOT start with "${companyName} stock is up/down X%." Instead, START WITH THE CHALLENGE or OPPORTUNITY from the Context Dossier. Frame the price movement as a reflection of that dynamic.
-
-**INSTRUCTIONS:**
-1. **Sentence 1 (The Thesis):** Open with the single biggest challenge, opportunity, or competitive dynamic from the Context Dossier (e.g., "As ${companyName} battles for AI dominance..." or "With investors demanding proof that [strategy] is yielding results..."). Use company name with exchange (e.g., "${companyName} (NASDAQ:${tickerUpper})"). Then naturally incorporate the price movement (${stockData.priceAction?.changePercent >= 0 ? 'up' : 'down'} ${Math.abs(stockData.priceAction?.changePercent || 0).toFixed(1)}%) as a reflection of this dynamic.
-
-2. **Sentence 2-3 (The Context):** Synthesize the price movement into the narrative. ${sectorPerformance ? `Compare to sector performance (${sectorPerformance.sectorChange.toFixed(1)}% ${sectorPerformance.sectorChange >= 0 ? 'gain' : 'loss'} in ${sectorPerformance.sectorName}) to show whether the stock is outperforming or underperforming relative to its sector.` : ''} Connect the movement to the challenge/opportunity from the Context Dossier.
-
-**TONE:** Write like you're explaining a high-stakes situation to a sophisticated trader. Use phrases like "faces a critical test," "as investors weigh [challenge]," "amidst [competitive dynamic]." Create narrative tension around the challenge/opportunity.`;
-
-               catalystInstructions = `**CATALYST SECTION (after "## Section: The Catalyst" marker):**
-- Use the Context Dossier to explain the driving forces behind the price movement
-- Connect recent developments from the Context Dossier to the current price action
-- Explain whether the stock is moving WITH or AGAINST broader market trends
-- Mention sector performance in context of the narrative
-- DO NOT mention specific Moving Averages (SMAs), RSI numbers, MACD, or any technical indicators here
-- Keep to 2-3 sentences that synthesize context with price action`;
-             }
-           } else {
-             // STANDARD FLOW: No context brief provided
-             leadInstructions = `**LEAD PARAGRAPH (exactly 2 sentences):**
+           // Build lead paragraph instructions - use standard template for both enriched and regular flows
+           // STANDARD FLOW: Use standard template regardless of context brief (maintain enriched process structure)
+           const leadInstructions = `**LEAD PARAGRAPH (exactly 2 sentences):**
 - First sentence: Start with company name and ticker, describe actual price movement (up/down/unchanged) with time context
 - Second sentence: Brief context about sector correlation or market context - do NOT mention technical indicators here`;
 
-             catalystInstructions = `**CATALYST SECTION (after section marker):**
+           const catalystInstructions = `**CATALYST SECTION (after section marker):**
 - Focus ONLY on sector correlation, market context, and relative strength/weakness
 - Explain whether the stock is moving WITH or AGAINST broader market trends
 - Mention sector performance (e.g., "defying broad declines in the Technology sector")
 - DO NOT mention specific Moving Averages (SMAs), RSI numbers, MACD, or any technical indicators here
 - DO NOT mention 12-month performance, 52-week ranges, or specific price levels here
 - Keep to 1-2 sentences focused on market/sector correlation`;
-           }
            
              const prompt = `
-You are a financial journalist creating a WGO No News story for ${ticker}. ${contextBrief ? 'You have access to a Context Dossier with recent news and events that should inform your narrative.' : 'Focus on technical analysis and market data.'}
+You are a financial journalist creating a WGO No News story for ${ticker}. Focus on technical analysis and market data.
 
 CURRENT DATE: ${currentDateStr}
 CURRENT MARKET STATUS: ${marketStatus}
@@ -1151,10 +1093,10 @@ STOCK DATA:
 ${JSON.stringify(stockData, null, 2)}
 
 ${contextBrief ? `
-CONTEXT DOSSIER (USE THIS AS THE "MAIN CHARACTER" OF YOUR STORY):
+CONTEXT DOSSIER (optional reference - use standard template structure):
 ${JSON.stringify(contextBrief, null, 2)}
 
-CRITICAL: The Context Dossier contains recent news, events, and sentiment that should drive your narrative. Use it to explain WHY the stock is moving, not just that it is moving.
+NOTE: The Context Dossier contains recent news and events for context, but follow the standard template structure below.
 ` : ''}
 
 ${sectorPerformance ? `
