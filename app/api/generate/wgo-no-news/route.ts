@@ -1708,6 +1708,90 @@ Generate the basic technical story now.`;
         if (optimizedStory) {
           story = optimizedStory;
           console.log(`✅ [ENRICHED WGO] ${tickerUpper}: SEO subheads injected`);
+          
+          // Re-run critical post-processing after SEO injection to restore formatted content
+          // The SEO agent may have rewritten sections, so we need to re-format them
+          console.log(`[ENRICHED WGO] ${tickerUpper}: Re-running post-processing after SEO injection...`);
+          
+          // Re-run price action line replacement (SEO might have changed the format)
+          const priceActionCompanyName = stockData.priceAction?.companyName || ticker.toUpperCase();
+          const programmaticPriceAction = await generatePriceActionLine(ticker, priceActionCompanyName, stockData);
+          if (programmaticPriceAction) {
+            const priceActionPattern1 = /<strong>.*?Price Action:.*?<\/strong>.*?according to.*?Benzinga Pro.*?(?:data\.|\.)/is;
+            const priceActionPattern2 = /Price Action:.*?according to.*?Benzinga Pro(?: data)?\./is;
+            const priceActionPattern3 = /Price Action:.*?Benzinga Pro\./is;
+            
+            if (priceActionPattern1.test(story) || priceActionPattern2.test(story) || priceActionPattern3.test(story)) {
+              story = story.replace(priceActionPattern1, programmaticPriceAction);
+              story = story.replace(priceActionPattern2, programmaticPriceAction);
+              story = story.replace(priceActionPattern3, programmaticPriceAction);
+              console.log(`✅ [ENRICHED WGO] ${tickerUpper}: Re-applied programmatic price action line`);
+            } else {
+              // Try to find any price action line
+              const priceActionIndex = story.indexOf('Price Action:');
+              if (priceActionIndex !== -1) {
+                const afterPriceAction = story.substring(priceActionIndex);
+                const endMatch = afterPriceAction.match(/.*?\.(?=\s|$)/s);
+                if (endMatch) {
+                  const beforePriceAction = story.substring(0, priceActionIndex);
+                  const afterPriceActionLine = story.substring(priceActionIndex + endMatch[0].length);
+                  story = beforePriceAction + programmaticPriceAction + afterPriceActionLine;
+                  console.log(`✅ [ENRICHED WGO] ${tickerUpper}: Re-applied programmatic price action line (fallback)`);
+                }
+              }
+            }
+          }
+          
+          // Re-run earnings section formatting (look for various section markers after SEO)
+          const earningsSectionMarker = /(?:##\s*Section:\s*Earnings|Earnings.*Expectations|GM's Earnings|Upcoming Earnings|Investors are looking ahead to the.*next earnings report)/i;
+          const earningsSectionMatch = story.match(earningsSectionMarker);
+          if (earningsSectionMatch && earningsSectionMatch.index !== undefined && stockData.nextEarnings) {
+            // Find the earnings content section
+            const afterEarningsMarker = story.substring(earningsSectionMatch.index + earningsSectionMatch[0].length);
+            const nextSectionMatch = afterEarningsMarker.match(/(##\s*Section:|##\s*Top\s*ETF|Price Action:|Read Next:|<h2>|<h3>)/i);
+            const earningsSectionEnd = nextSectionMatch ? nextSectionMatch.index! : Math.min(afterEarningsMarker.length, 2000);
+            const earningsContent = afterEarningsMarker.substring(0, earningsSectionEnd).trim();
+            
+            // Check if it needs formatting (doesn't have structured format)
+            if (!earningsContent.includes('<ul>') && !earningsContent.includes('<strong>EPS Estimate</strong>')) {
+              // Re-format the earnings section with structured data
+              const lines: string[] = [];
+              const tickerUpperForEarnings = ticker.toUpperCase();
+              const intro = `Investors are looking ahead to the <a href="https://www.benzinga.com/quote/${tickerUpperForEarnings}/earnings">next earnings report</a> on ${formatEarningsDate(stockData.nextEarnings.date)}.`;
+              
+              if (stockData.nextEarnings.eps_estimate !== null && stockData.nextEarnings.eps_estimate !== undefined) {
+                const epsEst = parseFloat(stockData.nextEarnings.eps_estimate.toString());
+                const epsPrior = stockData.nextEarnings.eps_prior ? parseFloat(stockData.nextEarnings.eps_prior.toString()) : null;
+                const direction = epsPrior !== null ? (epsEst > epsPrior ? 'Up' : epsEst < epsPrior ? 'Down' : '') : '';
+                lines.push(`<strong>EPS Estimate</strong>: $${epsEst.toFixed(2)}${epsPrior !== null && direction ? ` (${direction} from $${epsPrior.toFixed(2)} YoY)` : ''}`);
+              }
+              
+              if (stockData.nextEarnings.revenue_estimate !== null && stockData.nextEarnings.revenue_estimate !== undefined) {
+                const revEstFormatted = formatRevenue(stockData.nextEarnings.revenue_estimate as string | number | null);
+                const revPriorFormatted = stockData.nextEarnings.revenue_prior ? formatRevenue(stockData.nextEarnings.revenue_prior as string | number | null) : null;
+                const revEstNum = typeof stockData.nextEarnings.revenue_estimate === 'string' ? parseFloat(stockData.nextEarnings.revenue_estimate) : stockData.nextEarnings.revenue_estimate;
+                const revPriorNum = stockData.nextEarnings.revenue_prior ? (typeof stockData.nextEarnings.revenue_prior === 'string' ? parseFloat(stockData.nextEarnings.revenue_prior) : stockData.nextEarnings.revenue_prior) : null;
+                const direction = revPriorNum !== null ? (revEstNum > revPriorNum ? 'Up' : revEstNum < revPriorNum ? 'Down' : '') : '';
+                lines.push(`<strong>Revenue Estimate</strong>: ${revEstFormatted}${revPriorFormatted && direction ? ` (${direction} from ${revPriorFormatted} YoY)` : ''}`);
+              }
+              
+              if (stockData.consensusRatings) {
+                const rating = stockData.consensusRatings.consensus_rating ? stockData.consensusRatings.consensus_rating.charAt(0) + stockData.consensusRatings.consensus_rating.slice(1).toLowerCase() : null;
+                const target = stockData.consensusRatings.consensus_price_target ? parseFloat(stockData.consensusRatings.consensus_price_target.toString()) : null;
+                if (rating && target) {
+                  lines.push(`<strong>Analyst Consensus</strong>: ${rating} Rating (<a href="https://www.benzinga.com/quote/${tickerUpperForEarnings}/analyst-ratings">$${target.toFixed(2)} Avg Price Target</a>)`);
+                }
+              }
+              
+              if (lines.length > 0) {
+                const formattedSection = `${intro}\n\n<ul>\n${lines.map(l => `  <li>${l}</li>`).join('\n')}\n</ul>`;
+                const beforeEarnings = story.substring(0, earningsSectionMatch.index + earningsSectionMatch[0].length);
+                const afterEarnings = story.substring(earningsSectionMatch.index + earningsSectionMatch[0].length + earningsSectionEnd);
+                story = `${beforeEarnings}\n\n${formattedSection}\n\n${afterEarnings}`;
+                console.log(`✅ [ENRICHED WGO] ${tickerUpper}: Re-formatted earnings section after SEO injection`);
+              }
+            }
+          }
         }
       } catch (error) {
         console.error(`[ENRICHED WGO] ${tickerUpper}: Error injecting SEO subheads:`, error);
