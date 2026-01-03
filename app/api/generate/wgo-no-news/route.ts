@@ -1607,8 +1607,8 @@ Generate the basic technical story now.`;
     }
 
     // Generate and replace price action line with programmatically generated one
-    const companyName = stockData.priceAction?.companyName || ticker.toUpperCase();
-    const programmaticPriceAction = await generatePriceActionLine(ticker, companyName, stockData);
+    const priceActionCompanyName = stockData.priceAction?.companyName || ticker.toUpperCase();
+    const programmaticPriceAction = await generatePriceActionLine(ticker, priceActionCompanyName, stockData);
     
     if (programmaticPriceAction) {
       // Find and replace the AI-generated price action line
