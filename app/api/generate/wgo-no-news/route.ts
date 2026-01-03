@@ -1071,8 +1071,27 @@ CRITICAL: Use the EXACT firm names from the data above. Do NOT use [FIRM NAME] p
            // Generate WGO No News story
            // Build lead paragraph instructions - use standard template for both enriched and regular flows
            // STANDARD FLOW: Use standard template regardless of context brief (maintain enriched process structure)
+           const dailyChangePercent = stockData.priceAction?.changePercent || 0;
+           
+           // Narrative Logic Block for Lead Paragraph
+           let narrativeGuidance = '';
+           if (dailyChangePercent > 2) {
+             narrativeGuidance = 'Use words like "Surge," "Rally," "Jump." Focus the lead on today\'s action.';
+           } else if (dailyChangePercent < -2) {
+             narrativeGuidance = 'Use words like "Slide," "Pullback," "Drop."';
+           } else if (dailyChangePercent >= -1 && dailyChangePercent <= 1) {
+             narrativeGuidance = 'Use words like "Consolidates," "Holds Steady," "Flat." If the weekly performance is high, frame the narrative as: "[Company] takes a breather, holding onto gains after a massive weekly rally."';
+           } else {
+             narrativeGuidance = 'Describe the price movement accurately based on the percentage change.';
+           }
+           
            const leadInstructions = `**LEAD PARAGRAPH (exactly 2 sentences):**
-- First sentence: Start with company name and ticker, describe actual price movement (up/down/unchanged) with time context
+
+LEAD PARAGRAPH LOGIC: Check the daily_change_percent variable (${dailyChangePercent.toFixed(2)}%) before writing.
+
+${narrativeGuidance}
+
+- First sentence: Start with company name and ticker, describe actual price movement (up/down/unchanged) with time context using the appropriate narrative language above
 - Second sentence: Brief context about sector correlation or market context - do NOT mention technical indicators here`;
 
            const catalystInstructions = `**CATALYST SECTION (after section marker):**
@@ -1106,6 +1125,19 @@ ${stockData.priceAction?.companyName || ticker} stock is ${stockData.priceAction
 CRITICAL: This comparison line should appear immediately after the headline and before the main story content. Use this exact format.
 ` : ''}
 
+MANDATORY DATA RULES:
+
+No Generic Summaries: Never write "technical indicators are bullish" without citing the specific number.
+
+Bad: "The RSI suggests the stock is overbought."
+Good: "With an RSI of 67.18, the stock is approaching overbought territory."
+
+Show the Spread: When reporting Moving Averages, you MUST state the percentage difference.
+
+Requirement: "Trading 19.8% above the 20-day SMA."
+
+If Data is Missing: If a specific field (like MACD) is null or undefined in the input, do NOT write "The data is not available." Simply omit that sentence entirely.
+
 CRITICAL INSTRUCTIONS:
 
 1. HEADLINE: Use format "[Company] Stock Is Trending ${currentDayName}: What's Going On?" (on its own line, no bold formatting)
@@ -1123,9 +1155,9 @@ CRITICAL INSTRUCTIONS:
 7. TECHNICAL ANALYSIS SECTION (simplified structure):
 Write exactly 3 paragraphs for technical analysis:
 
-TECHNICAL ANALYSIS PARAGRAPH 1 (MOVING AVERAGES, 12-MONTH PERFORMANCE, 52-WEEK RANGE): Write a single paragraph that combines: (1) Stock position relative to 20-day and 100-day SMAs with exact percentages if available (e.g., "Apple stock is currently trading 2.3% below its 20-day simple moving average (SMA), but is X% above its 100-day SMA, demonstrating longer-term strength"), (2) 12-month performance if available (e.g., "Shares have increased/decreased X% over the past 12 months"), and (3) 52-week range position (e.g., "and are currently positioned closer to their 52-week highs than lows" or "closer to their 52-week lows than highs" - DO NOT include a percentage, just use qualitative positioning). If specific technical data is not available in the stock data, use general language about the stock's technical position. Keep this to 2-3 sentences maximum.
+TECHNICAL ANALYSIS PARAGRAPH 1 (MOVING AVERAGES, 12-MONTH PERFORMANCE, 52-WEEK RANGE): Write a single paragraph that combines: (1) Stock position relative to 20-day and 100-day SMAs with exact percentages if available (e.g., "Apple stock is currently trading 2.3% below its 20-day simple moving average (SMA), but is 19.8% above its 100-day SMA, demonstrating longer-term strength"). YOU MUST state the percentage difference when reporting Moving Averages. (2) 12-month performance if available (e.g., "Shares have increased/decreased X% over the past 12 months"), and (3) 52-week range position (e.g., "and are currently positioned closer to their 52-week highs than lows" or "closer to their 52-week lows than highs" - DO NOT include a percentage, just use qualitative positioning). If specific technical data is not available in the stock data, omit that sentence entirely - do NOT write "The data is not available." Keep this to 2-3 sentences maximum.
 
-TECHNICAL ANALYSIS PARAGRAPH 2 (RSI AND MACD): Write a single paragraph that combines: (1) RSI level and interpretation if available. CRITICAL RSI INTERPRETATION: RSI below 30 = oversold/bearish, RSI 30-45 = bearish, RSI 45-55 = neutral, RSI 55-70 = bullish momentum, RSI above 70 = overbought. Use accurate interpretations (e.g., "The RSI is at 62.41, signaling bullish momentum that still has room to run before hitting overbought territory"), and (2) MACD status if available (e.g., "Meanwhile, MACD is above its signal line, suggesting bullish conditions" or "MACD is below its signal line, indicating bearish pressure"). If specific indicator data is not available, use general language about momentum indicators. Keep this to 2 sentences maximum.
+TECHNICAL ANALYSIS PARAGRAPH 2 (RSI AND MACD): Write a single paragraph that combines: (1) RSI level and interpretation if available. CRITICAL RSI INTERPRETATION: RSI below 30 = oversold/bearish, RSI 30-45 = bearish, RSI 45-55 = neutral, RSI 55-70 = bullish momentum, RSI above 70 = overbought. Use accurate interpretations with the specific number (e.g., "With an RSI of 67.18, the stock is approaching overbought territory" or "The RSI is at 62.41, signaling bullish momentum that still has room to run before hitting overbought territory"). (2) MACD status if available (e.g., "Meanwhile, MACD is above its signal line, suggesting bullish conditions" or "MACD is below its signal line, indicating bearish pressure"). If specific indicator data is not available (null or undefined), omit that sentence entirely - do NOT write "The data is not available." Keep this to 2 sentences maximum.
 
 TECHNICAL ANALYSIS PARAGRAPH 3 (RSI/MACD SUMMARY): Write a single sentence that summarizes the RSI and MACD signals using accurate RSI interpretations (e.g., "The combination of bullish RSI and bullish MACD confirms strong upward momentum" or "The combination of neutral RSI and bearish MACD suggests mixed momentum"). Keep this to 1 sentence maximum. STOP AFTER THIS PARAGRAPH.
 
@@ -1139,6 +1171,16 @@ These should be clearly labeled, rounded to the nearest $0.50, and formatted as 
 ${stockData.consensusRatings || stockData.nextEarnings ? `
 5. EARNINGS AND ANALYST OUTLOOK SECTION (forward-looking):
 After the technical analysis section, include a forward-looking section that anticipates the upcoming earnings report and provides analyst outlook. This section should help investors understand both the stock's value proposition and how analysts view it.
+
+ANALYST REPORTING RULES:
+
+Name Names: You must list the specific firms and their price targets if provided in the data.
+
+Structure: "[Firm Name] reiterated a [Rating] with a [Price Target]."
+
+Deduplicate Logic: If the data lists the same firm twice, ONLY report the most recent rating/target.
+
+Contextualize: If the average price target is lower than the current price, explicitly state that the stock is "trading at a premium to analyst expectations."
 
 CRITICAL INSTRUCTIONS FOR THIS SECTION:
 - Start with a brief introductory sentence (1 sentence max) about the earnings date
