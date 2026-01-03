@@ -366,6 +366,7 @@ const TechnicalAnalysisGenerator = forwardRef<TechnicalAnalysisGeneratorRef>((pr
             results.push({
               ticker,
               companyName: ticker,
+              analysis: '',
               error: data.error || 'Failed to generate enriched WGO story'
             });
             continue;
@@ -380,6 +381,7 @@ const TechnicalAnalysisGenerator = forwardRef<TechnicalAnalysisGeneratorRef>((pr
           results.push({
             ticker,
             companyName: ticker,
+            analysis: '',
             error: err.message || 'Failed to generate enriched WGO story'
           });
         }
