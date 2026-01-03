@@ -80,6 +80,8 @@ const TechnicalAnalysisGenerator = forwardRef<TechnicalAnalysisGeneratorRef>((pr
   const [newsArticles, setNewsArticles] = useState<any[]>([]);
   const [selectedNewsArticles, setSelectedNewsArticles] = useState<Set<string>>(new Set());
   const [fetchingNews, setFetchingNews] = useState(false);
+  const [addingNewsIndex, setAddingNewsIndex] = useState<number | null>(null);
+  const [newsErrors, setNewsErrors] = useState<{ [key: number]: string | null }>({});
 
   const analysisRefs = useRef<(HTMLDivElement | null)[]>([]);
 
@@ -96,6 +98,134 @@ const TechnicalAnalysisGenerator = forwardRef<TechnicalAnalysisGeneratorRef>((pr
     setAnalyses(prev => prev.map((analysis, i) => 
       i === index ? { ...analysis, analysis: newText } : analysis
     ));
+  };
+
+  // Function to add Benzinga news to an article
+  const handleAddBenzingaNews = async (index: number) => {
+    const analysis = analyses[index];
+    if (!analysis || !analysis.analysis || analysis.error) {
+      setNewsErrors(prev => ({ ...prev, [index]: 'No article available to add news to' }));
+      return;
+    }
+
+    setAddingNewsIndex(index);
+    setNewsErrors(prev => ({ ...prev, [index]: null }));
+
+    try {
+      const response = await fetch(`${NEWS_AGENT_URL}/api/enrichment/add-news`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          ticker: analysis.ticker.toUpperCase(),
+          articleText: analysis.analysis,
+          storyType: 'wgo'
+        })
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => '');
+        throw new Error(`HTTP ${response.status}: ${response.statusText}${errorText ? `. ${errorText.substring(0, 200)}` : ''}`);
+      }
+
+      const data = await response.json();
+
+      if (data.success && data.newsSection) {
+        // Ensure the section has the correct header (format: ## Recent Developments & Catalysts)
+        let newsSection = data.newsSection.trim();
+        
+        // Replace existing headers with our desired header
+        newsSection = newsSection.replace(
+          /##\s*(Section:\s*)?(Latest News on Stock|Recent Developments & Catalysts)/gi,
+          '## Recent Developments & Catalysts'
+        );
+        
+        // If the header doesn't exist at the start, add it
+        if (!newsSection.startsWith('## Recent Developments & Catalysts')) {
+          // Remove any existing markdown H2 header at the start
+          newsSection = newsSection.replace(/^##\s*(Section:\s*)?.+\n?/m, '');
+          // Add our header at the beginning
+          newsSection = '## Recent Developments & Catalysts\n\n' + newsSection.trim();
+        }
+        
+        // Insert the news section after "The Catalyst" section and before "Technical Analysis"
+        let updatedArticle = analysis.analysis;
+        
+        // Check if "Recent Developments & Catalysts" already exists and replace it
+        const existingNewsSectionMarker = /##\s*Recent Developments & Catalysts[\s\S]*?(?=\n##\s*|<h2>|Read Next:|$)/i;
+        if (existingNewsSectionMarker.test(updatedArticle)) {
+          updatedArticle = updatedArticle.replace(existingNewsSectionMarker, newsSection);
+        } else {
+          // Find the position to insert: after "The Catalyst" section, before "Technical Analysis"
+          let insertionPoint = -1;
+          let match: RegExpMatchArray | null = null;
+          
+          // Pattern 1: Look for section marker "## Section: Technical Analysis"
+          const technicalAnalysisMarker = /##\s*Section:\s*Technical Analysis/i;
+          match = updatedArticle.match(technicalAnalysisMarker);
+          if (match && match.index !== undefined) {
+            insertionPoint = match.index;
+          } else {
+            // Pattern 2: Look for SEO-optimized HTML heading with "Technical" in it
+            const technicalHeadingHTMLPattern = /<h2>\s*[^<]*(?:Technical|Analysis)[^<]*\s*<\/h2>/i;
+            match = updatedArticle.match(technicalHeadingHTMLPattern);
+            if (match && match.index !== undefined) {
+              insertionPoint = match.index;
+            } else {
+              // Pattern 3: Look for markdown heading with "Technical"
+              const technicalHeadingMarkdownPattern = /^##\s+[^\n]*(?:Technical|Analysis)[^\n]*$/m;
+              match = updatedArticle.match(technicalHeadingMarkdownPattern);
+              if (match && match.index !== undefined) {
+                insertionPoint = match.index;
+              }
+            }
+          }
+          
+          if (insertionPoint !== -1 && insertionPoint > 0) {
+            // Insert news section before the technical analysis section
+            const beforeTechnical = updatedArticle.substring(0, insertionPoint).trim();
+            const afterTechnical = updatedArticle.substring(insertionPoint);
+            updatedArticle = beforeTechnical + '\n\n' + newsSection + '\n\n' + afterTechnical;
+          } else {
+            // Fallback: try to find "The Catalyst" section and insert after it
+            const catalystMarker = /(##\s*Section:\s*The Catalyst[\s\S]*?)(?=\n##\s*Section:|$)/i;
+            if (catalystMarker.test(updatedArticle)) {
+              updatedArticle = updatedArticle.replace(
+                catalystMarker,
+                `$1\n\n${newsSection}\n\n`
+              );
+            } else {
+              // Last resort: append before "Read Next" or at the end
+              const readNextMarker = /\n\nRead Next:/i;
+              const readNextMatch = updatedArticle.match(readNextMarker);
+              if (readNextMatch && readNextMatch.index !== undefined) {
+                const beforeReadNext = updatedArticle.substring(0, readNextMatch.index).trim();
+                const afterReadNext = updatedArticle.substring(readNextMatch.index + 2);
+                updatedArticle = beforeReadNext + '\n\n' + newsSection + '\n\n' + afterReadNext;
+              } else {
+                // Final fallback: append at end
+                updatedArticle = updatedArticle + '\n\n' + newsSection;
+              }
+            }
+          }
+        }
+        
+        updateAnalysisText(index, updatedArticle);
+        setNewsErrors(prev => ({ ...prev, [index]: null }));
+      } else {
+        throw new Error(data.error || 'Failed to add news section');
+      }
+    } catch (error) {
+      console.error('Error calling enrichment API:', error);
+      if (error instanceof Error) {
+        setNewsErrors(prev => ({ ...prev, [index]: `Failed to add news: ${error.message}` }));
+      } else {
+        setNewsErrors(prev => ({ ...prev, [index]: 'Failed to add news. Check browser console for details.' }));
+      }
+    } finally {
+      setAddingNewsIndex(null);
+    }
   };
 
 
@@ -969,6 +1099,38 @@ const TechnicalAnalysisGenerator = forwardRef<TechnicalAnalysisGeneratorRef>((pr
 
                 <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'flex-start', gap: '8px', marginBottom: '16px', userSelect: 'none', WebkitUserSelect: 'none', MozUserSelect: 'none', msUserSelect: 'none' }}>
 
+                  <button
+                    onClick={() => handleAddBenzingaNews(i)}
+                    disabled={addingNewsIndex === i || !analysis.analysis || !!analysis.error}
+                    style={{
+                      padding: '8px 16px',
+                      backgroundColor: addingNewsIndex === i || !analysis.analysis || !!analysis.error ? '#9ca3af' : '#6366f1',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '6px',
+                      fontSize: '13px',
+                      fontWeight: '500',
+                      cursor: addingNewsIndex === i || !analysis.analysis || !!analysis.error ? 'not-allowed' : 'pointer',
+                      transition: 'all 0.2s',
+                      userSelect: 'none',
+                      WebkitUserSelect: 'none',
+                      MozUserSelect: 'none',
+                      msUserSelect: 'none'
+                    }}
+                    onMouseEnter={(e) => {
+                      if (addingNewsIndex !== i && analysis.analysis && !analysis.error) {
+                        e.currentTarget.style.backgroundColor = '#4f46e5';
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      if (addingNewsIndex !== i && analysis.analysis && !analysis.error) {
+                        e.currentTarget.style.backgroundColor = '#6366f1';
+                      }
+                    }}
+                  >
+                    {addingNewsIndex === i ? 'Adding News...' : 'Add Benzinga News'}
+                  </button>
+
                   <AddSubheadsButton
                     articleText={analysis.analysis}
                     onArticleUpdate={(newText) => updateAnalysisText(i, newText)}
@@ -1014,6 +1176,17 @@ const TechnicalAnalysisGenerator = forwardRef<TechnicalAnalysisGeneratorRef>((pr
                   </button>
 
                 </div>
+                {newsErrors[i] && (
+                  <div style={{
+                    padding: '8px 12px',
+                    backgroundColor: '#fef2f2',
+                    border: '1px solid #fecaca',
+                    borderRadius: '6px',
+                    marginBottom: '12px'
+                  }}>
+                    <p style={{ color: '#dc2626', fontSize: '12px', margin: 0 }}>{newsErrors[i]}</p>
+                  </div>
+                )}
 
 
 

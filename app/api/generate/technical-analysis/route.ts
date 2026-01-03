@@ -4505,7 +4505,7 @@ export async function POST(request: Request) {
               let priceTargetNote = '';
               
               // Extract intro sentence with hyperlink
-              const tickerUpper = data.symbol.toUpperCase();
+              const tickerUpper = ticker.toUpperCase();
               if (earningsDateMatch && earningsDateMatch[1]) {
                 intro = `Investors are looking ahead to the <a href="https://www.benzinga.com/quote/${tickerUpper}/earnings">next earnings report</a> on ${earningsDateMatch[1].trim()}.`;
               } else {
