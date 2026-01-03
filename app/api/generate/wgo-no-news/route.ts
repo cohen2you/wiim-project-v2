@@ -1171,9 +1171,9 @@ Write exactly 3 paragraphs for technical analysis:
 
 TECHNICAL ANALYSIS PARAGRAPH 1 (MOVING AVERAGES, 12-MONTH PERFORMANCE, 52-WEEK RANGE): Write a single paragraph that combines: (1) Stock position relative to 20-day and 100-day SMAs with exact percentages if available (e.g., "Apple stock is currently trading 2.3% below its 20-day simple moving average (SMA), but is 19.8% above its 100-day SMA, demonstrating longer-term strength"). YOU MUST state the percentage difference when reporting Moving Averages. (2) 12-month performance if available (e.g., "Shares have increased/decreased X% over the past 12 months"), and (3) 52-week range position (e.g., "and are currently positioned closer to their 52-week highs than lows" or "closer to their 52-week lows than highs" - DO NOT include a percentage, just use qualitative positioning). If specific technical data is not available in the stock data, omit that sentence entirely - do NOT write "The data is not available." Keep this to 2-3 sentences maximum.
 
-TECHNICAL ANALYSIS PARAGRAPH 2 (RSI AND MACD): Write a single paragraph that combines: (1) RSI level and interpretation if available. CRITICAL RSI INTERPRETATION: RSI below 30 = oversold/bearish, RSI 30-45 = bearish, RSI 45-55 = neutral, RSI 55-70 = bullish momentum, RSI above 70 = overbought. Use accurate interpretations with the specific number (e.g., "With an RSI of 67.18, the stock is approaching overbought territory" or "The RSI is at 62.41, signaling bullish momentum that still has room to run before hitting overbought territory"). (2) MACD status if available (e.g., "Meanwhile, MACD is above its signal line, suggesting bullish conditions" or "MACD is below its signal line, indicating bearish pressure"). If specific indicator data is not available (null or undefined), omit that sentence entirely - do NOT write "The data is not available." Keep this to 2 sentences maximum.
+TECHNICAL ANALYSIS PARAGRAPH 2 (RSI AND MACD): Write a single paragraph that combines: (1) RSI level and interpretation if available. CRITICAL RSI INTERPRETATION: RSI below 30 = oversold/bearish, RSI 30-45 = bearish, RSI 45-55 = neutral, RSI 55-70 = bullish momentum, RSI above 70 = overbought. Use accurate interpretations with the specific number (e.g., "With an RSI of 67.18, the stock is approaching overbought territory" or "The RSI is at 62.41, signaling bullish momentum that still has room to run before hitting overbought territory"). (2) MACD status if available (e.g., "Meanwhile, MACD is above its signal line, suggesting bullish conditions" or "MACD is below its signal line, indicating bearish pressure"). **CRITICAL: If RSI data is NOT available (null or undefined), DO NOT mention RSI at all. If MACD data is NOT available (null or undefined), DO NOT mention MACD at all. If BOTH are missing, skip this entire paragraph entirely. DO NOT write phrases like "not available", "cannot assess", "cannot comment", or "data is not provided". Simply omit any mention of missing indicators completely.** Keep this to 2 sentences maximum if data is available, or omit the paragraph entirely if no data.
 
-TECHNICAL ANALYSIS PARAGRAPH 3 (RSI/MACD SUMMARY): Write a single sentence that summarizes the RSI and MACD signals using accurate RSI interpretations (e.g., "The combination of bullish RSI and bullish MACD confirms strong upward momentum" or "The combination of neutral RSI and bearish MACD suggests mixed momentum"). Keep this to 1 sentence maximum. STOP AFTER THIS PARAGRAPH.
+TECHNICAL ANALYSIS PARAGRAPH 3 (RSI/MACD SUMMARY): **ONLY write this paragraph if you wrote paragraph 2 AND it contained RSI and/or MACD data.** Write a single sentence that summarizes the RSI and MACD signals using accurate RSI interpretations (e.g., "The combination of bullish RSI and bullish MACD confirms strong upward momentum" or "The combination of neutral RSI and bearish MACD suggests mixed momentum"). **If paragraph 2 was omitted (no RSI/MACD data available), then OMIT this paragraph 3 entirely as well.** Keep this to 1 sentence maximum. STOP AFTER THIS PARAGRAPH.
 
 KEY LEVELS (MANDATORY): After paragraph 3, you MUST extract and display the key support and resistance levels in a clear, scannable format. Format as bullet points using HTML <ul> and <li> tags:
 <ul>
@@ -1183,8 +1183,10 @@ KEY LEVELS (MANDATORY): After paragraph 3, you MUST extract and display the key 
 These should be clearly labeled, rounded to the nearest $0.50, and formatted as bullet points. This format helps with SEO and Featured Snippets.
 
 ${stockData.consensusRatings || stockData.nextEarnings ? `
-5. EARNINGS AND ANALYST OUTLOOK SECTION (forward-looking):
-After the technical analysis section, include a forward-looking section that anticipates the upcoming earnings report and provides analyst outlook. This section should help investors understand both the stock's value proposition and how analysts view it.
+5. SECTION MARKER: After the technical analysis section, insert "## Section: Earnings & Analyst Outlook" on its own line.
+
+6. EARNINGS AND ANALYST OUTLOOK SECTION (forward-looking):
+After the section marker, include a forward-looking section that anticipates the upcoming earnings report and provides analyst outlook. This section should help investors understand both the stock's value proposition and how analysts view it.
 
 ANALYST REPORTING RULES:
 
@@ -1715,97 +1717,14 @@ Generate the basic technical story now.`;
     }
 
     // If contextBrief was provided (Enrich First mode), automatically inject SEO subheads
+    // SEO injection is the FINAL STEP - no post-processing after this (matches Earnings Preview approach)
     if (contextBrief && backendUrl) {
       try {
-        console.log(`[ENRICHED WGO] ${tickerUpper}: Injecting SEO subheads...`);
+        console.log(`[ENRICHED WGO] ${tickerUpper}: Injecting SEO subheads (final step)...`);
         const optimizedStory = await injectSEOSubheads(story, backendUrl);
         if (optimizedStory) {
           story = optimizedStory;
-          console.log(`✅ [ENRICHED WGO] ${tickerUpper}: SEO subheads injected`);
-          
-          // Re-run critical post-processing after SEO injection to restore formatted content
-          // The SEO agent may have rewritten sections, so we need to re-format them
-          console.log(`[ENRICHED WGO] ${tickerUpper}: Re-running post-processing after SEO injection...`);
-          
-          // Re-run price action line replacement (SEO might have changed the format)
-          const priceActionCompanyName = stockData.priceAction?.companyName || ticker.toUpperCase();
-          const programmaticPriceAction = await generatePriceActionLine(ticker, priceActionCompanyName, stockData);
-          if (programmaticPriceAction) {
-            const priceActionPattern1 = /<strong>.*?Price Action:.*?<\/strong>.*?according to.*?Benzinga Pro.*?(?:data\.|\.)/is;
-            const priceActionPattern2 = /Price Action:.*?according to.*?Benzinga Pro(?: data)?\./is;
-            const priceActionPattern3 = /Price Action:.*?Benzinga Pro\./is;
-            
-            if (priceActionPattern1.test(story) || priceActionPattern2.test(story) || priceActionPattern3.test(story)) {
-              story = story.replace(priceActionPattern1, programmaticPriceAction);
-              story = story.replace(priceActionPattern2, programmaticPriceAction);
-              story = story.replace(priceActionPattern3, programmaticPriceAction);
-              console.log(`✅ [ENRICHED WGO] ${tickerUpper}: Re-applied programmatic price action line`);
-            } else {
-              // Try to find any price action line
-              const priceActionIndex = story.indexOf('Price Action:');
-              if (priceActionIndex !== -1) {
-                const afterPriceAction = story.substring(priceActionIndex);
-                const endMatch = afterPriceAction.match(/.*?\.(?=\s|$)/s);
-                if (endMatch) {
-                  const beforePriceAction = story.substring(0, priceActionIndex);
-                  const afterPriceActionLine = story.substring(priceActionIndex + endMatch[0].length);
-                  story = beforePriceAction + programmaticPriceAction + afterPriceActionLine;
-                  console.log(`✅ [ENRICHED WGO] ${tickerUpper}: Re-applied programmatic price action line (fallback)`);
-                }
-              }
-            }
-          }
-          
-          // Re-run earnings section formatting (look for various section markers after SEO)
-          const earningsSectionMarker = /(?:##\s*Section:\s*Earnings|Earnings.*Expectations|GM's Earnings|Upcoming Earnings|Investors are looking ahead to the.*next earnings report)/i;
-          const earningsSectionMatch = story.match(earningsSectionMarker);
-          if (earningsSectionMatch && earningsSectionMatch.index !== undefined && stockData.nextEarnings) {
-            // Find the earnings content section
-            const afterEarningsMarker = story.substring(earningsSectionMatch.index + earningsSectionMatch[0].length);
-            const nextSectionMatch = afterEarningsMarker.match(/(##\s*Section:|##\s*Top\s*ETF|Price Action:|Read Next:|<h2>|<h3>)/i);
-            const earningsSectionEnd = nextSectionMatch ? nextSectionMatch.index! : Math.min(afterEarningsMarker.length, 2000);
-            const earningsContent = afterEarningsMarker.substring(0, earningsSectionEnd).trim();
-            
-            // Check if it needs formatting (doesn't have structured format)
-            if (!earningsContent.includes('<ul>') && !earningsContent.includes('<strong>EPS Estimate</strong>')) {
-              // Re-format the earnings section with structured data
-              const lines: string[] = [];
-              const tickerUpperForEarnings = ticker.toUpperCase();
-              const intro = `Investors are looking ahead to the <a href="https://www.benzinga.com/quote/${tickerUpperForEarnings}/earnings">next earnings report</a> on ${formatEarningsDate(stockData.nextEarnings.date)}.`;
-              
-              if (stockData.nextEarnings.eps_estimate !== null && stockData.nextEarnings.eps_estimate !== undefined) {
-                const epsEst = parseFloat(stockData.nextEarnings.eps_estimate.toString());
-                const epsPrior = stockData.nextEarnings.eps_prior ? parseFloat(stockData.nextEarnings.eps_prior.toString()) : null;
-                const direction = epsPrior !== null ? (epsEst > epsPrior ? 'Up' : epsEst < epsPrior ? 'Down' : '') : '';
-                lines.push(`<strong>EPS Estimate</strong>: $${epsEst.toFixed(2)}${epsPrior !== null && direction ? ` (${direction} from $${epsPrior.toFixed(2)} YoY)` : ''}`);
-              }
-              
-              if (stockData.nextEarnings.revenue_estimate !== null && stockData.nextEarnings.revenue_estimate !== undefined) {
-                const revEstFormatted = formatRevenue(stockData.nextEarnings.revenue_estimate as string | number | null);
-                const revPriorFormatted = stockData.nextEarnings.revenue_prior ? formatRevenue(stockData.nextEarnings.revenue_prior as string | number | null) : null;
-                const revEstNum = typeof stockData.nextEarnings.revenue_estimate === 'string' ? parseFloat(stockData.nextEarnings.revenue_estimate) : stockData.nextEarnings.revenue_estimate;
-                const revPriorNum = stockData.nextEarnings.revenue_prior ? (typeof stockData.nextEarnings.revenue_prior === 'string' ? parseFloat(stockData.nextEarnings.revenue_prior) : stockData.nextEarnings.revenue_prior) : null;
-                const direction = revPriorNum !== null ? (revEstNum > revPriorNum ? 'Up' : revEstNum < revPriorNum ? 'Down' : '') : '';
-                lines.push(`<strong>Revenue Estimate</strong>: ${revEstFormatted}${revPriorFormatted && direction ? ` (${direction} from ${revPriorFormatted} YoY)` : ''}`);
-              }
-              
-              if (stockData.consensusRatings) {
-                const rating = stockData.consensusRatings.consensus_rating ? stockData.consensusRatings.consensus_rating.charAt(0) + stockData.consensusRatings.consensus_rating.slice(1).toLowerCase() : null;
-                const target = stockData.consensusRatings.consensus_price_target ? parseFloat(stockData.consensusRatings.consensus_price_target.toString()) : null;
-                if (rating && target) {
-                  lines.push(`<strong>Analyst Consensus</strong>: ${rating} Rating (<a href="https://www.benzinga.com/quote/${tickerUpperForEarnings}/analyst-ratings">$${target.toFixed(2)} Avg Price Target</a>)`);
-                }
-              }
-              
-              if (lines.length > 0) {
-                const formattedSection = `${intro}\n\n<ul>\n${lines.map(l => `  <li>${l}</li>`).join('\n')}\n</ul>`;
-                const beforeEarnings = story.substring(0, earningsSectionMatch.index + earningsSectionMatch[0].length);
-                const afterEarnings = story.substring(earningsSectionMatch.index + earningsSectionMatch[0].length + earningsSectionEnd);
-                story = `${beforeEarnings}\n\n${formattedSection}\n\n${afterEarnings}`;
-                console.log(`✅ [ENRICHED WGO] ${tickerUpper}: Re-formatted earnings section after SEO injection`);
-              }
-            }
-          }
+          console.log(`✅ [ENRICHED WGO] ${tickerUpper}: SEO subheads injected successfully (final step)`);
         }
       } catch (error) {
         console.error(`[ENRICHED WGO] ${tickerUpper}: Error injecting SEO subheads:`, error);
