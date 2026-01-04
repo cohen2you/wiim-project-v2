@@ -4,6 +4,7 @@ import { aiProvider, AIProvider } from '@/lib/aiProvider';
 import { fetchETFs, formatETFInfo } from '@/lib/etf-utils';
 
 const BZ_NEWS_URL = 'https://api.benzinga.com/api/v2/news';
+const BENZINGA_EDGE_API_KEY = process.env.BENZINGA_EDGE_API_KEY;
 
 
 
@@ -191,6 +192,7 @@ async function generatePriceAction(ticker: string): Promise<string> {
     const currentDayName = formatter.format(now);
     // If it's a weekend, return Friday as the last trading day
     const dayOfWeek = (currentDayName === 'Sunday' || currentDayName === 'Saturday') ? 'Friday' : currentDayName;
+    const isWeekend = currentDayName === 'Sunday' || currentDayName === 'Saturday';
     
     let marketStatusPhrase = '';
     if (marketStatus === 'premarket') {
@@ -198,7 +200,8 @@ async function generatePriceAction(ticker: string): Promise<string> {
     } else if (marketStatus === 'afterhours') {
       marketStatusPhrase = ' during after-hours trading';
     } else if (marketStatus === 'closed') {
-      marketStatusPhrase = ' while the market was closed';
+      // On weekends, don't include "while the market was closed" phrase
+      marketStatusPhrase = isWeekend ? '' : ' while the market was closed';
     }
     
     // ALWAYS calculate regular session change from close vs previousClosePrice (matches main article calculation)
@@ -288,7 +291,9 @@ async function generatePriceAction(ticker: string): Promise<string> {
     
     // Build simple 1-sentence price action: Current Price, % Change (no volume)
     // Note: dayOfWeek and marketStatusPhrase are already calculated earlier in the function
-    return `<strong>${symbol} Price Action:</strong> ${companyName} shares were ${upDown} ${absChange}% at $${formattedPrice}${marketStatusPhrase} at the time of publication on ${dayOfWeek}, according to <a href="https://pro.benzinga.com/dashboard">Benzinga Pro data</a>.`;
+    // On weekends or when market is closed (but not premarket/afterhours), remove "at the time of publication"
+    const timePhrase = (marketStatus === 'closed' && !isWeekend) ? ' at the time of publication' : '';
+    return `<strong>${symbol} Price Action:</strong> ${companyName} shares were ${upDown} ${absChange}% at $${formattedPrice}${marketStatusPhrase}${timePhrase} on ${dayOfWeek}, according to <a href="https://pro.benzinga.com/dashboard">Benzinga Pro data</a>.`;
   } catch (error) {
     console.error(`Error generating price action for ${ticker}:`, error);
     return '';
@@ -2747,6 +2752,90 @@ function formatRevenue(revenue: number | string | null | undefined): string {
   }
 }
 
+// Fetch Edge ratings from Benzinga Edge API
+async function fetchEdgeRatings(ticker: string) {
+  try {
+    if (!BENZINGA_EDGE_API_KEY) {
+      console.log('[WGO W/ News] BENZINGA_EDGE_API_KEY not configured, skipping Edge ratings');
+      return null;
+    }
+
+    // Try different possible Edge API endpoints
+    const possibleUrls = [
+      `https://data-api-next.benzinga.com/rest/v3/tickerDetail?apikey=${BENZINGA_EDGE_API_KEY}&symbols=${encodeURIComponent(ticker)}`,
+      `https://api.benzinga.com/api/v2/edge?token=${BENZINGA_EDGE_API_KEY}&symbols=${encodeURIComponent(ticker)}`,
+      `https://api.benzinga.com/api/v2/edge/stock/${encodeURIComponent(ticker)}?token=${BENZINGA_EDGE_API_KEY}`,
+      `https://api.benzinga.com/api/v2/edge/${encodeURIComponent(ticker)}?token=${BENZINGA_EDGE_API_KEY}`,
+      `https://api.benzinga.com/api/v2/edge/ratings?token=${BENZINGA_EDGE_API_KEY}&symbols=${encodeURIComponent(ticker)}`
+    ];
+    
+    let data = null;
+    
+    for (const url of possibleUrls) {
+      console.log('[WGO W/ News] Trying Edge API URL:', url);
+      const response = await fetch(url, {
+        headers: { 
+          'Accept': 'application/json'
+        },
+      });
+      
+      if (response.ok) {
+        data = await response.json();
+        console.log('[WGO W/ News] Edge API success with URL:', url);
+        break;
+      } else {
+        console.log('[WGO W/ News] Edge API failed with URL:', url, response.status);
+      }
+    }
+    
+    if (!data) {
+      console.log('[WGO W/ News] All Edge API endpoints failed');
+      return null;
+    }
+    
+    console.log('[WGO W/ News] Edge API response:', data);
+    
+    // Extract the relevant ratings data - try different possible data structures
+    let edgeData = null;
+    
+    // Handle the tickerDetail API response structure
+    if (data.result && Array.isArray(data.result) && data.result.length > 0) {
+      const tickerData = data.result[0];
+      if (tickerData.rankings && tickerData.rankings.exists) {
+        edgeData = {
+          ticker: ticker.toUpperCase(),
+          value_rank: tickerData.rankings.value,
+          growth_rank: tickerData.rankings.growth,
+          quality_rank: tickerData.rankings.quality,
+          momentum_rank: tickerData.rankings.momentum,
+        };
+      }
+    }
+    
+    // Fallback to other possible data structures
+    if (!edgeData) {
+      edgeData = {
+        ticker: ticker.toUpperCase(),
+        value_rank: data.value_rank || data.valueRank || data.value || data.rankings?.value,
+        growth_rank: data.growth_rank || data.growthRank || data.growth || data.rankings?.growth,
+        quality_rank: data.quality_rank || data.qualityRank || data.quality || data.rankings?.quality,
+        momentum_rank: data.momentum_rank || data.momentumRank || data.momentum || data.rankings?.momentum,
+      };
+      
+      // Only return if we have at least one valid ranking
+      if (!edgeData.value_rank && !edgeData.growth_rank && !edgeData.quality_rank && !edgeData.momentum_rank) {
+        return null;
+      }
+    }
+    
+    console.log('[WGO W/ News] Processed Edge data:', edgeData);
+    return edgeData;
+  } catch (error) {
+    console.error('[WGO W/ News] Error fetching Edge ratings:', error);
+    return null;
+  }
+}
+
 // Fetch next earnings date from Benzinga calendar
 async function fetchNextEarningsDate(ticker: string) {
   try {
@@ -2859,6 +2948,7 @@ async function generateTechnicalAnalysis(data: TechnicalAnalysisData, provider?:
     // Markets are closed on weekends, so return Friday for Saturday/Sunday
     // If it's a weekend, return Friday as the last trading day
     const dayOfWeek = (currentDay === 0 || currentDay === 6) ? 'Friday' : dayNames[currentDay];
+    const isWeekend = currentDay === 0 || currentDay === 6;
 
     // Get market status to adjust language appropriately
     const marketStatus = getMarketStatusTimeBased();
@@ -2887,11 +2977,12 @@ async function generateTechnicalAnalysis(data: TechnicalAnalysisData, provider?:
     const sectorPerformance = await getStockSectorPerformance(data.symbol, marketContext || null);
     const sp500Change = marketContext?.indices.find(idx => idx.ticker === 'SPY')?.change || null;
 
-    // Fetch consensus ratings, earnings date, and recent analyst actions
-    const [consensusRatings, nextEarnings, recentAnalystActions] = await Promise.all([
+    // Fetch consensus ratings, earnings date, recent analyst actions, and edge ratings
+    const [consensusRatings, nextEarnings, recentAnalystActions, edgeRatings] = await Promise.all([
       fetchConsensusRatings(data.symbol),
       fetchNextEarningsDate(data.symbol),
-      fetchRecentAnalystActions(data.symbol, 3)
+      fetchRecentAnalystActions(data.symbol, 3),
+      fetchEdgeRatings(data.symbol)
     ]);
     
     // Log fetched data for debugging
@@ -3045,6 +3136,7 @@ CURRENT MARKET STATUS: ${marketStatus === 'open' ? 'Markets are currently OPEN' 
 CRITICAL: Adjust your language based on market status:
 - If markets are OPEN or in PREMARKET: Use present tense (e.g., "the market is experiencing", "the sector is gaining", "stocks are trading")
 - If markets are CLOSED or AFTER-HOURS: Use past tense (e.g., "the market experienced", "the sector gained", "stocks closed", "on the trading day")
+${isWeekend ? '- CRITICAL WEEKEND RULE: Today is a weekend (Saturday or Sunday). Markets are CLOSED on weekends. In the lead paragraph, you MUST use PAST TENSE ("were down", "were up", "closed down", "closed up") instead of present tense ("are down", "are up"). Reference Friday as the last trading day.' : ''}
 
 
 
@@ -3062,7 +3154,7 @@ CRITICAL: The "Daily Change (REGULAR SESSION ONLY)" value above is the REGULAR T
 
 ${sectorPerformance && sp500Change !== null ? `
 COMPARISON LINE (USE THIS EXACT FORMAT AT THE START OF THE ARTICLE, IMMEDIATELY AFTER THE HEADLINE):
-${data.companyNameWithExchange || data.companyName} stock is ${data.changePercent >= 0 ? 'up' : 'down'} approximately ${Math.abs(data.changePercent).toFixed(1)}% on ${dayOfWeek} versus a ${sectorPerformance.sectorChange.toFixed(1)}% ${sectorPerformance.sectorChange >= 0 ? 'gain' : 'loss'} in the ${sectorPerformance.sectorName} sector and a ${Math.abs(sp500Change).toFixed(1)}% ${sp500Change >= 0 ? 'gain' : 'loss'} in the S&P 500.
+${data.companyNameWithExchange || data.companyName} stock ${isWeekend ? 'was' : 'is'} ${data.changePercent >= 0 ? 'up' : 'down'} approximately ${Math.abs(data.changePercent).toFixed(1)}% on ${dayOfWeek} versus a ${sectorPerformance.sectorChange.toFixed(1)}% ${sectorPerformance.sectorChange >= 0 ? 'gain' : 'loss'} in the ${sectorPerformance.sectorName} sector and a ${Math.abs(sp500Change).toFixed(1)}% ${sp500Change >= 0 ? 'gain' : 'loss'} in the S&P 500.
 
 CRITICAL: This comparison line should appear immediately after the headline and before the main story content. Use this EXACT format with these EXACT numbers:
 - Stock direction: ${data.changePercent >= 0 ? 'up' : 'down'}
@@ -3371,6 +3463,46 @@ CRITICAL FORMATTING REQUIREMENTS:
 
   <strong>Analyst Consensus</strong>: [Rating] Rating ($X.XX Avg Price Target)
 
+MANDATORY: You MUST include "## Section: Earnings & Analyst Outlook" as a separate section header AFTER "## Section: Technical Analysis" and ${edgeRatings ? 'BEFORE "## Section: Benzinga Edge Rankings"' : 'BEFORE "## Section: Price Action"'}. Write 2-3 sentences that integrate earnings data (if available), analyst consensus (if available), and P/E ratio (if available) into a cohesive narrative that helps investors understand the stock's value proposition and analyst sentiment. Do NOT write separate paragraphs for each data point - weave them together naturally.
+${edgeRatings ? `
+## Section: Benzinga Edge Rankings
+After the "## Section: Earnings & Analyst Outlook" section, include a section analyzing the Benzinga Edge rankings.
+
+CRITICAL FORMATTING: Immediately after the "## Section: Benzinga Edge Rankings" header, add this line: "Below is the <a href=\"https://www.benzinga.com/edge/\">Benzinga Edge scorecard</a> for ${data.companyName || data.symbol} (${data.symbol}), highlighting its strengths and weaknesses compared to the broader market:"
+
+BENZINGA EDGE RANKINGS DATA:
+- Value Rank: ${edgeRatings.value_rank || 'N/A'}
+- Growth Rank: ${edgeRatings.growth_rank || 'N/A'}
+- Quality Rank: ${edgeRatings.quality_rank || 'N/A'}
+- Momentum Rank: ${edgeRatings.momentum_rank || 'N/A'}
+
+CRITICAL: Use the EXACT numbers from the data above. Format scores as [Number]/100 (e.g., "4/100", "83/100").
+
+BENZINGA EDGE SECTION RULES - FORMAT AS "TRADER'S SCORECARD":
+
+1. FORMAT: Use a bulleted list with HTML <ul> and <li> tags, NOT paragraphs. This structured format helps with SEO and Featured Snippets.
+
+2. SCORING LOGIC & LABELS:
+   - Score > 70: Label as "Strong" or "Bullish"
+   - Score < 30: Label as "Weak" or "Bearish"  
+   - Score 30-70: Label as "Neutral" or "Moderate"
+
+3. INTERPRETATION: Do NOT just list the number. Add a 1-sentence interpretation after each score.
+
+4. FORMAT EXAMPLE (use HTML bullets):
+   <ul>
+   <li><strong>Momentum</strong>: Bullish (Score: 83/100) — Stock is outperforming the broader market.</li>
+   <li><strong>Quality</strong>: Solid (Score: 66/100) — Balance sheet remains healthy.</li>
+   <li><strong>Value</strong>: Risk (Score: 4/100) — Trading at a steep premium relative to peers.</li>
+   </ul>
+
+5. HANDLING N/A: If a ranking is "N/A" or missing (null/undefined), OMIT IT COMPLETELY. Do NOT write "Growth ranking N/A" or mention missing rankings at all. Only include rankings that have actual numeric values.
+
+6. THE VERDICT: After the bullet list, add a 2-sentence summary that synthesizes the rankings and provides actionable insight. Start with "<strong>The Verdict:</strong> ${data.companyName || data.symbol}'s Benzinga Edge signal reveals..." and continue with the analysis. Example: "<strong>The Verdict:</strong> Tesla's Benzinga Edge signal reveals a classic 'High-Flyer' setup. While the Momentum (83) confirms the strong trend, the extremely low Value (4) score warns that the stock is priced for perfection—investors should ride the trend but use tight stop-losses."
+
+7. ORDER: Present rankings in order of importance: Momentum first, then Quality, then Value, then Growth (if available).
+` : ''}
+
 IMPORTANT: CRITICAL RULE - Only mention "analysts expecting earnings per share" if eps_estimate is actually available. Do NOT use eps_prior (same quarter from prior year) as an expectation. eps_prior is only for comparison purposes when eps_estimate exists. If eps_estimate is null/not available, do NOT write "analysts expecting earnings per share" - instead, just mention the earnings date without specific estimates.
 
 When earnings estimates ARE available, ALWAYS compare them to the same quarter from the previous year (year-over-year comparison):
@@ -3393,8 +3525,6 @@ ${nextEarnings && consensusRatings && peRatio !== null ? `
 ` : consensusRatings ? `
 "${data.companyName || data.symbol} has a consensus ${consensusRatings.consensus_rating ? consensusRatings.consensus_rating.charAt(0) + consensusRatings.consensus_rating.slice(1).toLowerCase() : 'N/A'} rating among analysts${consensusRatings.consensus_price_target ? ` with an average price target of $${parseFloat(consensusRatings.consensus_price_target.toString()).toFixed(2)}` : ''}, ${consensusRatings.buy_percentage && parseFloat(consensusRatings.buy_percentage.toString()) > 50 ? `reflecting a bullish outlook from the analyst community with ${parseFloat(consensusRatings.buy_percentage.toString()).toFixed(0)}% buy ratings.` : consensusRatings.hold_percentage && parseFloat(consensusRatings.hold_percentage.toString()) > 50 ? `reflecting a cautious stance with ${parseFloat(consensusRatings.hold_percentage.toString()).toFixed(0)}% hold ratings.` : 'as analysts monitor the stock\'s performance.'} ${consensusRatings.total_analyst_count ? `${consensusRatings.total_analyst_count} analysts are currently covering the stock.` : ''}"
 ` : ''}
-
-MANDATORY: You MUST include "## Section: Earnings & Analyst Outlook" as a separate section header AFTER "## Section: Technical Analysis" and BEFORE "## Section: Price Action". Write 2-3 sentences that integrate earnings data (if available), analyst consensus (if available), and P/E ratio (if available) into a cohesive narrative that helps investors understand the stock's value proposition and analyst sentiment. Do NOT write separate paragraphs for each data point - weave them together naturally.
 ` : ''}
 
 ${newsContext && (newsContext.scrapedContent || (newsContext.selectedArticles && newsContext.selectedArticles.length > 0)) ? `
@@ -3428,7 +3558,7 @@ URL: ${article.url || 'N/A'}
 
 CRITICAL INSTRUCTIONS FOR NEWS INTEGRATION:
 
-1. LEAD THE STORY WITH PRICE ACTION: The first paragraph MUST start with the stock's current price move (direction and day of week, e.g., "shares closed up on Thursday" or "shares closed down on Monday"). ${marketStatus === 'premarket' ? `CRITICAL: Use the "Premarket Change" value provided above (${data.changePercent.toFixed(2)}%) to determine direction. If it's positive (>= 0), say "are up during premarket trading on [day]"; if it's negative (< 0), say "are down during premarket trading on [day]". You MUST include the phrase "during premarket trading" in the first sentence. The direction MUST match the sign of ${data.changePercent.toFixed(2)}% - ${data.changePercent >= 0 ? 'POSITIVE means UP' : 'NEGATIVE means DOWN'}. Example: "Apple Inc. (NASDAQ:AAPL) shares are ${data.changePercent >= 0 ? 'up' : 'down'} during premarket trading on Friday".` : `CRITICAL: Use the "Daily Change (REGULAR SESSION ONLY)" value provided above (${data.changePercent.toFixed(2)}%) to determine direction. If it's positive (>= 0), say "closed up" or "were up"; if it's negative (< 0), say "closed down" or "were down". The direction MUST match the sign of ${data.changePercent.toFixed(2)}% - ${data.changePercent >= 0 ? 'POSITIVE means UP' : 'NEGATIVE means DOWN'}. DO NOT make up your own direction - use ONLY the value provided.`} ${marketStatus === 'afterhours' ? 'CRITICAL: During after-hours, DO NOT include a specific closing price amount (e.g., do NOT write "closing at $22.18"). The "Current Price" shown above is the after-hours price, not the regular session closing price. Only mention the direction (up/down) and day - do NOT include any dollar amount or percentage. Example: "ZIM Integrated Shipping Services Ltd. (NYSE:ZIM) shares surged on Monday during regular trading" NOT "closing at $22.18" or "closing up 3.33%".' : ''} When mentioning the day, use ONLY the day name (e.g., "on Thursday", "on Monday") - DO NOT include the date (e.g., do NOT use "on Thursday, December 18, 2025" or any date format). ${marketStatus === 'open' || marketStatus === 'premarket' ? 'Use present tense (e.g., "shares are tumbling", "shares are surging", "shares are up", "shares are down") since markets are currently open or in premarket.' : 'Use past tense (e.g., "shares closed up", "shares closed down", "shares were up", "shares were down") since markets are closed.'} DO NOT include the percentage in the first paragraph - it's already in the price action section. Then reference the news article to explain what's going on - either the news is contributing to the move, OR the stock is moving despite positive/negative news (suggesting larger market elements may be at play). The angle should answer "What's Going On" by connecting the price action to the news context.
+1. LEAD THE STORY WITH PRICE ACTION: The first paragraph MUST start with the stock's current price move (direction and day of week, e.g., "shares closed up on Thursday" or "shares closed down on Monday"). ${marketStatus === 'premarket' ? `CRITICAL: Use the "Premarket Change" value provided above (${data.changePercent.toFixed(2)}%) to determine direction. If it's positive (>= 0), say "are up during premarket trading on [day]"; if it's negative (< 0), say "are down during premarket trading on [day]". You MUST include the phrase "during premarket trading" in the first sentence. The direction MUST match the sign of ${data.changePercent.toFixed(2)}% - ${data.changePercent >= 0 ? 'POSITIVE means UP' : 'NEGATIVE means DOWN'}. Example: "Apple Inc. (NASDAQ:AAPL) shares are ${data.changePercent >= 0 ? 'up' : 'down'} during premarket trading on Friday".` : `CRITICAL: Use the "Daily Change (REGULAR SESSION ONLY)" value provided above (${data.changePercent.toFixed(2)}%) to determine direction. If it's positive (>= 0), say "closed up" or "were up"; if it's negative (< 0), say "closed down" or "were down". The direction MUST match the sign of ${data.changePercent.toFixed(2)}% - ${data.changePercent >= 0 ? 'POSITIVE means UP' : 'NEGATIVE means DOWN'}. DO NOT make up your own direction - use ONLY the value provided.`} ${marketStatus === 'afterhours' ? 'CRITICAL: During after-hours, DO NOT include a specific closing price amount (e.g., do NOT write "closing at $22.18"). The "Current Price" shown above is the after-hours price, not the regular session closing price. Only mention the direction (up/down) and day - do NOT include any dollar amount or percentage. Example: "ZIM Integrated Shipping Services Ltd. (NYSE:ZIM) shares surged on Monday during regular trading" NOT "closing at $22.18" or "closing up 3.33%".' : ''} When mentioning the day, use ONLY the day name (e.g., "on Thursday", "on Monday") - DO NOT include the date (e.g., do NOT use "on Thursday, December 18, 2025" or any date format). ${isWeekend ? 'CRITICAL WEEKEND RULE: Today is a weekend (Saturday or Sunday). Markets are CLOSED on weekends. You MUST use PAST TENSE throughout BOTH sentences ("were down", "were up", "closed down", "closed up", "the move came", "stocks were lower", "the decline came") instead of present tense ("are down", "are up", "the move comes", "stocks are lower", "the decline comes"). Reference Friday as the last trading day.' : marketStatus === 'open' || marketStatus === 'premarket' ? 'Use present tense (e.g., "shares are tumbling", "shares are surging", "shares are up", "shares are down") since markets are currently open or in premarket.' : 'Use past tense (e.g., "shares closed up", "shares closed down", "shares were up", "shares were down") since markets are closed.'} CRITICAL WORD CHOICE: DO NOT use the word "amidst" anywhere in the lead paragraph - it's a clear AI writing pattern. Use natural alternatives like "as", "during", "on", or "following" instead. For example, use "The stock's decline came as" or "during a mixed market day" instead of "comes amidst" or "amidst a mixed market day". DO NOT include the percentage in the first paragraph - it's already in the price action section. Then reference the news article to explain what's going on - either the news is contributing to the move, OR the stock is moving despite positive/negative news (suggesting larger market elements may be at play). The angle should answer "What's Going On" by connecting the price action to the news context.
 
 2. HYPERLINK FORMATTING (MANDATORY - MUST BE IN FIRST PARAGRAPH):
    ${primaryUrl ? (isBenzinga ? `- This is a Benzinga article. You MUST include a hyperlink in the first paragraph by choosing ANY THREE CONSECUTIVE WORDS from your first paragraph and wrapping them in a hyperlink with format: <a href="${primaryUrl}">[three consecutive words]</a>
@@ -3483,7 +3613,7 @@ CRITICAL INSTRUCTIONS FOR NEWS INTEGRATION:
 
 TASK: ${newsContext && (newsContext.scrapedContent || (newsContext.selectedArticles && newsContext.selectedArticles.length > 0)) ? `Write a conversational WGO article that helps readers understand "What's Going On" with the stock. LEAD with the current price move (direction and day of week, e.g., "shares are tumbling on Monday" or "shares are surging on Tuesday"). Use ONLY the day name (e.g., "on Thursday", "on Monday") - DO NOT include the date (e.g., do NOT use "on Thursday, December 18, 2025" or any date format). DO NOT include the percentage in the first paragraph. Then reference the news article provided above AND broader market context to explain what's going on - either the news is contributing to the move, OR the stock is moving despite positive/negative news (suggesting larger market elements may be at play). ${marketContext ? 'Use the broader market context (indices, sectors, market breadth) to provide additional context - is the stock moving with or against broader market trends? Reference specific sector performance when relevant (e.g., "Technology stocks are broadly lower today, contributing to the decline" or "Despite a strong market day, the stock is down, suggesting company-specific concerns").' : ''} Include the appropriate hyperlink in the first paragraph (three-word for Benzinga, one-word with outlet credit for others). When mentioning other companies in the article, always include their ticker symbol with exchange (e.g., "Snowflake Inc. (NYSE:SNOW)").
 
-MANDATORY: You MUST include section markers in your output. Insert "## Section: The Catalyst" AFTER the "Also Read" section (which comes after the FIRST paragraph), "## Section: Technical Analysis" after news paragraphs, "## Section: Earnings & Analyst Outlook" if earnings or analyst data is available (MANDATORY if consensus ratings or earnings date data is provided), and "## Section: Price Action" immediately before the automatically-generated price action line at the end. CRITICAL: Do NOT write any paragraph or content in the "## Section: Price Action" section - the price action line is automatically generated and added after your article. Just place the section marker "## Section: Price Action" and end your article there. These section markers are REQUIRED - do not skip them.
+MANDATORY: You MUST include section markers in your output. Insert "## Section: The Catalyst" AFTER the "Also Read" section (which comes after the FIRST paragraph), "## Section: Technical Analysis" after news paragraphs, "## Section: Earnings & Analyst Outlook" if earnings or analyst data is available (MANDATORY if consensus ratings or earnings date data is provided)${edgeRatings ? ', "## Section: Benzinga Edge Rankings" after the Earnings & Analyst Outlook section' : ''}, and "## Section: Price Action" immediately before the automatically-generated price action line at the end. CRITICAL: Do NOT write any paragraph or content in the "## Section: Price Action" section - the price action line is automatically generated and added after your article. Just place the section marker "## Section: Price Action" and end your article there. These section markers are REQUIRED - do not skip them.
 
 CRITICAL: The second paragraph (which appears AFTER "## Section: The Catalyst") and optionally third paragraph MUST include detailed, specific information from the news source article. Do NOT just summarize or use vague language. Extract and include:
 - Specific numbers, figures, percentages, dates, or metrics from the article
@@ -3520,6 +3650,7 @@ Rules for Headers:
    - Insert "## Section: The Catalyst" AFTER the "Also Read" section (which appears after the first paragraph) and BEFORE the detailed news paragraphs (Paragraph 2 with the specific details).
    - Insert "## Section: Technical Analysis" immediately after the news paragraphs and BEFORE the transition to technical data.
    - Insert "## Section: Earnings & Analyst Outlook" AFTER "## Section: Technical Analysis" if earnings data or analyst consensus ratings are available (this is MANDATORY when earnings/analyst data is provided).
+   ${edgeRatings ? '- Insert "## Section: Benzinga Edge Rankings" AFTER "## Section: Earnings & Analyst Outlook" and BEFORE "## Section: Price Action".' : ''}
    - Insert "## Section: Price Action" immediately before the automatically-generated price action line at the end of the article. CRITICAL: Do NOT write any paragraph or content in this section - just place the section marker. The price action line is automatically generated and will be added after your article ends.
 
 CRITICAL: 
@@ -3708,7 +3839,8 @@ FINAL CRITICAL REMINDER - SECTION MARKERS (THIS IS NOT OPTIONAL): Your article o
 - "## Section: Technical Analysis" after the news paragraphs  
 - "## Section: Analyst Ratings" if analyst overview is included
 - "## Section: Price Action" immediately before the automatically-generated price action line (do NOT write any content in this section - just place the marker)
-IF YOU DO NOT INCLUDE THESE SECTION MARKERS IN YOUR OUTPUT, YOUR RESPONSE IS INCOMPLETE AND INCORRECT.`;
+IF YOU DO NOT INCLUDE THESE SECTION MARKERS IN YOUR OUTPUT, YOUR RESPONSE IS INCOMPLETE AND INCORRECT.
+`;
 
 
 

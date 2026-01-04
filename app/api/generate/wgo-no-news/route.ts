@@ -4,6 +4,7 @@ import { fetchETFs, formatETFInfo } from '@/lib/etf-utils';
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const BENZINGA_API_KEY = process.env.BENZINGA_API_KEY!;
+const BENZINGA_EDGE_API_KEY = process.env.BENZINGA_EDGE_API_KEY!;
 const BZ_NEWS_URL = 'https://api.benzinga.com/api/v2/news';
 
 function getMarketStatus(): 'open' | 'premarket' | 'afterhours' | 'closed' {
@@ -229,6 +230,58 @@ async function getStockSectorPerformance(ticker: string): Promise<{ sectorName: 
     };
   } catch (error) {
     console.error('Error getting stock sector performance:', error);
+    return null;
+  }
+}
+
+// Fetch historical sector performance for past week and month
+async function fetchHistoricalSectorPerformance(sectorETF: string): Promise<{ weekChange?: number; monthChange?: number } | null> {
+  try {
+    const now = new Date();
+    const weekAgo = new Date(now);
+    weekAgo.setDate(weekAgo.getDate() - 7);
+    const monthAgo = new Date(now);
+    monthAgo.setMonth(monthAgo.getMonth() - 1);
+    
+    const formatDate = (date: Date) => date.toISOString().split('T')[0];
+    const to = formatDate(now);
+    const fromWeek = formatDate(weekAgo);
+    const fromMonth = formatDate(monthAgo);
+    
+    // Fetch weekly and monthly historical bars
+    const [weekRes, monthRes] = await Promise.all([
+      fetch(`https://api.polygon.io/v2/aggs/ticker/${sectorETF}/range/1/day/${fromWeek}/${to}?adjusted=true&apikey=${process.env.POLYGON_API_KEY}`),
+      fetch(`https://api.polygon.io/v2/aggs/ticker/${sectorETF}/range/1/day/${fromMonth}/${to}?adjusted=true&apikey=${process.env.POLYGON_API_KEY}`)
+    ]);
+    
+    const [weekData, monthData] = await Promise.all([
+      weekRes.ok ? weekRes.json() : null,
+      monthRes.ok ? monthRes.json() : null
+    ]);
+    
+    const weekBars = weekData?.results || [];
+    const monthBars = monthData?.results || [];
+    
+    let weekChange: number | undefined;
+    let monthChange: number | undefined;
+    
+    // Calculate week change (first vs last close)
+    if (weekBars.length >= 2) {
+      const firstClose = weekBars[0].c;
+      const lastClose = weekBars[weekBars.length - 1].c;
+      weekChange = ((lastClose - firstClose) / firstClose) * 100;
+    }
+    
+    // Calculate month change (first vs last close)
+    if (monthBars.length >= 2) {
+      const firstClose = monthBars[0].c;
+      const lastClose = monthBars[monthBars.length - 1].c;
+      monthChange = ((lastClose - firstClose) / firstClose) * 100;
+    }
+    
+    return (weekChange !== undefined || monthChange !== undefined) ? { weekChange, monthChange } : null;
+  } catch (error) {
+    console.error('Error fetching historical sector performance:', error);
     return null;
   }
 }
@@ -513,6 +566,90 @@ function formatRevenue(revenue: number | string | null | undefined): string {
   }
 }
 
+// Fetch Edge ratings from Benzinga Edge API
+async function fetchEdgeRatings(ticker: string) {
+  try {
+    if (!BENZINGA_EDGE_API_KEY) {
+      console.log('WGO No News: BENZINGA_EDGE_API_KEY not configured, skipping Edge ratings');
+      return null;
+    }
+
+    // Try different possible Edge API endpoints
+    const possibleUrls = [
+      `https://data-api-next.benzinga.com/rest/v3/tickerDetail?apikey=${BENZINGA_EDGE_API_KEY}&symbols=${encodeURIComponent(ticker)}`,
+      `https://api.benzinga.com/api/v2/edge?token=${BENZINGA_EDGE_API_KEY}&symbols=${encodeURIComponent(ticker)}`,
+      `https://api.benzinga.com/api/v2/edge/stock/${encodeURIComponent(ticker)}?token=${BENZINGA_EDGE_API_KEY}`,
+      `https://api.benzinga.com/api/v2/edge/${encodeURIComponent(ticker)}?token=${BENZINGA_EDGE_API_KEY}`,
+      `https://api.benzinga.com/api/v2/edge/ratings?token=${BENZINGA_EDGE_API_KEY}&symbols=${encodeURIComponent(ticker)}`
+    ];
+    
+    let data = null;
+    
+    for (const url of possibleUrls) {
+      console.log('WGO No News: Trying Edge API URL:', url);
+      const response = await fetch(url, {
+        headers: { 
+          'Accept': 'application/json'
+        },
+      });
+      
+      if (response.ok) {
+        data = await response.json();
+        console.log('WGO No News: Edge API success with URL:', url);
+        break;
+      } else {
+        console.log('WGO No News: Edge API failed with URL:', url, response.status);
+      }
+    }
+    
+    if (!data) {
+      console.log('WGO No News: All Edge API endpoints failed');
+      return null;
+    }
+    
+    console.log('WGO No News: Edge API response:', data);
+    
+    // Extract the relevant ratings data - try different possible data structures
+    let edgeData = null;
+    
+    // Handle the tickerDetail API response structure
+    if (data.result && Array.isArray(data.result) && data.result.length > 0) {
+      const tickerData = data.result[0];
+      if (tickerData.rankings && tickerData.rankings.exists) {
+        edgeData = {
+          ticker: ticker.toUpperCase(),
+          value_rank: tickerData.rankings.value,
+          growth_rank: tickerData.rankings.growth,
+          quality_rank: tickerData.rankings.quality,
+          momentum_rank: tickerData.rankings.momentum,
+        };
+      }
+    }
+    
+    // Fallback to other possible data structures
+    if (!edgeData) {
+      edgeData = {
+        ticker: ticker.toUpperCase(),
+        value_rank: data.value_rank || data.valueRank || data.value || data.rankings?.value,
+        growth_rank: data.growth_rank || data.growthRank || data.growth || data.rankings?.growth,
+        quality_rank: data.quality_rank || data.qualityRank || data.quality || data.rankings?.quality,
+        momentum_rank: data.momentum_rank || data.momentumRank || data.momentum || data.rankings?.momentum,
+      };
+      
+      // Only return if we have at least one valid ranking
+      if (!edgeData.value_rank && !edgeData.growth_rank && !edgeData.quality_rank && !edgeData.momentum_rank) {
+        return null;
+      }
+    }
+    
+    console.log('WGO No News: Processed Edge data:', edgeData);
+    return edgeData;
+  } catch (error) {
+    console.error('WGO No News: Error fetching Edge ratings:', error);
+    return null;
+  }
+}
+
 // Fetch next earnings date from Benzinga calendar
 async function fetchNextEarningsDate(ticker: string) {
   try {
@@ -624,6 +761,11 @@ async function generatePriceActionLine(ticker: string, companyName: string, stoc
     const marketStatus = getMarketStatus();
     const dayOfWeek = getCurrentDayName();
     
+    // Check if it's a weekend
+    const now = new Date();
+    const nyTime = new Date(now.toLocaleString("en-US", {timeZone: "America/New_York"}));
+    const isWeekend = nyTime.getDay() === 0 || nyTime.getDay() === 6;
+    
     let changePercent = 0;
     let displayPrice = 0;
     let marketStatusPhrase = '';
@@ -654,7 +796,8 @@ async function generatePriceActionLine(ticker: string, companyName: string, stoc
       // Use regular session data when market is closed
       changePercent = stockData.priceAction?.changePercent || 0;
       displayPrice = stockData.priceAction?.last || stockData.priceAction?.regularHours?.close || 0;
-      marketStatusPhrase = ' while the market was closed';
+      // On weekends, don't include "while the market was closed" phrase
+      marketStatusPhrase = isWeekend ? '' : ' while the market was closed';
     } else {
       // Use regular session data during regular hours
       changePercent = stockData.priceAction?.changePercent || 0;
@@ -666,7 +809,10 @@ async function generatePriceActionLine(ticker: string, companyName: string, stoc
     const absChange = Math.abs(changePercent).toFixed(2);
     const formattedPrice = displayPrice.toFixed(2);
     
-    return `<strong>${ticker.toUpperCase()} Price Action:</strong> ${companyName} shares were ${upDown} ${absChange}% at $${formattedPrice}${marketStatusPhrase} at the time of publication on ${dayOfWeek}, according to <a href="https://pro.benzinga.com/dashboard">Benzinga Pro data</a>.`;
+    // On weekends or when market is closed (but not premarket/afterhours), remove "at the time of publication"
+    const timePhrase = (marketStatus === 'closed' && !isWeekend) ? ' at the time of publication' : '';
+    
+    return `<strong>${ticker.toUpperCase()} Price Action:</strong> ${companyName} shares were ${upDown} ${absChange}% at $${formattedPrice}${marketStatusPhrase}${timePhrase} on ${dayOfWeek}, according to <a href="https://pro.benzinga.com/dashboard">Benzinga Pro data</a>.`;
   } catch (error) {
     console.error(`Error generating price action line for ${ticker}:`, error);
     return '';
@@ -845,10 +991,11 @@ async function fetchStockData(ticker: string) {
       console.log('Using real analyst ratings data:', analystRatings);
     }
     
-    // Fetch consensus ratings and earnings date
-    const [consensusRatings, nextEarnings] = await Promise.all([
+    // Fetch consensus ratings, earnings date, and edge ratings
+    const [consensusRatings, nextEarnings, edgeRatings] = await Promise.all([
       fetchConsensusRatings(ticker),
-      fetchNextEarningsDate(ticker)
+      fetchNextEarningsDate(ticker),
+      fetchEdgeRatings(ticker)
     ]);
     
     return {
@@ -857,6 +1004,7 @@ async function fetchStockData(ticker: string) {
       recentArticles, // Array of up to 2 articles
       consensusRatings, // Consensus rating and price target
       nextEarnings, // Next earnings date and estimates
+      edgeRatings, // Edge rankings data
     };
   } catch (error) {
     console.error('Error fetching stock data:', error);
@@ -1053,8 +1201,33 @@ export async function POST(request: Request) {
       const marketStatus = getMarketStatus();
       const currentDayName = getCurrentDayName();
       
+      // Check if it's a weekend for tense adjustment
+      const nyTime = new Date(currentDate.toLocaleString("en-US", {timeZone: "America/New_York"}));
+      const isWeekend = nyTime.getDay() === 0 || nyTime.getDay() === 6;
+      
       // Get sector performance for comparison line
       const sectorPerformance = await getStockSectorPerformance(ticker);
+      
+      // Fetch historical sector performance if sector ETF is available
+      let historicalSectorPerformance: { weekChange?: number; monthChange?: number } | null = null;
+      if (sectorPerformance) {
+        // Determine sector ETF from sector performance data
+        const sectorETFTicker = sectorPerformance.sectorName === 'Technology' ? 'XLK' :
+                                sectorPerformance.sectorName === 'Financial' ? 'XLF' :
+                                sectorPerformance.sectorName === 'Energy' ? 'XLE' :
+                                sectorPerformance.sectorName === 'Healthcare' ? 'XLV' :
+                                sectorPerformance.sectorName === 'Industrial' ? 'XLI' :
+                                sectorPerformance.sectorName === 'Consumer Staples' ? 'XLP' :
+                                sectorPerformance.sectorName === 'Consumer Discretionary' ? 'XLY' :
+                                sectorPerformance.sectorName === 'Utilities' ? 'XLU' :
+                                sectorPerformance.sectorName === 'Real Estate' ? 'XLRE' :
+                                sectorPerformance.sectorName === 'Communication Services' ? 'XLC' :
+                                sectorPerformance.sectorName === 'Materials' ? 'XLB' : null;
+        
+        if (sectorETFTicker) {
+          historicalSectorPerformance = await fetchHistoricalSectorPerformance(sectorETFTicker);
+        }
+      }
      
      // Calculate days difference for each article
      const articlesWithDateContext = stockData.recentArticles?.map((article: any) => {
@@ -1116,15 +1289,25 @@ LEAD PARAGRAPH LOGIC: Check the daily_change_percent variable (${dailyChangePerc
 ${narrativeGuidance}
 
 - First sentence: Start with company name and ticker, describe actual price movement (up/down/unchanged) with time context using the appropriate narrative language above
-- Second sentence: Brief context about sector correlation or market context - do NOT mention technical indicators here`;
+${isWeekend ? '- CRITICAL: Today is a weekend (Saturday or Sunday). Markets are CLOSED on weekends. Use PAST TENSE ("were down", "were up", "closed down", "closed up") instead of present tense ("are down", "are up"). Reference Friday as the last trading day.' : ''}
+- Second sentence: Brief context about sector correlation or market context - do NOT mention technical indicators here${isWeekend ? '. CRITICAL WEEKEND: Use past tense throughout this sentence (e.g., "The move came", "The decline came", "stocks were lower") since you are referring to Friday\'s trading action.' : ''}
+- CRITICAL WORD CHOICE: DO NOT use the word "amidst" - it's a clear AI writing pattern. Use natural alternatives like "as", "during", "on", or "following" instead. For example, use "The stock's decline came as" or "during a mixed market day" instead of "comes amidst".
+- CRITICAL LOGIC RULE: If the stock's direction matches the sector's direction (both up OR both down), describe it as moving WITH sector trends. If the stock's direction OPPOSES the sector's direction (stock down but sector up, OR stock up but sector down), describe it as company-specific performance (e.g., "Apple's decline suggests company-specific concerns as the Technology sector advanced"). Always verify the actual sector performance data before making this statement.`;
 
-           const catalystInstructions = `**CATALYST SECTION (after section marker):**
+          const catalystInstructions = `**CATALYST SECTION (after section marker):**
+- Write EXACTLY ONE paragraph (do NOT write two paragraphs)
 - Focus ONLY on sector correlation, market context, and relative strength/weakness
-- Explain whether the stock is moving WITH or AGAINST broader market trends
-- Mention sector performance (e.g., "defying broad declines in the Technology sector")
+- CRITICAL LOGIC RULES - Use this decision tree:
+  * Stock DOWN + Sector DOWN = Moving WITH sector weakness (sector-specific challenges)
+  * Stock DOWN + Sector UP = Moving AGAINST sector strength (company-specific weakness)
+  * Stock UP + Sector UP = Moving WITH sector strength (sector-specific strength)
+  * Stock UP + Sector DOWN = Moving AGAINST sector weakness (company-specific strength)
+- ALWAYS state the actual CURRENT DAY sector performance FIRST with the exact percentage (e.g., "The Technology sector saw a gain of 0.27% on Friday"), then explain whether the stock is moving WITH or AGAINST that trend
+- CRITICAL: You can ONLY make claims about sector "struggles", "pressure", or broader trends over time (e.g., "technology stocks faced some pressure" or "sector's overall struggles") if historical sector performance data is provided below. If no historical data is provided, you MUST only reference the current day's performance.
+- If stock is moving AGAINST sector (opposite direction), explicitly state it's company-specific performance
 - DO NOT mention specific Moving Averages (SMAs), RSI numbers, MACD, or any technical indicators here
 - DO NOT mention 12-month performance, 52-week ranges, or specific price levels here
-- Keep to 1-2 sentences focused on market/sector correlation`;
+- Keep to 1-2 sentences maximum focused on market/sector correlation${isWeekend ? '. CRITICAL WEEKEND: Use past tense throughout (e.g., "came", "saw", "were", "was") since referring to Friday\'s trading action.' : ''}`;
            
              const prompt = `
 You are a financial journalist creating a WGO No News story for ${ticker}. Focus on technical analysis and market data.
@@ -1144,9 +1327,21 @@ NOTE: The Context Dossier contains recent news and events for context, but follo
 
 ${sectorPerformance ? `
 COMPARISON LINE (USE THIS EXACT FORMAT AT THE START OF THE ARTICLE, IMMEDIATELY AFTER THE HEADLINE):
-${stockData.priceAction?.companyName || ticker} stock is ${stockData.priceAction?.changePercent >= 0 ? 'up' : 'down'} approximately ${Math.abs(stockData.priceAction?.changePercent || 0).toFixed(1)}% on ${currentDayName} versus a ${sectorPerformance.sectorChange.toFixed(1)}% ${sectorPerformance.sectorChange >= 0 ? 'gain' : 'loss'} in the ${sectorPerformance.sectorName} sector and a ${Math.abs(sectorPerformance.sp500Change).toFixed(1)}% ${sectorPerformance.sp500Change >= 0 ? 'gain' : 'loss'} in the S&P 500.
+${stockData.priceAction?.companyName || ticker} stock ${isWeekend ? 'was' : 'is'} ${stockData.priceAction?.changePercent >= 0 ? 'up' : 'down'} approximately ${Math.abs(stockData.priceAction?.changePercent || 0).toFixed(1)}% on ${currentDayName} versus a ${sectorPerformance.sectorChange.toFixed(1)}% ${sectorPerformance.sectorChange >= 0 ? 'gain' : 'loss'} in the ${sectorPerformance.sectorName} sector and a ${Math.abs(sectorPerformance.sp500Change).toFixed(1)}% ${sectorPerformance.sp500Change >= 0 ? 'gain' : 'loss'} in the S&P 500.
 
 CRITICAL: This comparison line should appear immediately after the headline and before the main story content. Use this exact format.
+
+CURRENT DAY SECTOR PERFORMANCE:
+- ${sectorPerformance.sectorName} sector: ${sectorPerformance.sectorChange.toFixed(2)}% ${sectorPerformance.sectorChange >= 0 ? 'gain' : 'loss'} on ${currentDayName}
+- S&P 500: ${sectorPerformance.sp500Change.toFixed(2)}% ${sectorPerformance.sp500Change >= 0 ? 'gain' : 'loss'} on ${currentDayName}
+
+${historicalSectorPerformance ? `
+HISTORICAL SECTOR PERFORMANCE (use this data ONLY when making claims about sector trends over time):
+- ${sectorPerformance.sectorName} sector past week: ${historicalSectorPerformance.weekChange !== undefined ? `${historicalSectorPerformance.weekChange.toFixed(2)}% ${historicalSectorPerformance.weekChange >= 0 ? 'gain' : 'loss'}` : 'data not available'}
+- ${sectorPerformance.sectorName} sector past month: ${historicalSectorPerformance.monthChange !== undefined ? `${historicalSectorPerformance.monthChange.toFixed(2)}% ${historicalSectorPerformance.monthChange >= 0 ? 'gain' : 'loss'}` : 'data not available'}
+
+CRITICAL: You can ONLY use phrases like "sector struggles", "sector pressure", "broader trend", or "technology stocks faced some pressure" if the historical data above shows the sector is actually down over the past week/month. If the historical data shows gains, do NOT make claims about sector struggles.
+` : 'HISTORICAL SECTOR PERFORMANCE: Not available. You can ONLY reference the current day\'s sector performance. Do NOT make claims about sector trends over time (e.g., "sector struggles", "broader pressure") without historical data to support it.'}
 ` : ''}
 
 MANDATORY DATA RULES:
@@ -1270,11 +1465,52 @@ SECTION BOUNDARIES (STRICT - CRITICAL):
 - **CATALYST SECTION:** Focus ONLY on News (or lack of it), Sector Correlation, Market Context, and Relative Strength. DO NOT mention specific Moving Averages (SMAs), RSI numbers, MACD, 12-month performance, 52-week ranges, or any technical indicators here.
 - **TECHNICAL ANALYSIS SECTION:** This is the ONLY place for SMAs, RSI, MACD, 12-month performance, 52-week ranges, and all technical data. DO NOT repeat technical data from this section in the Catalyst section.
 
-8. PRICE ACTION LINE (at the end):
+${stockData.edgeRatings ? `
+7. SECTION MARKER: After the Earnings & Analyst Outlook section, insert "## Section: Benzinga Edge Rankings" on its own line.
+
+8. BENZINGA EDGE RANKINGS SECTION:
+After the section marker, include a section analyzing the Benzinga Edge rankings.
+
+CRITICAL FORMATTING: Immediately after the "## Section: Benzinga Edge Rankings" header, add this line: "Below is the <a href=\"https://www.benzinga.com/edge/\">Benzinga Edge scorecard</a> for ${stockData.priceAction?.companyName || ticker.toUpperCase()} (${ticker.toUpperCase()}), highlighting its strengths and weaknesses compared to the broader market:"
+
+BENZINGA EDGE RANKINGS DATA:
+- Value Rank: ${stockData.edgeRatings.value_rank || 'N/A'}
+- Growth Rank: ${stockData.edgeRatings.growth_rank || 'N/A'}
+- Quality Rank: ${stockData.edgeRatings.quality_rank || 'N/A'}
+- Momentum Rank: ${stockData.edgeRatings.momentum_rank || 'N/A'}
+
+CRITICAL: Use the EXACT numbers from the data above. Format scores as [Number]/100 (e.g., "4/100", "83/100").
+
+BENZINGA EDGE SECTION RULES - FORMAT AS "TRADER'S SCORECARD":
+
+1. FORMAT: Use a bulleted list with HTML <ul> and <li> tags, NOT paragraphs. This structured format helps with SEO and Featured Snippets.
+
+2. SCORING LOGIC & LABELS:
+   - Score > 70: Label as "Strong" or "Bullish"
+   - Score < 30: Label as "Weak" or "Bearish"  
+   - Score 30-70: Label as "Neutral" or "Moderate"
+
+3. INTERPRETATION: Do NOT just list the number. Add a 1-sentence interpretation after each score.
+
+4. FORMAT EXAMPLE (use HTML bullets):
+   <ul>
+   <li><strong>Momentum</strong>: Bullish (Score: 83/100) — Stock is outperforming the broader market.</li>
+   <li><strong>Quality</strong>: Solid (Score: 66/100) — Balance sheet remains healthy.</li>
+   <li><strong>Value</strong>: Risk (Score: 4/100) — Trading at a steep premium relative to peers.</li>
+   </ul>
+
+5. HANDLING N/A: If a ranking is "N/A" or missing (null/undefined), OMIT IT COMPLETELY. Do NOT write "Growth ranking N/A" or mention missing rankings at all. Only include rankings that have actual numeric values.
+
+6. THE VERDICT: After the bullet list, add a 2-sentence summary that synthesizes the rankings and provides actionable insight. Start with "<strong>The Verdict:</strong> ${stockData.priceAction?.companyName || ticker.toUpperCase()}'s Benzinga Edge signal reveals..." and continue with the analysis. Example: "<strong>The Verdict:</strong> Tesla's Benzinga Edge signal reveals a classic 'High-Flyer' setup. While the Momentum (83) confirms the strong trend, the extremely low Value (4) score warns that the stock is priced for perfection—investors should ride the trend but use tight stop-losses."
+
+7. ORDER: Present rankings in order of importance: Momentum first, then Quality, then Value, then Growth (if available).
+` : ''}
+
+${stockData.edgeRatings ? '9' : '8'}. PRICE ACTION LINE (at the end):
 - Format: "[TICKER] Price Action: [Company Name] shares were [up/down] [X.XX]% at $[XX.XX] [during premarket trading/during after-hours trading/while the market was closed] on [Day], according to <a href=\"https://pro.benzinga.com\">Benzinga Pro</a>."
 - All prices must be formatted to exactly 2 decimal places
 
-9. WRITING STYLE:
+${stockData.edgeRatings ? '10' : '9'}. WRITING STYLE:
 - Professional financial journalism
 - Active voice, clear language
 - No flowery phrases like "amidst" or "whilst"
