@@ -478,7 +478,7 @@ export default function EarningsPreviewGenerator() {
             }
           }}
         >
-          {loading ? 'Enriching & Generating...' : 'Enrich First Earnings Preview'}
+          {loading ? 'Enriching & Generating...' : 'Enriched Earnings Preview'}
         </button>
       </div>
 
