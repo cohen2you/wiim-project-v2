@@ -24,10 +24,20 @@ function getMarketStatus(): 'open' | 'premarket' | 'afterhours' | 'closed' {
 
 function getCurrentDayName(): string {
   // Get current day name in New York timezone
+  // Markets are closed on weekends, so return Friday for Saturday/Sunday
   const now = new Date();
   const nyTime = new Date(now.toLocaleString("en-US", {timeZone: "America/New_York"}));
   const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-  return days[nyTime.getDay()];
+  const currentDay = nyTime.getDay();
+  
+  // If it's a weekend, return Friday as the last trading day
+  if (currentDay === 0) { // Sunday
+    return 'Friday';
+  } else if (currentDay === 6) { // Saturday
+    return 'Friday';
+  } else {
+    return days[currentDay];
+  }
 }
 
 // Function to fetch related articles from Benzinga

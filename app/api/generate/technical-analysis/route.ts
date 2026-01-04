@@ -182,12 +182,15 @@ async function generatePriceAction(ticker: string): Promise<string> {
     const marketStatus = getMarketStatusTimeBased();
     
     // Get current day name in Eastern Time (not the close date, which might be previous day)
+    // Markets are closed on weekends, so return Friday for Saturday/Sunday
     const now = new Date();
     const formatter = new Intl.DateTimeFormat('en-US', {
       timeZone: 'America/New_York',
       weekday: 'long',
     });
-    const dayOfWeek = formatter.format(now);
+    const currentDayName = formatter.format(now);
+    // If it's a weekend, return Friday as the last trading day
+    const dayOfWeek = (currentDayName === 'Sunday' || currentDayName === 'Saturday') ? 'Friday' : currentDayName;
     
     let marketStatusPhrase = '';
     if (marketStatus === 'premarket') {
@@ -2851,8 +2854,11 @@ async function generateTechnicalAnalysis(data: TechnicalAnalysisData, provider?:
     const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
     const today = new Date();
-
-    const dayOfWeek = dayNames[today.getDay()];
+    const currentDay = today.getDay();
+    
+    // Markets are closed on weekends, so return Friday for Saturday/Sunday
+    // If it's a weekend, return Friday as the last trading day
+    const dayOfWeek = (currentDay === 0 || currentDay === 6) ? 'Friday' : dayNames[currentDay];
 
     // Get market status to adjust language appropriately
     const marketStatus = getMarketStatusTimeBased();
