@@ -1424,11 +1424,21 @@ LEAD PARAGRAPH LOGIC: Check the daily_change_percent variable (${dailyChangePerc
 
 CRITICAL: DO NOT include exact percentage values in the lead paragraph. Use only the direction: "up", "down", or "unchanged". For example, write "Microsoft Corp stock is down on Monday" NOT "Microsoft Corp stock is down 0.03% on Monday". The exact percentage appears only in the price action line at the bottom of the article.
 
+${contextBrief ? `CRITICAL ENRICHMENT INSTRUCTION: If a Context Brief is provided, you MUST prioritize specific, high-value narrative from the Context Brief in your lead paragraph. Scan the Context Brief for:
+- Specific analyst firms or networks (e.g., "Schwab Network", "Needham", "Wedbush")
+- Specific company initiatives or products mentioned (e.g., "Azure", "AI Edge", "iPhone 17")
+- Specific competitive dynamics (e.g., "Azure vs Google", "AI race")
+- Specific events or analysis (e.g., "analysts doubled down on", "highlighted strategic advantage")
+
+DO NOT default to generic sector data. If the Context Brief contains specific narratives, use THOSE in the lead paragraph instead of generic statements like "reflecting broader momentum in the technology sector." For example, if the Context Brief mentions "Schwab Network analysts seeing Azure's edge over Google," lead with that specific narrative rather than generic sector performance.
+
+The lead paragraph should combine: (1) Price movement direction, (2) The SPECIFIC narrative from Context Brief (if available), and (3) Market context as secondary information.` : ''}
+
 ${narrativeGuidance}
 
-- First sentence: Start with company name and ticker in format "[Company Name] (NASDAQ:TICKER)" or "[Company Name] (NYSE:TICKER)", then describe actual price movement direction only (up/down/unchanged) with time context. Use "shares are" not "stock is". ${marketStatus === 'premarket' ? 'CRITICAL PREMARKET: Since the market status is PREMARKET, you MUST include "during premarket trading" in your first sentence. Example: "Microsoft Corp (NASDAQ:MSFT) shares are up during premarket trading on Monday, [context]".' : marketStatus === 'afterhours' ? 'CRITICAL AFTER-HOURS: Since the market status is AFTER-HOURS, you MUST include "during after-hours trading" in your first sentence. Example: "Microsoft Corp (NASDAQ:MSFT) shares are up during after-hours trading on Monday, [context]".' : 'Example: "Microsoft Corp (NASDAQ:MSFT) shares are down on Monday, [context]".'} DO NOT include percentage values - use only words like "up", "down", or "unchanged".
+- First sentence: Start with company name and ticker in format "[Company Name] (NASDAQ:TICKER)" or "[Company Name] (NYSE:TICKER)", then describe actual price movement direction only (up/down/unchanged) with time context. Use "shares are" not "stock is". ${contextBrief ? 'If Context Brief is provided, immediately follow the price direction with the SPECIFIC narrative from the Context Brief (e.g., "as analysts at Schwab Network doubled down on the company\'s AI Edge" or "after Needham raised the target").' : ''} ${marketStatus === 'premarket' ? 'CRITICAL PREMARKET: Since the market status is PREMARKET, you MUST include "during premarket trading" in your first sentence. Example: "Microsoft Corp (NASDAQ:MSFT) shares are up during premarket trading on Monday, [context]".' : marketStatus === 'afterhours' ? 'CRITICAL AFTER-HOURS: Since the market status is AFTER-HOURS, you MUST include "during after-hours trading" in your first sentence. Example: "Microsoft Corp (NASDAQ:MSFT) shares are up during after-hours trading on Monday, [context]".' : 'Example: "Microsoft Corp (NASDAQ:MSFT) shares are down on Monday, [context]".'} DO NOT include percentage values - use only words like "up", "down", or "unchanged".
 ${isWeekend ? '- CRITICAL: Today is a weekend (Saturday or Sunday). Markets are CLOSED on weekends. Use PAST TENSE ("were down", "were up", "closed down", "closed up") instead of present tense ("are down", "are up"). Reference Friday as the last trading day.' : ''}
-- Second sentence: Brief context about sector correlation or market context - do NOT mention technical indicators here${isWeekend ? '. CRITICAL WEEKEND: Use past tense throughout this sentence (e.g., "The move came", "The decline came", "stocks were lower") since you are referring to Friday\'s trading action.' : ''}
+- Second sentence: ${contextBrief ? 'If Context Brief narrative was used in first sentence, provide market context (sector performance, broader trends) in the second sentence. ' : ''}Brief context about sector correlation or market context - do NOT mention technical indicators here${isWeekend ? '. CRITICAL WEEKEND: Use past tense throughout this sentence (e.g., "The move came", "The decline came", "stocks were lower") since you are referring to Friday\'s trading action.' : ''}
 - CRITICAL WORD CHOICE: DO NOT use the word "amidst" - it's a clear AI writing pattern. Use natural alternatives like "as", "during", "on", or "following" instead. For example, use "The stock's decline came as" or "during a mixed market day" instead of "comes amidst".
 - CRITICAL LOGIC RULE: If the stock's direction matches the sector's direction (both up OR both down), describe it as moving WITH sector trends. If the stock's direction OPPOSES the sector's direction (stock down but sector up, OR stock up but sector down), describe it as company-specific performance (e.g., "Apple's decline suggests company-specific concerns as the Technology sector advanced"). Always verify the actual sector performance data before making this statement.`;
 
@@ -1545,7 +1555,7 @@ Structure: "[Firm Name] reiterated a [Rating] with a [Price Target]."
 
 Deduplicate Logic: If the data lists the same firm twice, ONLY report the most recent rating/target.
 
-Contextualize: If the average price target is lower than the current price, explicitly state that the stock is "trading at a premium to analyst expectations."
+Contextualize: Compare the average price target to the current price to determine if the stock is trading at a premium or discount.
 
 CRITICAL INSTRUCTIONS FOR THIS SECTION:
 - Start with a brief introductory sentence (1 sentence max) about the earnings date
@@ -1553,7 +1563,10 @@ CRITICAL INSTRUCTIONS FOR THIS SECTION:
 - Format: Use <strong> tags to bold the labels (EPS Estimate, Revenue Estimate, Analyst Consensus), followed by the data on the same line
 - Each data point should be on its own line with a blank line between them
 - Focus on helping investors understand: (1) whether the stock represents good value, and (2) how analysts view the stock
-- CRITICAL: When mentioning the price target in the intro sentence, compare it to the current price. If price target is BELOW current price, say "suggesting the stock may be trading at a premium relative to analyst expectations" instead of "indicating potential upside"
+- CRITICAL PRICE TARGET LOGIC: When mentioning the price target in the intro sentence, compare it to the current price (stockData.priceAction.last). 
+  * If price target is ABOVE current price (e.g., target $631 > current $474): Say "suggesting the stock may be trading at a discount relative to analyst expectations" or "indicating potential upside" or "trading below analyst targets"
+  * If price target is BELOW current price (e.g., target $400 < current $474): Say "suggesting the stock may be trading at a premium relative to analyst expectations" or "trading above analyst targets"
+  * Always verify the math: Higher target = Discount/Upside, Lower target = Premium
 - Make it forward-looking and actionable for investors
 
 ${stockData.nextEarnings ? `
@@ -1643,9 +1656,9 @@ BENZINGA EDGE SECTION RULES - FORMAT AS "TRADER'S SCORECARD":
 1. FORMAT: Use a bulleted list with HTML <ul> and <li> tags, NOT paragraphs. This structured format helps with SEO and Featured Snippets.
 
 2. SCORING LOGIC & LABELS:
-   - Score > 70: Label as "Strong" or "Bullish"
-   - Score < 30: Label as "Weak" or "Bearish"  
-   - Score 30-70: Label as "Neutral" or "Moderate"
+   - Score > 60: Label as "Strong" or "Bullish"
+   - Score < 40: Label as "Weak" or "Bearish"  
+   - Score 40-60: Label as "Neutral" or "Moderate"
 
 3. INTERPRETATION: Do NOT just list the number. Add a 1-sentence interpretation after each score.
 
@@ -1653,6 +1666,7 @@ BENZINGA EDGE SECTION RULES - FORMAT AS "TRADER'S SCORECARD":
    <ul>
    <li><strong>Momentum</strong>: Bullish (Score: 83/100) — Stock is outperforming the broader market.</li>
    <li><strong>Quality</strong>: Solid (Score: 66/100) — Balance sheet remains healthy.</li>
+   <li><strong>Momentum</strong>: Neutral (Score: 42/100) — Stock is showing moderate movement.</li>
    <li><strong>Value</strong>: Risk (Score: 4/100) — Trading at a steep premium relative to peers.</li>
    </ul>
 
