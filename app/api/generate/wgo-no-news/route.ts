@@ -755,9 +755,50 @@ async function fetchNextEarningsDate(ticker: string) {
   }
 }
 
-// Generate price action line programmatically using correct session data
+// Fetch price data from Benzinga API (shared helper for both price action line and sync)
+async function fetchPriceDataFromBenzinga(ticker: string): Promise<{ quote: any; changePercent: number | undefined } | null> {
+  try {
+    const url = `https://api.benzinga.com/api/v2/quoteDelayed?token=${BENZINGA_API_KEY}&symbols=${ticker}`;
+    const res = await fetch(url);
+    
+    if (!res.ok) {
+      console.error(`[PRICE DATA] Failed to fetch price data for ${ticker}:`, res.statusText);
+      return null;
+    }
+    
+    const data = await res.json();
+    if (!data || typeof data !== 'object') {
+      return null;
+    }
+    
+    const quote = data[ticker.toUpperCase()];
+    if (!quote || typeof quote !== 'object' || !quote.lastTradePrice) {
+      return null;
+    }
+    
+    // Use Benzinga's changePercent if provided - don't override it with manual calculations
+    // During open market hours, if changePercent is 0, it might not be updated yet by Benzinga's delayed feed
+    // In that case, we'll skip showing the percentage to avoid misleading "unchanged 0.00%" messages
+    const changePercent = typeof quote.changePercent === 'number' ? quote.changePercent : undefined;
+    return { quote, changePercent };
+  } catch (error) {
+    console.error(`[PRICE DATA] Error fetching price data for ${ticker}:`, error);
+    return null;
+  }
+}
+
+// Generate price action line programmatically using Benzinga API (matching price-action route logic)
 async function generatePriceActionLine(ticker: string, companyName: string, stockData: any): Promise<string> {
   try {
+    // Fetch price action data directly from Benzinga API
+    const priceData = await fetchPriceDataFromBenzinga(ticker);
+    if (!priceData) {
+      return '';
+    }
+    
+    const { quote, changePercent } = priceData;
+    const symbol = quote.symbol ?? ticker.toUpperCase();
+    
     const marketStatus = getMarketStatus();
     const dayOfWeek = getCurrentDayName();
     
@@ -766,53 +807,76 @@ async function generatePriceActionLine(ticker: string, companyName: string, stoc
     const nyTime = new Date(now.toLocaleString("en-US", {timeZone: "America/New_York"}));
     const isWeekend = nyTime.getDay() === 0 || nyTime.getDay() === 6;
     
-    let changePercent = 0;
-    let displayPrice = 0;
-    let marketStatusPhrase = '';
-    const previousClose = stockData.priceAction?.previousClose || 0;
+    // Calculate regular session and after-hours changes separately
+    let regularSessionChange = 0;
+    let afterHoursChange = 0;
+    let regularUpDown = '';
+    let afterHoursUpDown = '';
     
-    if (marketStatus === 'premarket' && stockData.priceAction?.premarket?.last && stockData.priceAction.premarket.last > 0) {
-      // Use premarket data when in premarket
-      displayPrice = stockData.priceAction.premarket.last;
-      // Calculate premarket change from previous close if changePercent is not available
-      if (stockData.priceAction.premarket.changePercent !== undefined && stockData.priceAction.premarket.changePercent !== 0) {
-        changePercent = stockData.priceAction.premarket.changePercent;
-      } else if (previousClose > 0) {
-        changePercent = ((displayPrice - previousClose) / previousClose) * 100;
-      }
-      marketStatusPhrase = ' during premarket trading';
-    } else if (marketStatus === 'afterhours' && stockData.priceAction?.afterHours?.last && stockData.priceAction.afterHours.last > 0) {
-      // Use after-hours data when in after-hours
-      displayPrice = stockData.priceAction.afterHours.last;
-      // Calculate after-hours change if changePercent is not available
-      if (stockData.priceAction.afterHours.changePercent !== undefined && stockData.priceAction.afterHours.changePercent !== 0) {
-        changePercent = stockData.priceAction.afterHours.changePercent;
-      } else if (stockData.priceAction?.regularHours?.close && stockData.priceAction.regularHours.close > 0) {
-        const regularClose = stockData.priceAction.regularHours.close;
-        changePercent = ((displayPrice - regularClose) / regularClose) * 100;
-      }
-      marketStatusPhrase = ' during after-hours trading';
-    } else if (marketStatus === 'closed') {
-      // Use regular session data when market is closed
-      changePercent = stockData.priceAction?.changePercent || 0;
-      displayPrice = stockData.priceAction?.last || stockData.priceAction?.regularHours?.close || 0;
-      // On weekends, don't include "while the market was closed" phrase
-      marketStatusPhrase = isWeekend ? '' : ' while the market was closed';
-    } else {
-      // Use regular session data during regular hours
-      changePercent = stockData.priceAction?.changePercent || 0;
-      displayPrice = stockData.priceAction?.last || stockData.priceAction?.regularHours?.close || 0;
-      marketStatusPhrase = '';
+    if (marketStatus === 'afterhours' && quote.close && quote.lastTradePrice && quote.previousClosePrice) {
+      // Regular session change: (regular_close - previous_close) / previous_close * 100
+      regularSessionChange = ((quote.close - quote.previousClosePrice) / quote.previousClosePrice) * 100;
+      regularUpDown = regularSessionChange > 0 ? 'up' : regularSessionChange < 0 ? 'down' : 'unchanged';
+      
+      // After-hours change: (current - regular_close) / regular_close * 100
+      afterHoursChange = ((quote.lastTradePrice - quote.close) / quote.close) * 100;
+      afterHoursUpDown = afterHoursChange > 0 ? 'up' : afterHoursChange < 0 ? 'down' : 'unchanged';
     }
     
-    const upDown = changePercent > 0 ? 'up' : changePercent < 0 ? 'down' : 'unchanged';
-    const absChange = Math.abs(changePercent).toFixed(2);
-    const formattedPrice = displayPrice.toFixed(2);
+    // Format price to ensure exactly 2 decimal places
+    const lastPrice = typeof quote.lastTradePrice === 'number' ? quote.lastTradePrice : parseFloat(quote.lastTradePrice);
+    const formattedPrice = lastPrice.toFixed(2);
+    const priceString = String(formattedPrice);
     
-    // On weekends or when market is closed (but not premarket/afterhours), remove "at the time of publication"
-    const timePhrase = (marketStatus === 'closed' && !isWeekend) ? ' at the time of publication' : '';
+    // During open market hours, if changePercent is 0 or missing, skip the change percentage
+    // (Benzinga's delayed feed may not have updated it yet, showing 0.00% is misleading)
+    // For other market statuses (premarket, afterhours, closed), show 0 if provided (stock truly unchanged)
+    const shouldShowChangePercent = marketStatus === 'open'
+      ? (changePercent !== undefined && changePercent !== 0)
+      : changePercent !== undefined;
     
-    return `<strong>${ticker.toUpperCase()} Price Action:</strong> ${companyName} shares were ${upDown} ${absChange}% at $${formattedPrice}${marketStatusPhrase}${timePhrase} on ${dayOfWeek}, according to <a href="https://pro.benzinga.com/dashboard">Benzinga Pro data</a>.`;
+    const changePercentForCalc = changePercent ?? 0;
+    const upDown = changePercentForCalc > 0 ? 'up' : changePercentForCalc < 0 ? 'down' : 'unchanged';
+    const absChange = Math.abs(changePercentForCalc).toFixed(2);
+    
+    // Build price action text with explicit string concatenation
+    let priceActionText = '';
+    
+    if (marketStatus === 'open') {
+      if (shouldShowChangePercent) {
+        priceActionText = `${symbol} Price Action: ${companyName} shares were ${upDown} ${absChange}% at $${priceString} at the time of publication on ${dayOfWeek}`;
+      } else {
+        // Skip change percentage if it's 0 and we couldn't calculate it (Benzinga hasn't updated yet)
+        priceActionText = `${symbol} Price Action: ${companyName} shares were trading at $${priceString} at the time of publication on ${dayOfWeek}`;
+      }
+    } else if (marketStatus === 'afterhours' && quote.close && quote.lastTradePrice && quote.previousClosePrice) {
+      // Show both regular session and after-hours moves when we have the necessary data
+      const absRegularChange = Math.abs(regularSessionChange).toFixed(2);
+      const absAfterHoursChange = Math.abs(afterHoursChange).toFixed(2);
+      priceActionText = `${symbol} Price Action: ${companyName} shares were ${regularUpDown} ${absRegularChange}% during regular trading and ${afterHoursUpDown} ${absAfterHoursChange}% in after-hours trading on ${dayOfWeek}, last trading at $${priceString}`;
+    } else {
+      // For premarket/closed, use standard format
+      let marketStatusPhrase = '';
+      if (marketStatus === 'premarket') {
+        marketStatusPhrase = ' during premarket trading';
+      } else if (marketStatus === 'afterhours') {
+        marketStatusPhrase = ' during after-hours trading';
+      } else if (marketStatus === 'closed') {
+        marketStatusPhrase = isWeekend ? '' : ' while the market was closed';
+      }
+      const timePhrase = (marketStatus === 'closed' && !isWeekend) ? ' at the time of publication' : '';
+      priceActionText = `${symbol} Price Action: ${companyName} shares were ${upDown} ${absChange}% at $${priceString}${marketStatusPhrase}${timePhrase} on ${dayOfWeek}`;
+    }
+    
+    // Only bold the ticker prefix (e.g., "MSFT Price Action:"), not the entire line
+    const prefixMatch = priceActionText.match(/^([A-Z]+\s+Price Action:)\s+(.+)$/);
+    if (prefixMatch) {
+      const prefix = prefixMatch[1];
+      const rest = prefixMatch[2];
+      return `<strong>${prefix}</strong> ${rest}, according to <a href="https://pro.benzinga.com/dashboard">Benzinga Pro data</a>.`;
+    }
+    // Fallback: if pattern doesn't match, return as-is with prefix bolded
+    return `<strong>${priceActionText}</strong>, according to <a href="https://pro.benzinga.com/dashboard">Benzinga Pro data</a>.`;
   } catch (error) {
     console.error(`Error generating price action line for ${ticker}:`, error);
     return '';
@@ -839,11 +903,16 @@ async function fetchStockData(ticker: string) {
       if (priceData && typeof priceData === 'object') {
         const quote = priceData[ticker.toUpperCase()];
         if (quote && typeof quote === 'object') {
+          console.log(`[PRICE API] Raw quote data for ${ticker}:`, JSON.stringify(quote, null, 2));
+          
+          // Use changePercent directly from API - this matches generatePriceActionLine logic
+          const changePercent = typeof quote.changePercent === 'number' ? quote.changePercent : 0;
+          
           // Enhanced price action with session-specific data
           priceAction = {
             last: quote.lastTradePrice || 0,
             change: quote.change || 0,
-            changePercent: quote.changePercent || 0,
+            changePercent: changePercent, // Use API's changePercent directly (same as generatePriceActionLine)
             volume: quote.volume || 0,
             marketStatus: marketStatus,
             // Session-specific data
@@ -855,10 +924,11 @@ async function fetchStockData(ticker: string) {
               volume: quote.volume || 0
             },
             // Pre-market data if available
+            // Try multiple possible field names for premarket changePercent
             premarket: {
-              last: quote.preMarketLast || 0,
+              last: quote.preMarketLast || quote.preMarketPrice || quote.lastTradePrice || 0,
               change: quote.preMarketChange || 0,
-              changePercent: quote.preMarketChangePercent || 0,
+              changePercent: quote.preMarketChangePercent || quote.preMarketChangePerc || changePercent || 0,
               volume: quote.preMarketVolume || 0
             },
             // After-hours data if available
@@ -869,10 +939,11 @@ async function fetchStockData(ticker: string) {
               volume: quote.afterHoursVolume || 0
             },
             // Previous day data
-            previousClose: quote.previousClose || 0,
+            previousClose: quote.previousClose || quote.previousClosePrice || 0,
             companyName: quote.companyStandardName || quote.name || ticker.toUpperCase()
           };
-          console.log('Parsed enhanced price action:', priceAction);
+          console.log('Parsed enhanced price action:', JSON.stringify(priceAction, null, 2));
+          console.log(`[PRICE DATA] Market Status: ${marketStatus}, ChangePercent: ${priceAction.changePercent}, Last: ${priceAction.last}, Previous Close: ${priceAction.previousClose}`);
         }
       }
     } else {
@@ -903,13 +974,46 @@ async function fetchStockData(ticker: string) {
       console.log('Ratings array length:', ratingsArray.length);
       
       if (ratingsArray.length > 0) {
-        analystRatings = ratingsArray.slice(0, 3).map((rating: any) => {
+        // Sort by date (most recent first)
+        const sortedRatings = ratingsArray
+          .sort((a: any, b: any) => {
+            const dateA = new Date(a.date || a.created || 0).getTime();
+            const dateB = new Date(b.date || b.created || 0).getTime();
+            return dateB - dateA; // Most recent first
+          });
+        
+        analystRatings = sortedRatings.slice(0, 3).map((rating: any) => {
           console.log('Processing rating:', rating);
-          // Extract just the firm name, removing any analyst name if present
-          const firmName = (rating.action_company || rating.firm || 'Analyst').split(' - ')[0].split(':')[0].trim();
-          let line = `${firmName} maintains ${rating.rating_current} rating`;
-          if (rating.pt_current) {
-            line += ` with $${parseFloat(rating.pt_current).toFixed(0)} price target`;
+          // Use analyst field for firm name (not action_company which contains actions like "Reiterates", "Maintains")
+          const firmName = rating.analyst || rating.firm || rating.analyst_firm || rating.firm_name || 'Unknown Firm';
+          const actionCompany = rating.action_company || rating.action || rating.rating_action || '';
+          const currentRating = rating.rating_current || rating.rating || rating.new_rating || '';
+          const priorRating = rating.rating_prior || '';
+          const priceTarget = rating.pt_current || rating.pt || rating.price_target || rating.target || null;
+          
+          // Format the action description based on action_company and rating changes
+          let actionText = '';
+          const actionLower = actionCompany.toLowerCase();
+          
+          if (actionLower.includes('upgrade') || (priorRating && currentRating && currentRating !== priorRating && priorRating.toLowerCase() < currentRating.toLowerCase())) {
+            actionText = `Upgraded to ${currentRating}`;
+          } else if (actionLower.includes('downgrade') || (priorRating && currentRating && currentRating !== priorRating)) {
+            actionText = `Downgrades to ${currentRating}`;
+          } else if (actionLower.includes('reiterates') || actionLower.includes('maintains')) {
+            actionText = actionCompany.charAt(0).toUpperCase() + actionCompany.slice(1).toLowerCase();
+            if (currentRating) {
+              actionText += ` ${currentRating}`;
+            }
+          } else if (actionCompany && currentRating) {
+            actionText = `${actionCompany} ${currentRating}`;
+          } else if (currentRating) {
+            actionText = currentRating;
+          }
+          
+          // Build the line: Firm Name: Action (Target $X.XX)
+          let line = `${firmName}: ${actionText}`;
+          if (priceTarget) {
+            line += ` (Target $${parseFloat(priceTarget.toString()).toFixed(2)})`;
           }
           console.log('Generated line:', line);
           return line;
@@ -1173,6 +1277,8 @@ export async function POST(request: Request) {
   try {
     const { ticker, contextBriefs, aiProvider } = await request.json();
     
+    console.log(`[WGO-NO-NEWS] ===== POST handler called for ticker: ${ticker} =====`);
+    
     if (!ticker) {
       return NextResponse.json({ error: 'Ticker is required.' }, { status: 400 });
     }
@@ -1192,8 +1298,10 @@ export async function POST(request: Request) {
       });
     }
 
-         // Fetch stock data
-     const stockData = await fetchStockData(ticker);
+    // Fetch stock data
+    console.log(`[WGO-NO-NEWS] Fetching initial stockData for ${ticker}...`);
+    const stockData = await fetchStockData(ticker);
+    console.log(`[WGO-NO-NEWS] Initial stockData fetched. priceAction.changePercent: ${stockData.priceAction?.changePercent}%`);
      
            // Get current date and market status for context
       const currentDate = new Date();
@@ -1265,10 +1373,33 @@ CRITICAL: Use the EXACT firm names from the data above. Do NOT use [FIRM NAME] p
        analystSection = `ANALYST RATINGS: No recent analyst ratings data available.`;
      }
 
+     // CRITICAL: Fetch fresh price data RIGHT BEFORE generating the article to ensure lead and Catalyst use the same data as price action line
+     // This MUST happen right before building the prompt, after all other data fetching is complete
+     console.log(`[PRICE ACTION SYNC] ===== Starting sync for ${ticker} (RIGHT BEFORE PROMPT BUILD) =====`);
+     console.log(`[PRICE ACTION SYNC] Fetching fresh price data for ${ticker} using shared helper...`);
+     const freshPriceData = await fetchPriceDataFromBenzinga(ticker);
+     console.log(`[PRICE ACTION SYNC] Fresh price data received: ${freshPriceData ? `changePercent=${freshPriceData.changePercent ?? 'undefined'}` : 'null'}`);
+     
+     if (freshPriceData && stockData.priceAction) {
+       const oldChangePercent = stockData.priceAction.changePercent;
+       stockData.priceAction.changePercent = freshPriceData.changePercent ?? 0; // Default to 0 for stockData (used in lead/catalyst)
+       stockData.priceAction.last = freshPriceData.quote.lastTradePrice || stockData.priceAction.last;
+       stockData.priceAction.previousClose = freshPriceData.quote.previousClose || freshPriceData.quote.previousClosePrice || stockData.priceAction.previousClose;
+       console.log(`[PRICE ACTION SYNC] ✅ SUCCESS: Updated stockData.priceAction.changePercent from ${oldChangePercent ?? 'undefined'} to ${freshPriceData.changePercent ?? 'undefined'} for ${ticker}`);
+       console.log(`[PRICE ACTION SYNC] Verified: stockData.priceAction.changePercent is now ${stockData.priceAction.changePercent ?? 'undefined'}`);
+     } else if (!freshPriceData) {
+       console.warn(`[PRICE ACTION SYNC] ⚠️ Failed to fetch fresh price data for ${ticker}`);
+     } else if (!stockData.priceAction) {
+       console.error(`[PRICE ACTION SYNC] ❌ stockData.priceAction is null for ${ticker}`);
+     }
+
            // Generate WGO No News story
            // Build lead paragraph instructions - use standard template for both enriched and regular flows
            // STANDARD FLOW: Use standard template regardless of context brief (maintain enriched process structure)
-           const dailyChangePercent = stockData.priceAction?.changePercent || 0;
+          const dailyChangePercent = stockData.priceAction?.changePercent || 0;
+          console.log(`[LEAD PARAGRAPH] ===== Building lead paragraph for ${ticker} =====`);
+          console.log(`[LEAD PARAGRAPH] Using dailyChangePercent: ${dailyChangePercent}% (from stockData.priceAction.changePercent)`);
+          console.log(`[LEAD PARAGRAPH] Direction: ${dailyChangePercent > 0 ? 'UP' : dailyChangePercent < 0 ? 'DOWN' : 'UNCHANGED'}`);
            
            // Narrative Logic Block for Lead Paragraph
            let narrativeGuidance = '';
@@ -1282,13 +1413,20 @@ CRITICAL: Use the EXACT firm names from the data above. Do NOT use [FIRM NAME] p
              narrativeGuidance = 'Describe the price movement accurately based on the percentage change.';
            }
            
+           // Determine direction for explicit instruction
+           const stockDirection = dailyChangePercent > 0 ? 'UP' : dailyChangePercent < 0 ? 'DOWN' : 'UNCHANGED';
+           
            const leadInstructions = `**LEAD PARAGRAPH (exactly 2 sentences):**
 
-LEAD PARAGRAPH LOGIC: Check the daily_change_percent variable (${dailyChangePercent.toFixed(2)}%) before writing.
+CRITICAL: The daily_change_percent variable is ${dailyChangePercent.toFixed(2)}%. This means the stock is ${stockDirection}. You MUST use this exact direction in your lead paragraph.
+
+LEAD PARAGRAPH LOGIC: Check the daily_change_percent variable (${dailyChangePercent.toFixed(2)}%) before writing. If the value is positive (${dailyChangePercent > 0 ? 'YES' : 'NO'}), the stock is UP. If the value is negative (${dailyChangePercent < 0 ? 'YES' : 'NO'}), the stock is DOWN. If the value is zero, the stock is UNCHANGED.
+
+CRITICAL: DO NOT include exact percentage values in the lead paragraph. Use only the direction: "up", "down", or "unchanged". For example, write "Microsoft Corp stock is down on Monday" NOT "Microsoft Corp stock is down 0.03% on Monday". The exact percentage appears only in the price action line at the bottom of the article.
 
 ${narrativeGuidance}
 
-- First sentence: Start with company name and ticker, describe actual price movement (up/down/unchanged) with time context using the appropriate narrative language above
+- First sentence: Start with company name and ticker in format "[Company Name] (NASDAQ:TICKER)" or "[Company Name] (NYSE:TICKER)", then describe actual price movement direction only (up/down/unchanged) with time context. Use "shares are" not "stock is". ${marketStatus === 'premarket' ? 'CRITICAL PREMARKET: Since the market status is PREMARKET, you MUST include "during premarket trading" in your first sentence. Example: "Microsoft Corp (NASDAQ:MSFT) shares are up during premarket trading on Monday, [context]".' : marketStatus === 'afterhours' ? 'CRITICAL AFTER-HOURS: Since the market status is AFTER-HOURS, you MUST include "during after-hours trading" in your first sentence. Example: "Microsoft Corp (NASDAQ:MSFT) shares are up during after-hours trading on Monday, [context]".' : 'Example: "Microsoft Corp (NASDAQ:MSFT) shares are down on Monday, [context]".'} DO NOT include percentage values - use only words like "up", "down", or "unchanged".
 ${isWeekend ? '- CRITICAL: Today is a weekend (Saturday or Sunday). Markets are CLOSED on weekends. Use PAST TENSE ("were down", "were up", "closed down", "closed up") instead of present tense ("are down", "are up"). Reference Friday as the last trading day.' : ''}
 - Second sentence: Brief context about sector correlation or market context - do NOT mention technical indicators here${isWeekend ? '. CRITICAL WEEKEND: Use past tense throughout this sentence (e.g., "The move came", "The decline came", "stocks were lower") since you are referring to Friday\'s trading action.' : ''}
 - CRITICAL WORD CHOICE: DO NOT use the word "amidst" - it's a clear AI writing pattern. Use natural alternatives like "as", "during", "on", or "following" instead. For example, use "The stock's decline came as" or "during a mixed market day" instead of "comes amidst".
@@ -1309,6 +1447,9 @@ ${isWeekend ? '- CRITICAL: Today is a weekend (Saturday or Sunday). Markets are 
 - DO NOT mention 12-month performance, 52-week ranges, or specific price levels here
 - Keep to 1-2 sentences maximum focused on market/sector correlation${isWeekend ? '. CRITICAL WEEKEND: Use past tense throughout (e.g., "came", "saw", "were", "was") since referring to Friday\'s trading action.' : ''}`;
            
+             // FINAL VERIFICATION: Log the exact value being sent to AI
+             console.log(`[FINAL VERIFICATION] About to send prompt to AI. dailyChangePercent=${dailyChangePercent}%, stockDirection=${stockDirection}, stockData.priceAction.changePercent=${stockData.priceAction?.changePercent}%`);
+             
              const prompt = `
 You are a financial journalist creating a WGO No News story for ${ticker}. Focus on technical analysis and market data.
 
@@ -1318,6 +1459,16 @@ CURRENT MARKET STATUS: ${marketStatus}
 STOCK DATA:
 ${JSON.stringify(stockData, null, 2)}
 
+⚠️⚠️⚠️ CRITICAL PRICE DIRECTION - READ THIS FIRST ⚠️⚠️⚠️
+The stock's changePercent in stockData.priceAction.changePercent is ${dailyChangePercent.toFixed(2)}%. 
+This means the stock is currently ${stockDirection}. 
+YOU MUST USE THIS EXACT DIRECTION IN YOUR LEAD PARAGRAPH.
+- If changePercent is POSITIVE (${dailyChangePercent > 0 ? 'YES, IT IS POSITIVE' : 'NO'}), the stock is UP - use words like "up", "gains", "rises", "advances"
+- If changePercent is NEGATIVE (${dailyChangePercent < 0 ? 'YES, IT IS NEGATIVE' : 'NO'}), the stock is DOWN - use words like "down", "declines", "falls", "drops"  
+- If changePercent is ZERO, the stock is UNCHANGED - use words like "flat", "unchanged", "holds steady"
+
+DO NOT IGNORE THIS. The price action line at the bottom of the article will show the same direction. Your lead paragraph MUST match.
+
 ${contextBrief ? `
 CONTEXT DOSSIER (optional reference - use standard template structure):
 ${JSON.stringify(contextBrief, null, 2)}
@@ -1325,15 +1476,18 @@ ${JSON.stringify(contextBrief, null, 2)}
 NOTE: The Context Dossier contains recent news and events for context, but follow the standard template structure below.
 ` : ''}
 
-${sectorPerformance ? `
+${sectorPerformance && marketStatus !== 'premarket' ? `
 COMPARISON LINE (USE THIS EXACT FORMAT AT THE START OF THE ARTICLE, IMMEDIATELY AFTER THE HEADLINE):
-${stockData.priceAction?.companyName || ticker} stock ${isWeekend ? 'was' : 'is'} ${stockData.priceAction?.changePercent >= 0 ? 'up' : 'down'} approximately ${Math.abs(stockData.priceAction?.changePercent || 0).toFixed(1)}% on ${currentDayName} versus a ${sectorPerformance.sectorChange.toFixed(1)}% ${sectorPerformance.sectorChange >= 0 ? 'gain' : 'loss'} in the ${sectorPerformance.sectorName} sector and a ${Math.abs(sectorPerformance.sp500Change).toFixed(1)}% ${sectorPerformance.sp500Change >= 0 ? 'gain' : 'loss'} in the S&P 500.
+${stockData.priceAction?.companyName || ticker} stock ${isWeekend ? 'was' : 'is'} ${stockData.priceAction?.changePercent >= 0 ? 'up' : 'down'} on ${currentDayName} versus a ${sectorPerformance.sectorChange.toFixed(1)}% ${sectorPerformance.sectorChange >= 0 ? 'gain' : 'loss'} in the ${sectorPerformance.sectorName} sector and a ${Math.abs(sectorPerformance.sp500Change).toFixed(1)}% ${sectorPerformance.sp500Change >= 0 ? 'gain' : 'loss'} in the S&P 500.
 
-CRITICAL: This comparison line should appear immediately after the headline and before the main story content. Use this exact format.
+CRITICAL: This comparison line should appear immediately after the headline and before the main story content. Use this exact format. DO NOT include this comparison line if the market status is premarket (sector and S&P 500 are not moving during premarket).
 
 CURRENT DAY SECTOR PERFORMANCE:
 - ${sectorPerformance.sectorName} sector: ${sectorPerformance.sectorChange.toFixed(2)}% ${sectorPerformance.sectorChange >= 0 ? 'gain' : 'loss'} on ${currentDayName}
 - S&P 500: ${sectorPerformance.sp500Change.toFixed(2)}% ${sectorPerformance.sp500Change >= 0 ? 'gain' : 'loss'} on ${currentDayName}
+` : marketStatus === 'premarket' && sectorPerformance ? `
+CRITICAL: The market is currently in PREMARKET status. DO NOT include a comparison line with sector or S&P 500 performance, as these indices are not moving during premarket (the data would be from Friday's close, which is misleading). Only mention the stock's premarket movement.
+` : ''}
 
 ${historicalSectorPerformance ? `
 HISTORICAL SECTOR PERFORMANCE (use this data ONLY when making claims about sector trends over time):
@@ -1342,7 +1496,6 @@ HISTORICAL SECTOR PERFORMANCE (use this data ONLY when making claims about secto
 
 CRITICAL: You can ONLY use phrases like "sector struggles", "sector pressure", "broader trend", or "technology stocks faced some pressure" if the historical data above shows the sector is actually down over the past week/month. If the historical data shows gains, do NOT make claims about sector struggles.
 ` : 'HISTORICAL SECTOR PERFORMANCE: Not available. You can ONLY reference the current day\'s sector performance. Do NOT make claims about sector trends over time (e.g., "sector struggles", "broader pressure") without historical data to support it.'}
-` : ''}
 
 MANDATORY DATA RULES:
 
@@ -1361,7 +1514,7 @@ CRITICAL INSTRUCTIONS:
 
 1. HEADLINE: Use format "[Company] Stock Is Trending ${currentDayName}: What's Going On?" (on its own line, no bold formatting)
 
-2. ${sectorPerformance ? 'COMPARISON LINE (right after headline): Use the comparison line format provided above.' : ''}
+2. ${sectorPerformance && marketStatus !== 'premarket' ? 'COMPARISON LINE (right after headline): Use the comparison line format provided above.' : marketStatus === 'premarket' ? 'COMPARISON LINE: DO NOT include a comparison line during premarket (sector and S&P 500 are not moving).' : ''}
 
 3. ${leadInstructions}
 
@@ -1435,30 +1588,43 @@ ${stockData.consensusRatings.sell_percentage ? `- Sell Rating: ${parseFloat(stoc
 ` : ''}
 
 CRITICAL FORMATTING REQUIREMENTS:
-- Start with ONE introductory sentence (e.g., "Investors are looking ahead to the company's next earnings report on [DATE].")
-- Then format the data as separate lines (not HTML bullets) with bold labels
-- Each data point should be on its own line with a blank line between them
+- Start with ONE brief introductory sentence ONLY (e.g., "Investors are looking ahead to the next earnings report on [DATE].") - DO NOT include earnings estimates or analyst data in this sentence
+- Then format the data as HTML bullet points (<ul> and <li> tags) with bold labels for "Hard Numbers":
+  - EPS Estimate
+  - Revenue Estimate
+  - Valuation (P/E Ratio) - if available
+- Then create a subsection "Analyst Consensus & Recent Actions:" (with bold label) that includes:
+  - The consensus rating and average price target
+  - Recent analyst moves (use the ANALYST RATINGS DATA provided above, format as: "[Firm Name]: [Action] (Target $X.XX)")
 - Format example:
-  <strong>EPS Estimate</strong>: $X.XX (Up/Down from $X.XX YoY)
+  <ul>
+  <li><strong>EPS Estimate</strong>: $X.XX (Up from $X.XX YoY)</li>
+  <li><strong>Revenue Estimate</strong>: $X.XX billion (Up from $X.XX billion YoY)</li>
+  <li><strong>Valuation</strong>: P/E of X.Xx (Indicates premium valuation)</li>
+  </ul>
+  
+  <strong>Analyst Consensus & Recent Actions:</strong>
+  The stock carries a [Rating] Rating with an average price target of $X.XX. Recent analyst moves include:
+  
+  <ul>
+  <li><strong>[Actual Firm Name 1]:</strong> [Action from data] (Target $X.XX)</li>
+  <li><strong>[Actual Firm Name 2]:</strong> [Action from data] (Target $X.XX)</li>
+  <li><strong>[Actual Firm Name 3]:</strong> [Action from data] (Target $X.XX)</li>
+  </ul>
+  
+  <strong>Valuation Insight:</strong> <em>[Analysis of P/E, consensus, and price target relationship]</em>
 
-  <strong>Revenue Estimate</strong>: $X.XX Billion (Up/Down from $X.XX Billion YoY)
-
-  <strong>Analyst Consensus</strong>: [Rating] Rating ($X.XX Avg Price Target)
+CRITICAL FORMATTING:
+- Recent analyst moves MUST be formatted as HTML bullet points using <ul> and <li> tags
+- Each firm name MUST be wrapped in <strong> tags (e.g., <strong>Wedbush:</strong>)
+- The Valuation Insight text MUST be wrapped in <em> tags for italics
+- Use the EXACT firm names and actions from the ANALYST RATINGS DATA provided above. DO NOT use placeholder text like "Firm A", "Firm B", "Firm C" or "[FIRM NAME]". Copy the exact firm names and actions from the data provided.
 
 IMPORTANT: When earnings estimates are available, ALWAYS compare them to the same quarter from the previous year (year-over-year comparison):
 - If eps_prior is available, compare eps_estimate to eps_prior (e.g., "up from $0.65 from the same quarter last year" or "down from $0.80 from the prior-year period")
 - If revenue_prior is available, compare revenue_estimate to revenue_prior (e.g., "revenue of $25.5M, up from $23.2M from the same quarter last year")
 - NOTE: eps_prior and revenue_prior represent the same quarter from the previous year, NOT the sequentially previous quarter
 - This year-over-year comparison helps investors understand whether expectations show growth, decline, or stability compared to the same period last year
-
-EXAMPLE APPROACH (adapt based on available data):
-${stockData.nextEarnings && stockData.consensusRatings ? `
-"Investors are looking ahead to the company's next earnings report, scheduled for ${formatEarningsDate(stockData.nextEarnings.date)}, ${stockData.nextEarnings.eps_estimate ? `with analysts expecting earnings per share of $${parseFloat(stockData.nextEarnings.eps_estimate.toString()).toFixed(2)}${stockData.nextEarnings.eps_prior ? `, ${parseFloat(stockData.nextEarnings.eps_estimate.toString()) > parseFloat(stockData.nextEarnings.eps_prior.toString()) ? 'up from' : parseFloat(stockData.nextEarnings.eps_estimate.toString()) < parseFloat(stockData.nextEarnings.eps_prior.toString()) ? 'down from' : 'compared to'} $${parseFloat(stockData.nextEarnings.eps_prior.toString()).toFixed(2)} from the same quarter last year` : ''}${stockData.nextEarnings.revenue_estimate && stockData.nextEarnings.revenue_prior ? ` and revenue of ${formatRevenue(stockData.nextEarnings.revenue_estimate as string | number | null)}${parseFloat((stockData.nextEarnings.revenue_estimate as string | number).toString()) > parseFloat((stockData.nextEarnings.revenue_prior as string | number).toString()) ? ', up from' : parseFloat((stockData.nextEarnings.revenue_estimate as string | number).toString()) < parseFloat((stockData.nextEarnings.revenue_prior as string | number).toString()) ? ', down from' : ', compared to'} ${formatRevenue(stockData.nextEarnings.revenue_prior as string | number | null)} from the same quarter last year` : ''}.` : 'which will provide key insights into the company\'s financial performance.'} ${stockData.priceAction?.companyName || ticker} has a consensus ${stockData.consensusRatings.consensus_rating ? stockData.consensusRatings.consensus_rating.charAt(0) + stockData.consensusRatings.consensus_rating.slice(1).toLowerCase() : 'N/A'} rating among analysts${stockData.consensusRatings.consensus_price_target ? ` with an average price target of $${parseFloat(stockData.consensusRatings.consensus_price_target.toString()).toFixed(2)}` : ''}, ${stockData.consensusRatings.buy_percentage && parseFloat(stockData.consensusRatings.buy_percentage.toString()) > 50 ? `reflecting a bullish outlook from the analyst community with ${parseFloat(stockData.consensusRatings.buy_percentage.toString()).toFixed(0)}% buy ratings.` : stockData.consensusRatings.hold_percentage && parseFloat(stockData.consensusRatings.hold_percentage.toString()) > 50 ? `reflecting a cautious stance with ${parseFloat(stockData.consensusRatings.hold_percentage.toString()).toFixed(0)}% hold ratings.` : 'as investors monitor the stock ahead of the earnings release.'}"
-` : stockData.nextEarnings ? `
-"Investors are looking ahead to the company's next earnings report, scheduled for ${formatEarningsDate(stockData.nextEarnings.date)}, ${stockData.nextEarnings.eps_estimate ? `with analysts expecting earnings per share of $${parseFloat(stockData.nextEarnings.eps_estimate.toString()).toFixed(2)}${stockData.nextEarnings.eps_prior ? `, ${parseFloat(stockData.nextEarnings.eps_estimate.toString()) > parseFloat(stockData.nextEarnings.eps_prior.toString()) ? 'up from' : parseFloat(stockData.nextEarnings.eps_estimate.toString()) < parseFloat(stockData.nextEarnings.eps_prior.toString()) ? 'down from' : 'compared to'} $${parseFloat(stockData.nextEarnings.eps_prior.toString()).toFixed(2)} from the same quarter last year` : ''}${stockData.nextEarnings.revenue_estimate && stockData.nextEarnings.revenue_prior ? ` and revenue of ${formatRevenue(stockData.nextEarnings.revenue_estimate as string | number | null)}${parseFloat((stockData.nextEarnings.revenue_estimate as string | number).toString()) > parseFloat((stockData.nextEarnings.revenue_prior as string | number).toString()) ? ', up from' : parseFloat((stockData.nextEarnings.revenue_estimate as string | number).toString()) < parseFloat((stockData.nextEarnings.revenue_prior as string | number).toString()) ? ', down from' : ', compared to'} ${formatRevenue(stockData.nextEarnings.revenue_prior as string | number | null)} from the same quarter last year` : ''}.` : 'which will provide key insights into the company\'s financial performance and outlook.'}"
-` : stockData.consensusRatings ? `
-"${stockData.priceAction?.companyName || ticker} has a consensus ${stockData.consensusRatings.consensus_rating ? stockData.consensusRatings.consensus_rating.charAt(0) + stockData.consensusRatings.consensus_rating.slice(1).toLowerCase() : 'N/A'} rating among analysts${stockData.consensusRatings.consensus_price_target ? ` with an average price target of $${parseFloat(stockData.consensusRatings.consensus_price_target.toString()).toFixed(2)}` : ''}, ${stockData.consensusRatings.buy_percentage && parseFloat(stockData.consensusRatings.buy_percentage.toString()) > 50 ? `reflecting a bullish outlook from the analyst community with ${parseFloat(stockData.consensusRatings.buy_percentage.toString()).toFixed(0)}% buy ratings.` : stockData.consensusRatings.hold_percentage && parseFloat(stockData.consensusRatings.hold_percentage.toString()) > 50 ? `reflecting a cautious stance with ${parseFloat(stockData.consensusRatings.hold_percentage.toString()).toFixed(0)}% hold ratings.` : 'as analysts monitor the stock\'s performance.'} ${stockData.consensusRatings.total_analyst_count ? `${stockData.consensusRatings.total_analyst_count} analysts are currently covering the stock.` : ''}"
-` : ''}
 ` : ''}
 
 SECTION BOUNDARIES (STRICT - CRITICAL):
@@ -1503,18 +1669,20 @@ BENZINGA EDGE SECTION RULES - FORMAT AS "TRADER'S SCORECARD":
 
 6. THE VERDICT: After the bullet list, add a 2-sentence summary that synthesizes the rankings and provides actionable insight. Start with "<strong>The Verdict:</strong> ${stockData.priceAction?.companyName || ticker.toUpperCase()}'s Benzinga Edge signal reveals..." and continue with the analysis. Example: "<strong>The Verdict:</strong> Tesla's Benzinga Edge signal reveals a classic 'High-Flyer' setup. While the Momentum (83) confirms the strong trend, the extremely low Value (4) score warns that the stock is priced for perfection—investors should ride the trend but use tight stop-losses."
 
-7. ORDER: Present rankings in order of importance: Momentum first, then Quality, then Value, then Growth (if available).
+7. IMAGE: After "The Verdict" summary, add this image HTML: <p><img src="https://www.benzinga.com/edge/${ticker.toUpperCase()}.png" alt="Benzinga Edge Rankings for ${stockData.priceAction?.companyName || ticker.toUpperCase()}" style="max-width: 100%; height: auto;" /></p>
+
+8. ORDER: Present rankings in order of importance: Momentum first, then Quality, then Value, then Growth (if available).
 ` : ''}
 
-${stockData.edgeRatings ? '9' : '8'}. PRICE ACTION LINE (at the end):
-- Format: "[TICKER] Price Action: [Company Name] shares were [up/down] [X.XX]% at $[XX.XX] [during premarket trading/during after-hours trading/while the market was closed] on [Day], according to <a href=\"https://pro.benzinga.com\">Benzinga Pro</a>."
-- All prices must be formatted to exactly 2 decimal places
-
-${stockData.edgeRatings ? '10' : '9'}. WRITING STYLE:
+${stockData.edgeRatings ? '10' : '8'}. WRITING STYLE:
 - Professional financial journalism
 - Active voice, clear language
 - No flowery phrases like "amidst" or "whilst"
 - Keep paragraphs to 2 sentences maximum
+
+CRITICAL: DO NOT generate any links, including "Also Read", "What to Know", "Read Next", or any other links. All links are added programmatically after the story is generated. Write only the article content without any links.
+
+CRITICAL: DO NOT generate a price action line at the end. The price action line is added programmatically after the story is generated. End your story after the last section (Technical Analysis, Earnings & Analyst Outlook, or Benzinga Edge Rankings, depending on what's included).
 
 IMPORTANT: Do NOT include any analyst ratings section in this story. This will be added in a separate step.
 
@@ -1583,72 +1751,12 @@ Generate the basic technical story now.`;
       }
     }
 
-    // Fetch related articles and add "Also Read" and "Read Next" sections
+    // Fetch related articles (will be inserted after price action line is added)
     const relatedArticles = await fetchRelatedArticles(ticker);
     
-    // Ensure "Also Read" and "Read Next" sections are included if related articles are available
-    if (relatedArticles && relatedArticles.length > 0) {
-      // Check if "Also Read" section exists and is in the correct position
-      const alsoReadPattern = /<p>Also Read:.*?<\/p>/i;
-      const alsoReadMatch = story.match(alsoReadPattern);
-      const alsoReadExists = !!alsoReadMatch;
-      
-      // Find where "Also Read" currently is
-      const paragraphs = story.split('</p>').filter(p => p.trim().length > 0);
-      const alsoReadIndex = alsoReadMatch ? paragraphs.findIndex(p => p.includes('Also Read:')) : -1;
-      
-      // Target position: after the second paragraph (index 2, which is the 3rd element: lead, para1, Also Read)
-      const targetIndex = 2;
-      
-      if (alsoReadExists && alsoReadIndex === targetIndex) {
-        console.log('"Also Read" section already exists in correct position');
-      } else {
-        // Remove existing "Also Read" if it's in the wrong place
-        if (alsoReadExists && alsoReadIndex !== -1) {
-          console.log(`Moving "Also Read" from position ${alsoReadIndex} to position ${targetIndex}`);
-          paragraphs.splice(alsoReadIndex, 1);
-        } else if (!alsoReadExists) {
-          console.log('Adding "Also Read" section');
-        }
-        
-        // Insert "Also Read" at the correct position (after second paragraph)
-        if (paragraphs.length >= 2) {
-          const alsoReadSection = `<p>Also Read: <a href="${relatedArticles[0].url}">${relatedArticles[0].headline}</a></p>`;
-          paragraphs.splice(targetIndex, 0, alsoReadSection);
-          // When we split by '</p>', each element doesn't have the closing tag
-          // But alsoReadSection already has '</p>', so we need to handle it differently
-          story = paragraphs.map(p => {
-            // If it already has '</p>' (like alsoReadSection), return as-is
-            if (p.trim().endsWith('</p>')) return p;
-            // Otherwise, add '</p>' back
-            return p + '</p>';
-          }).join('');
-          console.log('✅ "Also Read" section placed after second paragraph');
-        }
-      }
-      
-      // Check if "Read Next" section exists, if not add it after context but before price action
-      if (!story.includes('Read Next:')) {
-        console.log('Adding "Read Next" section');
-        const readNextSection = `<p>Read Next: <a href="${relatedArticles[1]?.url || relatedArticles[0].url}">${relatedArticles[1]?.headline || relatedArticles[0].headline}</a></p>`;
-        
-        // Find the price action section to insert before it
-        const priceActionIndex = story.indexOf('Price Action:');
-        if (priceActionIndex !== -1) {
-          // Insert before price action
-          const beforePriceAction = story.substring(0, priceActionIndex);
-          const priceActionAndAfter = story.substring(priceActionIndex);
-          story = `${beforePriceAction}\n\n${readNextSection}\n\n${priceActionAndAfter}`;
-        } else {
-          // If no price action found, add to the end
-          story += readNextSection;
-        }
-      } else {
-        console.log('"Read Next" section already exists');
-      }
-      } else {
-        console.log('No related articles available');
-      }
+    // Remove any "What to Know" links that the AI might have generated (safety measure)
+    story = story.replace(/<p>What to Know About.*?<\/p>/gi, '');
+    story = story.replace(/What to Know About.*?(?:<\/a>|<\/p>)/gi, '');
 
     // Post-process to add hyperlinks to earnings/analyst text (for both structured sections and paragraph format)
     // Add hyperlink to "next earnings report" if it appears in paragraph format (enriched flow)
@@ -1809,6 +1917,74 @@ Generate the basic technical story now.`;
         }
       }
     }
+
+    // Post-process Earnings & Analyst Outlook section to format analyst actions as bullet points with bolded firm names
+    // and ensure Valuation Insight is in italics
+    const earningsSectionMarker2 = /##\s*Section:\s*Earnings\s*&\s*Analyst\s*Outlook/i;
+    const earningsSectionMatch2 = story.match(earningsSectionMarker2);
+    if (earningsSectionMatch2 && earningsSectionMatch2.index !== undefined) {
+      const afterEarningsMarker2 = story.substring(earningsSectionMatch2.index + earningsSectionMatch2[0].length);
+      const nextSectionMatch2 = afterEarningsMarker2.match(/(##\s*Section:|##\s*Top\s*ETF|Price Action:)/i);
+      const earningsSectionEnd2 = nextSectionMatch2 ? nextSectionMatch2.index! : afterEarningsMarker2.length;
+      const earningsContent2 = afterEarningsMarker2.substring(0, earningsSectionEnd2);
+
+      // Format analyst actions as bullet points with bolded firm names
+      // Look for "Recent analyst moves include:" followed by firm names on separate lines
+      const analystActionsPattern = /Recent analyst moves include:([\s\S]*?)(?=\s*<strong>Valuation Insight:|$)/i;
+      const analystActionsMatch = earningsContent2.match(analystActionsPattern);
+      
+      if (analystActionsMatch && analystActionsMatch[1] && !analystActionsMatch[1].includes('<ul>')) {
+        const analystActionsText = analystActionsMatch[1].trim();
+        const analystLines = analystActionsText.split('\n').filter(line => {
+          const trimmed = line.trim();
+          return trimmed.length > 0 && trimmed.includes(':') && !trimmed.match(/^<[a-z]/i);
+        });
+        
+        if (analystLines.length > 0) {
+          const formattedAnalystActions = analystLines.map(line => {
+            const trimmedLine = line.trim();
+            // Extract firm name (everything before the first colon)
+            const colonIndex = trimmedLine.indexOf(':');
+            if (colonIndex > 0) {
+              const firmName = trimmedLine.substring(0, colonIndex).trim();
+              const actionText = trimmedLine.substring(colonIndex + 1).trim();
+              return `  <li><strong>${firmName}:</strong> ${actionText}</li>`;
+            }
+            return `  <li>${trimmedLine}</li>`;
+          }).join('\n');
+
+          const formattedBulletPoints = `\n\n<ul>\n${formattedAnalystActions}\n</ul>`;
+          
+          // Replace the plain text analyst actions with formatted bullet points
+          const beforeAnalystActions = earningsContent2.substring(0, analystActionsMatch.index! + 'Recent analyst moves include:'.length);
+          const afterAnalystActions = earningsContent2.substring(analystActionsMatch.index! + analystActionsMatch[0].length);
+          const newEarningsContent = beforeAnalystActions + formattedBulletPoints + afterAnalystActions;
+
+          // Replace the earnings section in the story
+          const beforeEarningsSection = story.substring(0, earningsSectionMatch2.index + earningsSectionMatch2[0].length);
+          const afterEarningsSection = story.substring(earningsSectionMatch2.index + earningsSectionMatch2[0].length + earningsSectionEnd2);
+          story = `${beforeEarningsSection}\n\n${newEarningsContent}\n\n${afterEarningsSection}`;
+          console.log('✅ Formatted analyst actions as bullet points with bolded firm names');
+        }
+      }
+
+      // Ensure Valuation Insight is in italics
+      // Match pattern: "<strong>Valuation Insight:</strong> [text]" where text is not already in <em> tags
+      const valuationInsightPattern = /(<strong>Valuation Insight:<\/strong>)\s*([^<\n]+?)(?=\s*(?:<strong>|##|$))/gi;
+      let valuationInsightReplaced = false;
+      story = story.replace(valuationInsightPattern, (match, label, text) => {
+        const trimmedText = text.trim();
+        // Only wrap in <em> if not already wrapped
+        if (!trimmedText.startsWith('<em>') && trimmedText.length > 0) {
+          valuationInsightReplaced = true;
+          return `${label} <em>${trimmedText}</em>`;
+        }
+        return match;
+      });
+      if (valuationInsightReplaced) {
+        console.log('✅ Ensured Valuation Insight is in italics');
+      }
+    }
     
     // Post-process Technical Analysis section to extract and format Key Levels
     const technicalSectionMarker = /##\s*Section:\s*Technical\s*Analysis/i;
@@ -1873,93 +2049,87 @@ Generate the basic technical story now.`;
       }
     }
 
-    // Generate and replace price action line with programmatically generated one
+    // Generate and add price action line programmatically
+    // First, remove any AI-generated price action lines (they should not be generated, but remove them if present)
     const priceActionCompanyName = stockData.priceAction?.companyName || ticker.toUpperCase();
     const programmaticPriceAction = await generatePriceActionLine(ticker, priceActionCompanyName, stockData);
     
     if (programmaticPriceAction) {
-      // Find and replace the AI-generated price action line
-      // Try multiple patterns to catch different formats (structured, enriched, etc.)
-      // Pattern 1: With <strong> tags and "Benzinga Pro data."
-      const priceActionPattern1 = /<strong>.*?Price Action:.*?<\/strong>.*?according to.*?Benzinga Pro.*?(?:data\.|\.)/is;
-      // Pattern 2: Without <strong> tags but with "Benzinga Pro" or "Benzinga Pro data"
-      const priceActionPattern2 = /Price Action:.*?according to.*?Benzinga Pro(?: data)?\./is;
-      // Pattern 3: More flexible - just "Price Action:" to "Benzinga Pro."
-      const priceActionPattern3 = /Price Action:.*?Benzinga Pro\./is;
+      // Remove any existing price action lines (AI might have generated one despite instructions)
+      // Pattern 1: With <strong> tags
+      story = story.replace(/<strong>.*?Price Action:.*?<\/strong>.*?according to.*?Benzinga Pro.*?(?:data\.|\.)/gis, '');
+      // Pattern 2: Without <strong> tags
+      story = story.replace(/Price Action:.*?according to.*?Benzinga Pro(?: data)?\./gis, '');
+      // Pattern 3: More flexible - just "Price Action:" to end of sentence
+      story = story.replace(/Price Action:.*?\.(?=\s|$)/gis, '');
       
-      if (priceActionPattern1.test(story)) {
-        story = story.replace(priceActionPattern1, programmaticPriceAction);
-        console.log('✅ Replaced AI-generated price action line with programmatic one (pattern 1)');
-      } else if (priceActionPattern2.test(story)) {
-        story = story.replace(priceActionPattern2, programmaticPriceAction);
-        console.log('✅ Replaced AI-generated price action line with programmatic one (pattern 2)');
-      } else if (priceActionPattern3.test(story)) {
-        story = story.replace(priceActionPattern3, programmaticPriceAction);
-        console.log('✅ Replaced AI-generated price action line with programmatic one (pattern 3)');
-      } else {
-        // If pattern not found, try to find "Price Action:" and replace the line
-        const priceActionIndex = story.indexOf('Price Action:');
-        if (priceActionIndex !== -1) {
-          // Find the end of the sentence (period or newline)
-          const afterPriceAction = story.substring(priceActionIndex);
-          const endMatch = afterPriceAction.match(/.*?\.(?=\s|$)/s);
-          if (endMatch) {
-            const beforePriceAction = story.substring(0, priceActionIndex);
-            const afterPriceActionLine = story.substring(priceActionIndex + endMatch[0].length);
-            story = beforePriceAction + programmaticPriceAction + afterPriceActionLine;
-            console.log('✅ Replaced AI-generated price action line by finding Price Action: marker');
-          } else {
-            // If still not found, append at the end
-            story += '\n\n' + programmaticPriceAction;
-            console.log('✅ Added programmatic price action line at the end (fallback)');
-          }
-        } else {
-          // If still not found, append at the end
-          story += '\n\n' + programmaticPriceAction;
-          console.log('✅ Added programmatic price action line at the end (no marker found)');
-        }
-      }
+      // Remove any standalone ticker symbols that might be leftover from price action removal
+      // Look for pattern like "MSFT\n\n" or "MSFT\n" at end of sections
+      story = story.replace(/\n\n([A-Z]{1,5})\n\n(?=Price Action:|##|$)/g, '\n\n');
+      story = story.replace(/\n([A-Z]{1,5})\n(?=Price Action:|##|$)/g, '\n');
     }
 
-    // Fetch and append ETF information after price action line
+    // Add "Also Read" section after the lead paragraph (second paragraph)
+    // Use stockData.recentArticles if available, otherwise fall back to relatedArticles
+    const articlesForAlsoRead = (stockData.recentArticles && stockData.recentArticles.length > 0) ? stockData.recentArticles : relatedArticles;
+    if (articlesForAlsoRead && articlesForAlsoRead.length > 0) {
+      const alsoReadPattern = /<p>Also Read:.*?<\/p>/i;
+      const alsoReadExists = alsoReadPattern.test(story);
+      
+      if (!alsoReadExists) {
+        // Find paragraphs by splitting on </p> tags
+        const paragraphs = story.split('</p>').filter(p => p.trim().length > 0);
+        const targetIndex = 2; // After second paragraph (lead sentence 1, lead sentence 2, Also Read)
+        
+        if (paragraphs.length >= 2) {
+          const alsoReadSection = `<p>Also Read: <a href="${articlesForAlsoRead[0].url}">${articlesForAlsoRead[0].headline}</a></p>`;
+          paragraphs.splice(targetIndex, 0, alsoReadSection);
+          story = paragraphs.map(p => {
+            if (p.trim().endsWith('</p>')) return p;
+            return p + '</p>';
+          }).join('');
+          console.log('✅ "Also Read" section placed after lead paragraph');
+        } else {
+          console.warn(`⚠️ Not enough paragraphs (${paragraphs.length}) to insert "Also Read" section. Need at least 2 paragraphs.`);
+        }
+      } else {
+        console.log('✅ "Also Read" section already exists in story');
+      }
+    } else {
+      console.warn('⚠️ No articles available for "Also Read" section. relatedArticles:', relatedArticles?.length || 0, 'stockData.recentArticles:', stockData.recentArticles?.length || 0);
+    }
+
+    // Fetch and append ETF information (before Price Action section)
     try {
       const etfs = await fetchETFs(ticker);
       if (etfs && etfs.length > 0) {
         const etfInfo = formatETFInfo(etfs, ticker);
         if (etfInfo) {
-          // Find the price action line and append ETF info after it
-          const priceActionIndex = story.indexOf('Price Action:');
-          if (priceActionIndex !== -1) {
-            // Find the end of the price action line (look for "according to Benzinga Pro data" or similar ending)
-            const afterPriceAction = story.substring(priceActionIndex);
-            // Look for the end pattern: period followed by optional space and "according to" or end of line
-            const endMatch = afterPriceAction.match(/(\.\s*(?:according to|$))/i);
-            if (endMatch && endMatch.index !== undefined) {
-              // Find the actual end after "according to Benzinga Pro data" or similar
-              const potentialEnd = priceActionIndex + endMatch.index + endMatch[0].length;
-              // Look for the period that ends the sentence after "according to"
-              const fullEndMatch = story.substring(potentialEnd - 50, potentialEnd + 50).match(/(according to[^.]*\.)/i);
-              if (fullEndMatch) {
-                const insertIndex = story.indexOf(fullEndMatch[0], potentialEnd - 50) + fullEndMatch[0].length;
-                story = story.substring(0, insertIndex) + etfInfo + story.substring(insertIndex);
-              } else {
-                // Fallback: insert after the period we found
-                const insertIndex = priceActionIndex + endMatch.index + 1;
-                story = story.substring(0, insertIndex) + etfInfo + story.substring(insertIndex);
-              }
-            } else {
-              // If we can't find the end, append at the end of the story
-              story += etfInfo;
-            }
-          } else {
-            // If no price action found, append at the end
-            story += etfInfo;
-          }
+          // Append ETF info at the end (before Price Action section)
+          story += '\n\n' + etfInfo;
+          console.log('✅ Added ETF information');
         }
       }
     } catch (etfError) {
       console.error(`Error fetching ETF data for ${ticker}:`, etfError);
       // Continue without ETF info if there's an error
+    }
+    
+    // Add Price Action section with header and price action line at the very end
+    if (programmaticPriceAction) {
+      story += '\n\n## Section: Price Action\n\n' + programmaticPriceAction;
+      console.log('✅ Added Price Action section with header');
+    }
+    
+    // Add "Read Next" section after Price Action
+    // Use stockData.recentArticles if available, otherwise fall back to relatedArticles
+    const articlesForReadNext = (stockData.recentArticles && stockData.recentArticles.length > 0) ? stockData.recentArticles : relatedArticles;
+    if (articlesForReadNext && articlesForReadNext.length > 0) {
+      if (!story.includes('Read Next:')) {
+        const readNextSection = `<p>Read Next: <a href="${articlesForReadNext[1]?.url || articlesForReadNext[0].url}">${articlesForReadNext[1]?.headline || articlesForReadNext[0].headline}</a></p>`;
+        story += '\n\n' + readNextSection;
+        console.log('✅ "Read Next" section added after Price Action');
+      }
     }
 
     // If contextBrief was provided (Enrich First mode), automatically inject SEO subheads

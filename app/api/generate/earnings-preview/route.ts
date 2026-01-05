@@ -657,13 +657,14 @@ async function fetchPERatio(ticker: string) {
   }
 }
 
-// Generate price action line
+// Generate price action line (matching price-action route logic)
 async function generatePriceAction(ticker: string, companyName: string): Promise<string> {
   try {
     const url = `https://api.benzinga.com/api/v2/quoteDelayed?token=${process.env.BENZINGA_API_KEY}&symbols=${ticker}`;
     const res = await fetch(url);
     
     if (!res.ok) {
+      console.error(`Failed to fetch price action for ${ticker}:`, res.statusText);
       return '';
     }
     
@@ -677,32 +678,77 @@ async function generatePriceAction(ticker: string, companyName: string): Promise
       return '';
     }
     
+    const symbol = quote.symbol ?? ticker.toUpperCase();
+    
+    if (!symbol || !quote.lastTradePrice) {
+      return '';
+    }
+    
     const marketStatus = getMarketStatusTimeBased();
+    
+    // Get current day name in Eastern Time (not the close date, which might be previous day)
+    // Markets are closed on weekends, so return Friday for Saturday/Sunday
     const now = new Date();
     const formatter = new Intl.DateTimeFormat('en-US', {
       timeZone: 'America/New_York',
       weekday: 'long',
     });
-    const dayOfWeek = formatter.format(now);
+    const currentDayName = formatter.format(now);
+    // If it's a weekend, return Friday as the last trading day
+    const dayOfWeek = (currentDayName === 'Sunday' || currentDayName === 'Saturday') ? 'Friday' : currentDayName;
+    const isWeekend = currentDayName === 'Sunday' || currentDayName === 'Saturday';
     
-    const quoteClose = typeof quote.close === 'number' ? quote.close : (quote.close ? parseFloat(quote.close) : null);
-    const quotePreviousClose = typeof quote.previousClosePrice === 'number' ? quote.previousClosePrice : 
-                               (quote.previousClose ? parseFloat(quote.previousClose) : null);
+    const changePercent = typeof quote.changePercent === 'number' ? quote.changePercent : 0;
     
+    // Calculate regular session and after-hours changes separately
     let regularSessionChange = 0;
-    let regularSessionClose = quoteClose || 0;
+    let afterHoursChange = 0;
+    let regularUpDown = '';
+    let afterHoursUpDown = '';
     
-    if (quoteClose && quotePreviousClose && quotePreviousClose > 0) {
-      regularSessionChange = ((quoteClose - quotePreviousClose) / quotePreviousClose) * 100;
-      regularSessionClose = quoteClose;
+    if (marketStatus === 'afterhours' && quote.close && quote.lastTradePrice && quote.previousClosePrice) {
+      // Regular session change: (regular_close - previous_close) / previous_close * 100
+      regularSessionChange = ((quote.close - quote.previousClosePrice) / quote.previousClosePrice) * 100;
+      regularUpDown = regularSessionChange > 0 ? 'up' : regularSessionChange < 0 ? 'down' : 'unchanged';
+      
+      // After-hours change: (current - regular_close) / regular_close * 100
+      afterHoursChange = ((quote.lastTradePrice - quote.close) / quote.close) * 100;
+      afterHoursUpDown = afterHoursChange > 0 ? 'up' : afterHoursChange < 0 ? 'down' : 'unchanged';
     }
     
-    const changePercent = regularSessionChange !== 0 ? regularSessionChange : (typeof quote.changePercent === 'number' ? quote.changePercent : 0);
+    // Format price to ensure exactly 2 decimal places
+    const lastPrice = typeof quote.lastTradePrice === 'number' ? quote.lastTradePrice : parseFloat(quote.lastTradePrice);
+    const formattedPrice = lastPrice.toFixed(2);
+    const priceString = String(formattedPrice);
+    
     const upDown = changePercent > 0 ? 'up' : changePercent < 0 ? 'down' : 'unchanged';
     const absChange = Math.abs(changePercent).toFixed(2);
-    const displayPrice = regularSessionClose.toFixed(2);
     
-    return `<strong>${ticker.toUpperCase()} Price Action:</strong> ${companyName} shares were ${upDown} ${absChange}% at $${displayPrice} at the time of publication on ${dayOfWeek}, according to Benzinga Pro data.`;
+    // Build price action text with explicit string concatenation
+    let priceActionText = '';
+    
+    if (marketStatus === 'open') {
+      priceActionText = `${symbol} Price Action: ${companyName} shares were ${upDown} ${absChange}% at $${priceString} at the time of publication on ${dayOfWeek}`;
+    } else if (marketStatus === 'afterhours' && quote.close && quote.lastTradePrice && quote.previousClosePrice) {
+      // Show both regular session and after-hours moves when we have the necessary data
+      const absRegularChange = Math.abs(regularSessionChange).toFixed(2);
+      const absAfterHoursChange = Math.abs(afterHoursChange).toFixed(2);
+      priceActionText = `${symbol} Price Action: ${companyName} shares were ${regularUpDown} ${absRegularChange}% during regular trading and ${afterHoursUpDown} ${absAfterHoursChange}% in after-hours trading on ${dayOfWeek}, last trading at $${priceString}`;
+    } else {
+      // For premarket/closed, use standard format
+      let marketStatusPhrase = '';
+      if (marketStatus === 'premarket') {
+        marketStatusPhrase = ' during premarket trading';
+      } else if (marketStatus === 'afterhours') {
+        marketStatusPhrase = ' during after-hours trading';
+      } else if (marketStatus === 'closed') {
+        marketStatusPhrase = isWeekend ? '' : ' while the market was closed';
+      }
+      const timePhrase = (marketStatus === 'closed' && !isWeekend) ? ' at the time of publication' : '';
+      priceActionText = `${symbol} Price Action: ${companyName} shares were ${upDown} ${absChange}% at $${priceString}${marketStatusPhrase}${timePhrase} on ${dayOfWeek}`;
+    }
+    
+    return `<strong>${priceActionText}</strong>, according to <a href="https://pro.benzinga.com/dashboard">Benzinga Pro data</a>.`;
   } catch (error) {
     console.error(`Error generating price action for ${ticker}:`, error);
     return '';
@@ -1225,11 +1271,27 @@ Generate the earnings preview article:`;
 
 export async function POST(request: Request) {
   try {
-    const { tickers, provider, skipSEOSubheads, contextBriefs } = await request.json();
+    console.log('[EARNINGS PREVIEW] Received request');
+    
+    // Parse request body with error handling
+    let requestBody;
+    try {
+      requestBody = await request.json();
+      console.log('[EARNINGS PREVIEW] Request body keys:', Object.keys(requestBody));
+      console.log('[EARNINGS PREVIEW] Request body:', JSON.stringify(requestBody).substring(0, 500));
+    } catch (parseError) {
+      console.error('[EARNINGS PREVIEW] Error parsing request body:', parseError);
+      return NextResponse.json({ error: 'Invalid JSON in request body' }, { status: 400 });
+    }
+    
+    const { tickers, provider, skipSEOSubheads, contextBriefs } = requestBody;
 
     if (!tickers || !tickers.trim()) {
+      console.error('[EARNINGS PREVIEW] Missing tickers in request');
       return NextResponse.json({ error: 'Please provide ticker(s)' }, { status: 400 });
     }
+    
+    console.log('[EARNINGS PREVIEW] Processing tickers:', tickers);
 
     const tickerList = tickers.split(',').map((t: string) => t.trim().toUpperCase());
     const aiProviderOption: AIProvider | undefined = provider && (provider === 'openai' || provider === 'gemini')
@@ -1448,12 +1510,23 @@ export async function POST(request: Request) {
       })
     );
 
+    console.log('[EARNINGS PREVIEW] Successfully generated previews:', previews.length);
     return NextResponse.json({ previews });
   } catch (error: any) {
-    console.error('Error in earnings preview endpoint:', error);
+    console.error('[EARNINGS PREVIEW] Error in earnings preview endpoint:', error);
+    console.error('[EARNINGS PREVIEW] Error stack:', error?.stack);
+    console.error('[EARNINGS PREVIEW] Error name:', error?.name);
+    
+    // Return detailed error for debugging
+    const errorMessage = error?.message || 'Failed to generate earnings preview';
+    const errorStatus = error?.status || 500;
+    
     return NextResponse.json(
-      { error: error.message || 'Failed to generate earnings preview' },
-      { status: 500 }
+      { 
+        error: errorMessage,
+        details: process.env.NODE_ENV === 'development' ? error?.stack : undefined
+      },
+      { status: errorStatus }
     );
   }
 }

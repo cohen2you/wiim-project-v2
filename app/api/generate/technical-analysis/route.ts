@@ -151,30 +151,56 @@ async function fetchRelatedArticles(ticker: string, excludeUrl?: string): Promis
   }
 }
 
-// Generate price action using Benzinga API (Price Action Only mode)
-async function generatePriceAction(ticker: string): Promise<string> {
+// Fetch price data from Benzinga API (shared helper for both price action line and sync)
+async function fetchPriceDataFromBenzinga(ticker: string): Promise<{ quote: any; changePercent: number | undefined } | null> {
   try {
-    const url = `https://api.benzinga.com/api/v2/quoteDelayed?token=${process.env.BENZINGA_API_KEY}&symbols=${ticker}`;
+    const BENZINGA_API_KEY = process.env.BENZINGA_API_KEY;
+    if (!BENZINGA_API_KEY) {
+      console.error('[PRICE DATA] BENZINGA_API_KEY not found');
+      return null;
+    }
+    
+    const url = `https://api.benzinga.com/api/v2/quoteDelayed?token=${BENZINGA_API_KEY}&symbols=${ticker}`;
     const res = await fetch(url);
     
     if (!res.ok) {
-      console.error(`Failed to fetch price action for ${ticker}:`, res.statusText);
-      return '';
+      console.error(`[PRICE DATA] Failed to fetch price data for ${ticker}:`, res.statusText);
+      return null;
     }
     
     const data = await res.json();
     if (!data || typeof data !== 'object') {
-      return '';
+      return null;
     }
     
     const quote = data[ticker.toUpperCase()];
-    if (!quote || typeof quote !== 'object') {
+    if (!quote || typeof quote !== 'object' || !quote.lastTradePrice) {
+      return null;
+    }
+    
+    // Use Benzinga's changePercent if provided - don't override it with manual calculations
+    // During open market hours, if changePercent is 0, it might not be updated yet by Benzinga's delayed feed
+    // In that case, we'll skip showing the percentage to avoid misleading "unchanged 0.00%" messages
+    const changePercent = typeof quote.changePercent === 'number' ? quote.changePercent : undefined;
+    return { quote, changePercent };
+  } catch (error) {
+    console.error(`[PRICE DATA] Error fetching price data for ${ticker}:`, error);
+    return null;
+  }
+}
+
+// Generate price action using Benzinga API (matching price-action route logic)
+async function generatePriceAction(ticker: string): Promise<string> {
+  try {
+    // Fetch price action data directly from Benzinga API
+    const priceData = await fetchPriceDataFromBenzinga(ticker);
+    if (!priceData) {
       return '';
     }
     
+    const { quote, changePercent } = priceData;
     const symbol = quote.symbol ?? ticker.toUpperCase();
     const companyName = normalizeCompanyName(quote.name ?? symbol);
-    const lastPrice = formatPriceValue(quote.lastTradePrice);
     
     if (!symbol || !quote.lastTradePrice) {
       return '';
@@ -194,106 +220,81 @@ async function generatePriceAction(ticker: string): Promise<string> {
     const dayOfWeek = (currentDayName === 'Sunday' || currentDayName === 'Saturday') ? 'Friday' : currentDayName;
     const isWeekend = currentDayName === 'Sunday' || currentDayName === 'Saturday';
     
-    let marketStatusPhrase = '';
-    if (marketStatus === 'premarket') {
-      marketStatusPhrase = ' during premarket trading';
-    } else if (marketStatus === 'afterhours') {
-      marketStatusPhrase = ' during after-hours trading';
-    } else if (marketStatus === 'closed') {
-      // On weekends, don't include "while the market was closed" phrase
-      marketStatusPhrase = isWeekend ? '' : ' while the market was closed';
-    }
-    
-    // ALWAYS calculate regular session change from close vs previousClosePrice (matches main article calculation)
-    // This ensures consistency - the price action line uses the same calculation as the article lede
+    // Calculate regular session and after-hours changes separately
     let regularSessionChange = 0;
     let afterHoursChange = 0;
-    let hasAfterHoursData = false;
-    let regularSessionClose = 0;
+    let regularUpDown = '';
+    let afterHoursUpDown = '';
     
-    // Calculate regular session change (close vs previousClosePrice)
-    const quoteClose = typeof quote.close === 'number' ? quote.close : (quote.close ? parseFloat(quote.close) : null);
-    const quotePreviousClose = typeof quote.previousClosePrice === 'number' ? quote.previousClosePrice : 
-                               (typeof quote.previousClose === 'number' ? quote.previousClose : 
-                               (quote.previousClosePrice ? parseFloat(quote.previousClosePrice) : 
-                               (quote.previousClose ? parseFloat(quote.previousClose) : null)));
-    
-    // When markets are closed (holiday), use lastTradePrice as the close if it's more recent/relevant
-    let effectiveClose = quoteClose;
-    if (marketStatus === 'closed' && quote.lastTradePrice) {
-      const lastTrade = typeof quote.lastTradePrice === 'number' ? quote.lastTradePrice : parseFloat(quote.lastTradePrice);
-      if (!isNaN(lastTrade) && lastTrade > 0) {
-        // Use lastTradePrice as the close when markets are closed (it should be the most recent trading day's close)
-        effectiveClose = lastTrade;
-        console.log(`[PRICE ACTION] Markets closed - using lastTradePrice as close: ${effectiveClose}`);
-      }
+    if (marketStatus === 'afterhours' && quote.close && quote.lastTradePrice && quote.previousClosePrice) {
+      // Regular session change: (regular_close - previous_close) / previous_close * 100
+      regularSessionChange = ((quote.close - quote.previousClosePrice) / quote.previousClosePrice) * 100;
+      regularUpDown = regularSessionChange > 0 ? 'up' : regularSessionChange < 0 ? 'down' : 'unchanged';
+      
+      // After-hours change: (current - regular_close) / regular_close * 100
+      afterHoursChange = ((quote.lastTradePrice - quote.close) / quote.close) * 100;
+      afterHoursUpDown = afterHoursChange > 0 ? 'up' : afterHoursChange < 0 ? 'down' : 'unchanged';
     }
     
-    if (effectiveClose && quotePreviousClose && quotePreviousClose > 0 && !isNaN(effectiveClose) && !isNaN(quotePreviousClose)) {
-      regularSessionClose = effectiveClose;
-      regularSessionChange = ((effectiveClose - quotePreviousClose) / quotePreviousClose) * 100;
-      console.log(`[PRICE ACTION] Regular session change: ${regularSessionChange.toFixed(2)}% (close: ${effectiveClose}, previousClose: ${quotePreviousClose})`);
-    } else if (quote.change && quotePreviousClose && quotePreviousClose > 0) {
-      // Fallback: calculate from change amount
-      const quoteChange = typeof quote.change === 'number' ? quote.change : parseFloat(quote.change);
-      if (!isNaN(quoteChange)) {
-        regularSessionClose = quotePreviousClose + quoteChange;
-        regularSessionChange = (quoteChange / quotePreviousClose) * 100;
-        console.log(`[PRICE ACTION] Regular session change from change amount: ${regularSessionChange.toFixed(2)}%`);
-      }
-    }
+    // Format price to ensure exactly 2 decimal places
+    const lastPrice = typeof quote.lastTradePrice === 'number' ? quote.lastTradePrice : parseFloat(quote.lastTradePrice);
+    const formattedPrice = lastPrice.toFixed(2);
+    const priceString = String(formattedPrice);
     
-    // Calculate after-hours change if we have after-hours data
-    if (marketStatus === 'afterhours' && regularSessionClose > 0 && quote.lastTradePrice) {
-      const lastTrade = typeof quote.lastTradePrice === 'number' ? quote.lastTradePrice : parseFloat(quote.lastTradePrice);
-      if (!isNaN(lastTrade) && lastTrade !== regularSessionClose) {
-        afterHoursChange = ((lastTrade - regularSessionClose) / regularSessionClose) * 100;
-      hasAfterHoursData = true;
-        console.log(`[PRICE ACTION] After-hours change: ${afterHoursChange.toFixed(2)}% (lastTrade: ${lastTrade}, close: ${regularSessionClose})`);
-      }
-    }
+    // During open market hours, if changePercent is 0 or missing, skip the change percentage
+    // (Benzinga's delayed feed may not have updated it yet, showing 0.00% is misleading)
+    // For other market statuses (premarket, afterhours, closed), show 0 if provided (stock truly unchanged)
+    const shouldShowChangePercent = marketStatus === 'open'
+      ? (changePercent !== undefined && changePercent !== 0)
+      : changePercent !== undefined;
     
-    // For premarket, calculate premarket change (current price vs previous close)
-    let premarketChange = 0;
-    let premarketPrice = 0;
-    if (marketStatus === 'premarket' && quotePreviousClose && quotePreviousClose > 0 && quote.lastTradePrice) {
-      premarketPrice = typeof quote.lastTradePrice === 'number' ? quote.lastTradePrice : parseFloat(quote.lastTradePrice);
-      if (!isNaN(premarketPrice)) {
-        premarketChange = ((premarketPrice - quotePreviousClose) / quotePreviousClose) * 100;
-        console.log(`[PRICE ACTION] Premarket change: ${premarketChange.toFixed(2)}% (premarketPrice: ${premarketPrice}, previousClose: ${quotePreviousClose})`);
-      }
-    }
+    const changePercentForCalc = changePercent ?? 0;
+    const upDown = changePercentForCalc > 0 ? 'up' : changePercentForCalc < 0 ? 'down' : 'unchanged';
+    const absChange = Math.abs(changePercentForCalc).toFixed(2);
     
-    // Determine which change percent and price to use based on market status
-    let changePercent = 0;
-    let displayPrice = 0;
+    // Build price action text with explicit string concatenation
+    let priceActionText = '';
     
-    if (marketStatus === 'premarket' && premarketChange !== 0 && premarketPrice > 0) {
-      // Use premarket data when in premarket
-      changePercent = premarketChange;
-      displayPrice = premarketPrice;
-    } else if (marketStatus === 'afterhours' && hasAfterHoursData && afterHoursChange !== 0 && quote.lastTradePrice) {
-      // Use after-hours data when in after-hours
-      const lastTrade = typeof quote.lastTradePrice === 'number' ? quote.lastTradePrice : parseFloat(quote.lastTradePrice);
-      if (!isNaN(lastTrade)) {
-        changePercent = afterHoursChange;
-        displayPrice = lastTrade;
+    if (marketStatus === 'open') {
+      if (shouldShowChangePercent) {
+        priceActionText = `${symbol} Price Action: ${companyName} shares were ${upDown} ${absChange}% at $${priceString} at the time of publication on ${dayOfWeek}`;
+      } else {
+        // Skip change percentage if it's 0 and we couldn't calculate it (Benzinga hasn't updated yet)
+        priceActionText = `${symbol} Price Action: ${companyName} shares were trading at $${priceString} at the time of publication on ${dayOfWeek}`;
       }
+    } else if (marketStatus === 'afterhours' && quote.close && quote.lastTradePrice && quote.previousClosePrice) {
+      // Show both regular session and after-hours moves when we have the necessary data
+      const absRegularChange = Math.abs(regularSessionChange).toFixed(2);
+      const absAfterHoursChange = Math.abs(afterHoursChange).toFixed(2);
+      priceActionText = `${symbol} Price Action: ${companyName} shares were ${regularUpDown} ${absRegularChange}% during regular trading and ${afterHoursUpDown} ${absAfterHoursChange}% in after-hours trading on ${dayOfWeek}, last trading at $${priceString}`;
     } else {
-      // Use regular session data
-      changePercent = regularSessionChange !== 0 ? regularSessionChange : (typeof quote.changePercent === 'number' ? quote.changePercent : 0);
-      displayPrice = regularSessionClose || quoteClose || (quote.lastTradePrice ? (typeof quote.lastTradePrice === 'number' ? quote.lastTradePrice : parseFloat(quote.lastTradePrice)) : 0);
+      // For premarket/closed, use standard format
+      let marketStatusPhrase = '';
+      if (marketStatus === 'premarket') {
+        marketStatusPhrase = ' during premarket trading';
+      } else if (marketStatus === 'afterhours') {
+        marketStatusPhrase = ' during after-hours trading';
+      } else if (marketStatus === 'closed') {
+        marketStatusPhrase = isWeekend ? '' : ' while the market was closed';
+      }
+      const timePhrase = (marketStatus === 'closed' && !isWeekend) ? ' at the time of publication' : '';
+      if (shouldShowChangePercent) {
+        priceActionText = `${symbol} Price Action: ${companyName} shares were ${upDown} ${absChange}% at $${priceString}${marketStatusPhrase}${timePhrase} on ${dayOfWeek}`;
+      } else {
+        // For premarket/closed/afterhours, if changePercent is undefined, just show price
+        priceActionText = `${symbol} Price Action: ${companyName} shares were trading at $${priceString}${marketStatusPhrase}${timePhrase} on ${dayOfWeek}`;
+      }
     }
     
-    const upDown = changePercent > 0 ? 'up' : changePercent < 0 ? 'down' : 'unchanged';
-    const absChange = Math.abs(changePercent).toFixed(2);
-    const formattedPrice = formatPriceValue(displayPrice);
-    
-    // Build simple 1-sentence price action: Current Price, % Change (no volume)
-    // Note: dayOfWeek and marketStatusPhrase are already calculated earlier in the function
-    // On weekends or when market is closed (but not premarket/afterhours), remove "at the time of publication"
-    const timePhrase = (marketStatus === 'closed' && !isWeekend) ? ' at the time of publication' : '';
-    return `<strong>${symbol} Price Action:</strong> ${companyName} shares were ${upDown} ${absChange}% at $${formattedPrice}${marketStatusPhrase}${timePhrase} on ${dayOfWeek}, according to <a href="https://pro.benzinga.com/dashboard">Benzinga Pro data</a>.`;
+    // Only bold the ticker prefix (e.g., "MSFT Price Action:"), not the entire line
+    const prefixMatch = priceActionText.match(/^([A-Z]+\s+Price Action:)\s+(.+)$/);
+    if (prefixMatch) {
+      const prefix = prefixMatch[1];
+      const rest = prefixMatch[2];
+      return `<strong>${prefix}</strong> ${rest}, according to <a href="https://pro.benzinga.com/dashboard">Benzinga Pro data</a>.`;
+    }
+    // Fallback: if pattern doesn't match, return as-is with prefix bolded
+    return `<strong>${priceActionText}</strong>, according to <a href="https://pro.benzinga.com/dashboard">Benzinga Pro data</a>.`;
   } catch (error) {
     console.error(`Error generating price action for ${ticker}:`, error);
     return '';
@@ -3126,8 +3127,29 @@ async function generateTechnicalAnalysis(data: TechnicalAnalysisData, provider?:
       }
 
     }
-
     
+    // CRITICAL: Fetch fresh price data RIGHT BEFORE generating the article to ensure lead and Catalyst use the same data as price action line
+    // This MUST happen right before building the prompt, after all other data fetching is complete
+    console.log(`[PRICE ACTION SYNC] ===== Starting sync for ${data.symbol} (RIGHT BEFORE PROMPT BUILD) =====`);
+    console.log(`[PRICE ACTION SYNC] Fetching fresh price data for ${data.symbol} using shared helper...`);
+    const freshPriceData = await fetchPriceDataFromBenzinga(data.symbol);
+    console.log(`[PRICE ACTION SYNC] Fresh price data received: ${freshPriceData ? `changePercent=${freshPriceData.changePercent ?? 'undefined'}` : 'null'}`);
+    
+    if (freshPriceData) {
+      const oldChangePercent = data.changePercent;
+      // Update changePercent with fresh data from API (use 0 as fallback for data structure)
+      data.changePercent = freshPriceData.changePercent ?? 0;
+      // Also update currentPrice if available
+      if (freshPriceData.quote.lastTradePrice) {
+        data.currentPrice = typeof freshPriceData.quote.lastTradePrice === 'number' 
+          ? freshPriceData.quote.lastTradePrice 
+          : parseFloat(freshPriceData.quote.lastTradePrice);
+      }
+      console.log(`[PRICE ACTION SYNC] ✅ SUCCESS: Updated data.changePercent from ${oldChangePercent}% to ${data.changePercent}% for ${data.symbol}`);
+      console.log(`[PRICE ACTION SYNC] Verified: data.changePercent is now ${data.changePercent}%`);
+    } else {
+      console.warn(`[PRICE ACTION SYNC] ⚠️ Failed to fetch fresh price data for ${data.symbol}`);
+    }
 
     const prompt = `You are a professional technical analyst writing a comprehensive stock analysis focused on longer-term trends and technical indicators. Today is ${dayOfWeek}.
 
@@ -3500,7 +3522,9 @@ BENZINGA EDGE SECTION RULES - FORMAT AS "TRADER'S SCORECARD":
 
 6. THE VERDICT: After the bullet list, add a 2-sentence summary that synthesizes the rankings and provides actionable insight. Start with "<strong>The Verdict:</strong> ${data.companyName || data.symbol}'s Benzinga Edge signal reveals..." and continue with the analysis. Example: "<strong>The Verdict:</strong> Tesla's Benzinga Edge signal reveals a classic 'High-Flyer' setup. While the Momentum (83) confirms the strong trend, the extremely low Value (4) score warns that the stock is priced for perfection—investors should ride the trend but use tight stop-losses."
 
-7. ORDER: Present rankings in order of importance: Momentum first, then Quality, then Value, then Growth (if available).
+7. IMAGE: After "The Verdict" summary, add this image HTML: <p><img src="https://www.benzinga.com/edge/${data.symbol.toUpperCase()}.png" alt="Benzinga Edge Rankings for ${data.companyName || data.symbol}" style="max-width: 100%; height: auto;" /></p>
+
+8. ORDER: Present rankings in order of importance: Momentum first, then Quality, then Value, then Growth (if available).
 ` : ''}
 
 IMPORTANT: CRITICAL RULE - Only mention "analysts expecting earnings per share" if eps_estimate is actually available. Do NOT use eps_prior (same quarter from prior year) as an expectation. eps_prior is only for comparison purposes when eps_estimate exists. If eps_estimate is null/not available, do NOT write "analysts expecting earnings per share" - instead, just mention the earnings date without specific estimates.
@@ -4113,7 +4137,7 @@ export async function POST(request: Request) {
 
   try {
 
-    const { tickers, provider, newsUrl, scrapedContent, selectedArticles, primaryArticle } = await request.json();
+    const { tickers, provider, newsUrl, scrapedContent, selectedArticles, primaryArticle, contextBriefs } = await request.json();
 
     
 
@@ -4168,6 +4192,13 @@ export async function POST(request: Request) {
           newsUrl: newsUrl || (selectedArticles && selectedArticles.length > 0 ? selectedArticles[0].url : undefined),
           primaryArticle: primaryArticle || undefined
         } : undefined;
+        
+        // Note: contextBriefs are passed in the request but not currently used in technical-analysis route
+        // This maintains compatibility with the route change while preserving the parameter structure
+        const contextBrief = contextBriefs && contextBriefs[ticker] ? contextBriefs[ticker] : undefined;
+        if (contextBrief) {
+          console.log(`[ENRICHED WGO] ${ticker}: Context brief received but not yet integrated into technical-analysis route`);
+        }
         
         const analysis = await generateTechnicalAnalysis(technicalData, aiProvider, newsContext, marketContext);
         
@@ -4317,11 +4348,18 @@ export async function POST(request: Request) {
                   // This catches things like "Latest Market Insights" with links or other standalone headlines
                   if (!foundSectionMarker) {
                     // Check if line is a standalone hyperlink (has <a href> but not wrapped in <p> tags)
-                    const hasLink = line.includes('<a href');
+                    const hasHTMLLink = line.includes('<a href');
                     const isInParagraph = line.startsWith('<p>') || line.match(/<p[^>]*>.*<a href/);
                     
-                    if (hasLink && !isInParagraph) {
-                      console.log(`[CLEANUP] Removing standalone hyperlink between "Also Read" and section marker: "${line}"`);
+                    if (hasHTMLLink && !isInParagraph) {
+                      console.log(`[CLEANUP] Removing standalone HTML hyperlink between "Also Read" and section marker: "${line}"`);
+                      continue;
+                    }
+                    
+                    // Check if line is a standalone markdown link (format: [text](url))
+                    const isMarkdownLink = line.match(/^\[.+\]\(https?:\/\/.+\)\s*$/);
+                    if (isMarkdownLink) {
+                      console.log(`[CLEANUP] Removing standalone markdown link between "Also Read" and section marker: "${line}"`);
                       continue;
                     }
                   }
