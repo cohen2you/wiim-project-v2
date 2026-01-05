@@ -1437,7 +1437,7 @@ The lead paragraph should combine: (1) Price movement direction, (2) The SPECIFI
 
 ${narrativeGuidance}
 
-- First sentence: Start with company name and ticker in format "[Company Name] (NASDAQ:TICKER)" or "[Company Name] (NYSE:TICKER)", then describe actual price movement direction only (up/down/unchanged) with time context. Use "shares are" not "stock is". ${contextBrief ? 'If Context Brief is provided, immediately follow the price direction with the SPECIFIC narrative from the Context Brief, including the source name and key insight (e.g., "as analysts at Schwab Network argued that Azure has a strategic edge over Google" or "after Needham raised the target to $90"). Mention the WHO (source name like "Schwab Network", "analysts at [Firm]") and the WHAT (the key insight or argument).' : ''} ${marketStatus === 'premarket' ? 'CRITICAL PREMARKET: Since the market status is PREMARKET, you MUST include "during premarket trading" in your first sentence. Example: "Microsoft Corp (NASDAQ:MSFT) shares are up during premarket trading on Monday, [context]".' : marketStatus === 'afterhours' ? 'CRITICAL AFTER-HOURS: Since the market status is AFTER-HOURS, you MUST include "during after-hours trading" in your first sentence. Example: "Microsoft Corp (NASDAQ:MSFT) shares are up during after-hours trading on Monday, [context]".' : 'Example: "Microsoft Corp (NASDAQ:MSFT) shares are down on Monday, [context]".'} DO NOT include percentage values - use only words like "up", "down", or "unchanged".
+- First sentence: Start with company name in bold (**Company Name**), followed by the ticker with exchange in parentheses (not bold) - e.g., **Microsoft Corp** (NASDAQ:MSFT) or **Apple Inc.** (NASDAQ:AAPL). The format should be **Company Name** (EXCHANGE:TICKER) - always include the exchange prefix (NASDAQ, NYSE, etc.). Use proper company name formatting with periods (Inc., Corp., etc.). CRITICAL: This is the ONLY place where the company name should be bolded AND followed by a ticker. All subsequent references to the company throughout the article should be in regular text (not bolded) and WITHOUT a ticker - e.g., "Microsoft", "the company", "Microsoft's", "Microsoft Corp", etc. Then describe actual price movement direction only (up/down/unchanged) with time context. Use "shares are" not "stock is". ${contextBrief ? 'If Context Brief is provided, immediately follow the price direction with the SPECIFIC narrative from the Context Brief, including the source name and key insight (e.g., "as analysts at Schwab Network argued that Azure has a strategic edge over Google" or "after Needham raised the target to $90"). Mention the WHO (source name like "Schwab Network", "analysts at [Firm]") and the WHAT (the key insight or argument).' : ''} ${marketStatus === 'premarket' ? 'CRITICAL PREMARKET: Since the market status is PREMARKET, you MUST include "during premarket trading" in your first sentence. Example: "**Microsoft Corp** (NASDAQ:MSFT) shares are up during premarket trading on Monday, [context]".' : marketStatus === 'afterhours' ? 'CRITICAL AFTER-HOURS: Since the market status is AFTER-HOURS, you MUST include "during after-hours trading" in your first sentence. Example: "**Microsoft Corp** (NASDAQ:MSFT) shares are up during after-hours trading on Monday, [context]".' : 'Example: "**Microsoft Corp** (NASDAQ:MSFT) shares are down on Monday, [context]".'} DO NOT include percentage values - use only words like "up", "down", or "unchanged".
 ${isWeekend ? '- CRITICAL: Today is a weekend (Saturday or Sunday). Markets are CLOSED on weekends. Use PAST TENSE ("were down", "were up", "closed down", "closed up") instead of present tense ("are down", "are up"). Reference Friday as the last trading day.' : ''}
 - Second sentence: ${contextBrief ? 'If Context Brief narrative was used in first sentence, provide market context (sector performance, broader trends) in the second sentence. ' : ''}Brief context about sector correlation or market context - do NOT mention technical indicators here${isWeekend ? '. CRITICAL WEEKEND: Use past tense throughout this sentence (e.g., "The move came", "The decline came", "stocks were lower") since you are referring to Friday\'s trading action.' : ''}
 - CRITICAL WORD CHOICE: DO NOT use the word "amidst" - it's a clear AI writing pattern. Use natural alternatives like "as", "during", "on", or "following" instead. For example, use "The stock's decline came as" or "during a mixed market day" instead of "comes amidst".
@@ -1683,6 +1683,10 @@ ${stockData.edgeRatings ? '10' : '8'}. WRITING STYLE:
 - Active voice, clear language
 - No flowery phrases like "amidst" or "whilst"
 - Keep paragraphs to 2 sentences maximum
+
+${stockData.edgeRatings ? '11' : '9'}. COMPANY NAME AND TICKER FORMATTING:
+- PRIMARY COMPANY (the stock being analyzed): The company name should be bolded (**Company Name**) and followed by a ticker with exchange (EXCHANGE:TICKER) ONLY in the first reference in the article (the lead paragraph). Example: **Microsoft Corp** (NASDAQ:MSFT). All subsequent references to the primary company throughout the article should be in regular text (not bolded) and WITHOUT a ticker - e.g., "Microsoft", "the company", "Microsoft's", "Microsoft Corp", etc.
+- OTHER COMPANIES (mentioned in the article): When mentioning other companies, include their ticker with exchange (EXCHANGE:TICKER) ONLY in the first reference to that company. Example: "Alphabet Inc (NASDAQ:GOOGL)" or "Apple Inc. (NASDAQ:AAPL)". All subsequent references to that same company should be in regular text WITHOUT a ticker. Do NOT bold other companies' names.
 
 CRITICAL: DO NOT generate any links, including "Also Read", "What to Know", "Read Next", or any other links. All links are added programmatically after the story is generated. Write only the article content without any links.
 
@@ -2147,8 +2151,33 @@ Generate the basic technical story now.`;
         console.log(`[ENRICHED WGO] ${tickerUpper}: Injecting SEO subheads (final step)...`);
         const optimizedStory = await injectSEOSubheads(story, backendUrl);
         if (optimizedStory) {
-          story = optimizedStory;
-          console.log(`✅ [ENRICHED WGO] ${tickerUpper}: SEO subheads injected successfully (final step)`);
+          // Remove ONLY the plain text headline at the very beginning (if present)
+          // DO NOT remove SEO subheads (H2/H3 headings) throughout the article - those should remain
+          // The story should start with the first paragraph (which contains the bolded company name)
+          let cleanedStory = optimizedStory;
+          
+          // Remove standalone plain text headline at the very beginning (before first paragraph)
+          // Only match if it's plain text (not HTML tags, not markdown formatting) and appears before the first paragraph
+          // The first paragraph should start with ** (markdown bold), <strong>, <p>, or a company name
+          // This catches headlines like "MSFT Shares Rise Amid AI Competition Optimism"
+          const headlinePattern = /^([^\n<*#]+?)\n+\n*(?=\*\*|<strong>|<p>|Microsoft Corp|Apple Inc|Alphabet Inc|Nvidia Corp|Amazon\.com|Tesla,?\s+Inc)/i;
+          const headlineMatch = cleanedStory.match(headlinePattern);
+          if (headlineMatch && headlineMatch[1]) {
+            const potentialHeadline = headlineMatch[1].trim();
+            // Only remove if it's plain text (no HTML tags, no markdown formatting)
+            // This ensures we don't accidentally remove H2/H3 headings or other formatted content
+            if (potentialHeadline.length > 0 && 
+                !potentialHeadline.includes('<') && 
+                !potentialHeadline.includes('*') &&
+                !potentialHeadline.includes('#') &&
+                !potentialHeadline.startsWith('##')) {
+              console.log(`[ENRICHED WGO] ${tickerUpper}: Removing plain text headline: "${potentialHeadline}"`);
+              cleanedStory = cleanedStory.replace(headlinePattern, '');
+            }
+          }
+          
+          story = cleanedStory.trim();
+          console.log(`✅ [ENRICHED WGO] ${tickerUpper}: SEO subheads injected successfully (plain text headline removed if present)`);
         }
       } catch (error) {
         console.error(`[ENRICHED WGO] ${tickerUpper}: Error injecting SEO subheads:`, error);
