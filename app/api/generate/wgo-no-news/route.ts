@@ -1112,7 +1112,7 @@ async function fetchStockData(ticker: string) {
     };
   } catch (error) {
     console.error('Error fetching stock data:', error);
-    return { priceAction: null, analystRatings: [], recentArticles: [], consensusRatings: null, nextEarnings: null };
+    return { priceAction: null, analystRatings: [], recentArticles: [], consensusRatings: null, nextEarnings: null, edgeRatings: null };
   }
 }
 
@@ -1302,6 +1302,7 @@ export async function POST(request: Request) {
     console.log(`[WGO-NO-NEWS] Fetching initial stockData for ${ticker}...`);
     const stockData = await fetchStockData(ticker);
     console.log(`[WGO-NO-NEWS] Initial stockData fetched. priceAction.changePercent: ${stockData.priceAction?.changePercent}%`);
+    console.log(`[WGO-NO-NEWS] Edge ratings data:`, stockData.edgeRatings ? 'present' : 'missing (API may have failed or BENZINGA_EDGE_API_KEY not configured)');
      
            // Get current date and market status for context
       const currentDate = new Date();
@@ -1592,7 +1593,7 @@ ${stockData.consensusRatings.sell_percentage ? `- Sell Rating: ${parseFloat(stoc
 ` : ''}
 
 CRITICAL FORMATTING REQUIREMENTS:
-- Start with ONE brief introductory sentence ONLY (e.g., "Investors are looking ahead to the next earnings report on [DATE].") - DO NOT include earnings estimates or analyst data in this sentence
+- Start with ONE brief introductory sentence ONLY (e.g., "Investors are looking ahead to the <a href="https://www.benzinga.com/quote/${tickerUpper}/earnings">next earnings report</a> on [DATE].") - DO NOT include earnings estimates or analyst data in this sentence. CRITICAL: You MUST include the hyperlink on "next earnings report" using the exact format shown in the example.
 - Then format the data as HTML bullet points (<ul> and <li> tags) with bold labels for "Hard Numbers":
   - EPS Estimate
   - Revenue Estimate
@@ -1763,9 +1764,13 @@ Generate the basic technical story now.`;
 
     // Post-process to add hyperlinks to earnings/analyst text (for both structured sections and paragraph format)
     // Add hyperlink to "next earnings report" if it appears in paragraph format (enriched flow)
-    // Match: "Investors are looking ahead to the company's next earnings report on [DATE]"
+    // Match: "Investors are looking ahead to the next earnings report on [DATE]" (with or without "company's")
     if (!story.match(/next earnings report.*?<a href="https:\/\/www\.benzinga\.com\/quote\/[^"]+\/earnings">/i)) {
+      // Try with "company's" first
       story = story.replace(/(Investors are looking ahead to the company's )next earnings report( on [^,\.]+(?:,|\.))/gi, 
+        `$1<a href="https://www.benzinga.com/quote/${tickerUpper}/earnings">next earnings report</a>$2`);
+      // Then try without "company's" (more common format)
+      story = story.replace(/(Investors are looking ahead to the )next earnings report( on [^,\.]+(?:,|\.))/gi, 
         `$1<a href="https://www.benzinga.com/quote/${tickerUpper}/earnings">next earnings report</a>$2`);
     }
     
