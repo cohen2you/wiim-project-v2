@@ -1489,7 +1489,7 @@ CURRENT DAY SECTOR PERFORMANCE:
 CRITICAL: The market is currently in PREMARKET status. DO NOT include a comparison line with sector or S&P 500 performance, as these indices are not moving during premarket (the data would be from Friday's close, which is misleading). Only mention the stock's premarket movement.
 ` : ''}
 
-${historicalSectorPerformance ? `
+${historicalSectorPerformance && sectorPerformance ? `
 HISTORICAL SECTOR PERFORMANCE (use this data ONLY when making claims about sector trends over time):
 - ${sectorPerformance.sectorName} sector past week: ${historicalSectorPerformance.weekChange !== undefined ? `${historicalSectorPerformance.weekChange.toFixed(2)}% ${historicalSectorPerformance.weekChange >= 0 ? 'gain' : 'loss'}` : 'data not available'}
 - ${sectorPerformance.sectorName} sector past month: ${historicalSectorPerformance.monthChange !== undefined ? `${historicalSectorPerformance.monthChange.toFixed(2)}% ${historicalSectorPerformance.monthChange >= 0 ? 'gain' : 'loss'}` : 'data not available'}
