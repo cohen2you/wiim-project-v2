@@ -4193,13 +4193,6 @@ export async function POST(request: Request) {
           primaryArticle: primaryArticle || undefined
         } : undefined;
         
-        // Note: contextBriefs are passed in the request but not currently used in technical-analysis route
-        // This maintains compatibility with the route change while preserving the parameter structure
-        const contextBrief = contextBriefs && contextBriefs[ticker] ? contextBriefs[ticker] : undefined;
-        if (contextBrief) {
-          console.log(`[ENRICHED WGO] ${ticker}: Context brief received but not yet integrated into technical-analysis route`);
-        }
-        
         const analysis = await generateTechnicalAnalysis(technicalData, aiProvider, newsContext, marketContext);
         
         // Generate price action and append to analysis
