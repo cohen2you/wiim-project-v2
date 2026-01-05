@@ -1433,19 +1433,20 @@ ${isWeekend ? '- CRITICAL: Today is a weekend (Saturday or Sunday). Markets are 
 - CRITICAL LOGIC RULE: If the stock's direction matches the sector's direction (both up OR both down), describe it as moving WITH sector trends. If the stock's direction OPPOSES the sector's direction (stock down but sector up, OR stock up but sector down), describe it as company-specific performance (e.g., "Apple's decline suggests company-specific concerns as the Technology sector advanced"). Always verify the actual sector performance data before making this statement.`;
 
           const catalystInstructions = `**CATALYST SECTION (after section marker):**
-- Write EXACTLY ONE paragraph (do NOT write two paragraphs)
-- Focus ONLY on sector correlation, market context, and relative strength/weakness
+- Write 2-3 paragraphs that provide rich context about what's driving the stock's movement
+- Focus on sector correlation, market context, relative strength/weakness, and any relevant context from the Context Brief (if provided)
 - CRITICAL LOGIC RULES - Use this decision tree:
   * Stock DOWN + Sector DOWN = Moving WITH sector weakness (sector-specific challenges)
   * Stock DOWN + Sector UP = Moving AGAINST sector strength (company-specific weakness)
   * Stock UP + Sector UP = Moving WITH sector strength (sector-specific strength)
   * Stock UP + Sector DOWN = Moving AGAINST sector weakness (company-specific strength)
-- ALWAYS state the actual CURRENT DAY sector performance FIRST with the exact percentage (e.g., "The Technology sector saw a gain of 0.27% on Friday"), then explain whether the stock is moving WITH or AGAINST that trend
+- FIRST PARAGRAPH: ALWAYS state the actual CURRENT DAY sector performance FIRST with the exact percentage (e.g., "The Technology sector saw a gain of 0.27% on Friday"), then explain whether the stock is moving WITH or AGAINST that trend. If stock is moving AGAINST sector (opposite direction), explicitly state it's company-specific performance.
+- SECOND PARAGRAPH (optional, if Context Brief provided): Weave in relevant context from the Context Brief (summary_of_events, key articles) to add depth about recent developments, market sentiment, or events that might be influencing the stock's movement. Do NOT just list events - integrate them naturally into the narrative about why the stock is moving.
+- THIRD PARAGRAPH (optional): Additional context about broader market conditions, sector trends, or relative performance that helps explain the movement.
 - CRITICAL: You can ONLY make claims about sector "struggles", "pressure", or broader trends over time (e.g., "technology stocks faced some pressure" or "sector's overall struggles") if historical sector performance data is provided below. If no historical data is provided, you MUST only reference the current day's performance.
-- If stock is moving AGAINST sector (opposite direction), explicitly state it's company-specific performance
 - DO NOT mention specific Moving Averages (SMAs), RSI numbers, MACD, or any technical indicators here
 - DO NOT mention 12-month performance, 52-week ranges, or specific price levels here
-- Keep to 1-2 sentences maximum focused on market/sector correlation${isWeekend ? '. CRITICAL WEEKEND: Use past tense throughout (e.g., "came", "saw", "were", "was") since referring to Friday\'s trading action.' : ''}`;
+- Keep each paragraph to 2 sentences maximum${isWeekend ? '. CRITICAL WEEKEND: Use past tense throughout (e.g., "came", "saw", "were", "was") since referring to Friday\'s trading action.' : ''}`;
            
              // FINAL VERIFICATION: Log the exact value being sent to AI
              console.log(`[FINAL VERIFICATION] About to send prompt to AI. dailyChangePercent=${dailyChangePercent}%, stockDirection=${stockDirection}, stockData.priceAction.changePercent=${stockData.priceAction?.changePercent}%`);
@@ -1470,23 +1471,17 @@ YOU MUST USE THIS EXACT DIRECTION IN YOUR LEAD PARAGRAPH.
 DO NOT IGNORE THIS. The price action line at the bottom of the article will show the same direction. Your lead paragraph MUST match.
 
 ${contextBrief ? `
-CONTEXT DOSSIER (optional reference - use standard template structure):
+CONTEXT BRIEF (Recent News & Events):
 ${JSON.stringify(contextBrief, null, 2)}
 
-NOTE: The Context Dossier contains recent news and events for context, but follow the standard template structure below.
+CRITICAL CONTEXT INSTRUCTION: Review the context_brief data above. If major_event_detected is TRUE (e.g., a lawsuit, recall, crash, or significant negative news), you MUST mention this event in the first paragraph as a counter-weight to the price movement. Do not bury this news. If major_event_detected is FALSE, you should still weave relevant context from the summary_of_events and articles into your Catalyst section to provide richer context about what's driving the stock's movement beyond just technical indicators and sector performance.
+
 ` : ''}
 
-${sectorPerformance && marketStatus !== 'premarket' ? `
-COMPARISON LINE (USE THIS EXACT FORMAT AT THE START OF THE ARTICLE, IMMEDIATELY AFTER THE HEADLINE):
-${stockData.priceAction?.companyName || ticker} stock ${isWeekend ? 'was' : 'is'} ${stockData.priceAction?.changePercent >= 0 ? 'up' : 'down'} on ${currentDayName} versus a ${sectorPerformance.sectorChange.toFixed(1)}% ${sectorPerformance.sectorChange >= 0 ? 'gain' : 'loss'} in the ${sectorPerformance.sectorName} sector and a ${Math.abs(sectorPerformance.sp500Change).toFixed(1)}% ${sectorPerformance.sp500Change >= 0 ? 'gain' : 'loss'} in the S&P 500.
-
-CRITICAL: This comparison line should appear immediately after the headline and before the main story content. Use this exact format. DO NOT include this comparison line if the market status is premarket (sector and S&P 500 are not moving during premarket).
-
+${sectorPerformance ? `
 CURRENT DAY SECTOR PERFORMANCE:
 - ${sectorPerformance.sectorName} sector: ${sectorPerformance.sectorChange.toFixed(2)}% ${sectorPerformance.sectorChange >= 0 ? 'gain' : 'loss'} on ${currentDayName}
 - S&P 500: ${sectorPerformance.sp500Change.toFixed(2)}% ${sectorPerformance.sp500Change >= 0 ? 'gain' : 'loss'} on ${currentDayName}
-` : marketStatus === 'premarket' && sectorPerformance ? `
-CRITICAL: The market is currently in PREMARKET status. DO NOT include a comparison line with sector or S&P 500 performance, as these indices are not moving during premarket (the data would be from Friday's close, which is misleading). Only mention the stock's premarket movement.
 ` : ''}
 
 ${historicalSectorPerformance && sectorPerformance ? `
@@ -1512,19 +1507,15 @@ If Data is Missing: If a specific field (like MACD) is null or undefined in the 
 
 CRITICAL INSTRUCTIONS:
 
-1. HEADLINE: Use format "[Company] Stock Is Trending ${currentDayName}: What's Going On?" (on its own line, no bold formatting)
+1. ${leadInstructions}
 
-2. ${sectorPerformance && marketStatus !== 'premarket' ? 'COMPARISON LINE (right after headline): Use the comparison line format provided above.' : marketStatus === 'premarket' ? 'COMPARISON LINE: DO NOT include a comparison line during premarket (sector and S&P 500 are not moving).' : ''}
+2. SECTION MARKER: After the lead paragraph, insert "## Section: The Catalyst" on its own line.
 
-3. ${leadInstructions}
+3. ${catalystInstructions}
 
-4. SECTION MARKER: After the lead paragraph, insert "## Section: The Catalyst" on its own line.
+4. SECTION MARKER: After the Catalyst section, insert "## Section: Technical Analysis" on its own line.
 
-5. ${catalystInstructions}
-
-6. SECTION MARKER: After the Catalyst section, insert "## Section: Technical Analysis" on its own line.
-
-7. TECHNICAL ANALYSIS SECTION (simplified structure):
+5. TECHNICAL ANALYSIS SECTION (simplified structure):
 Write exactly 3 paragraphs for technical analysis:
 
 TECHNICAL ANALYSIS PARAGRAPH 1 (MOVING AVERAGES, 12-MONTH PERFORMANCE, 52-WEEK RANGE): Write a single paragraph that combines: (1) Stock position relative to 20-day and 100-day SMAs with exact percentages if available (e.g., "Apple stock is currently trading 2.3% below its 20-day simple moving average (SMA), but is 19.8% above its 100-day SMA, demonstrating longer-term strength"). YOU MUST state the percentage difference when reporting Moving Averages. (2) 12-month performance if available (e.g., "Shares have increased/decreased X% over the past 12 months"), and (3) 52-week range position (e.g., "and are currently positioned closer to their 52-week highs than lows" or "closer to their 52-week lows than highs" - DO NOT include a percentage, just use qualitative positioning). If specific technical data is not available in the stock data, omit that sentence entirely - do NOT write "The data is not available." Keep this to 2-3 sentences maximum.
@@ -1541,7 +1532,7 @@ KEY LEVELS (MANDATORY): After paragraph 3, you MUST extract and display the key 
 These should be clearly labeled, rounded to the nearest $0.50, and formatted as bullet points. This format helps with SEO and Featured Snippets.
 
 ${stockData.consensusRatings || stockData.nextEarnings ? `
-5. SECTION MARKER: After the technical analysis section, insert "## Section: Earnings & Analyst Outlook" on its own line.
+6. SECTION MARKER: After the technical analysis section, insert "## Section: Earnings & Analyst Outlook" on its own line.
 
 6. EARNINGS AND ANALYST OUTLOOK SECTION (forward-looking):
 After the section marker, include a forward-looking section that anticipates the upcoming earnings report and provides analyst outlook. This section should help investors understand both the stock's value proposition and how analysts view it.
@@ -1669,9 +1660,7 @@ BENZINGA EDGE SECTION RULES - FORMAT AS "TRADER'S SCORECARD":
 
 6. THE VERDICT: After the bullet list, add a 2-sentence summary that synthesizes the rankings and provides actionable insight. Start with "<strong>The Verdict:</strong> ${stockData.priceAction?.companyName || ticker.toUpperCase()}'s Benzinga Edge signal reveals..." and continue with the analysis. Example: "<strong>The Verdict:</strong> Tesla's Benzinga Edge signal reveals a classic 'High-Flyer' setup. While the Momentum (83) confirms the strong trend, the extremely low Value (4) score warns that the stock is priced for perfection—investors should ride the trend but use tight stop-losses."
 
-7. IMAGE: After "The Verdict" summary, add this image HTML: <p><img src="https://www.benzinga.com/edge/${ticker.toUpperCase()}.png" alt="Benzinga Edge Rankings for ${stockData.priceAction?.companyName || ticker.toUpperCase()}" style="max-width: 100%; height: auto;" /></p>
-
-8. ORDER: Present rankings in order of importance: Momentum first, then Quality, then Value, then Growth (if available).
+7. ORDER: Present rankings in order of importance: Momentum first, then Quality, then Value, then Growth (if available).
 ` : ''}
 
 ${stockData.edgeRatings ? '10' : '8'}. WRITING STYLE:

@@ -329,12 +329,12 @@ const TechnicalAnalysisGenerator = forwardRef<TechnicalAnalysisGeneratorRef>((pr
     setLoadingEnrichedWGO(true);
 
     try {
-      // Step 1: Fetch context brief from external agent for all tickers
       const tickerList = tickers.split(',').map(t => t.trim().toUpperCase());
-      const contextBriefs: { [key: string]: any } = {};
+      const results: TechnicalAnalysisResult[] = [];
 
       for (const ticker of tickerList) {
         try {
+          // Step 1: Fetch context brief from external agent
           console.log(`[ENRICHED WGO] ${ticker}: Fetching context brief from ${NEWS_AGENT_URL}/api/enrichment/context-brief`);
           const contextRes = await fetch(`${NEWS_AGENT_URL}/api/enrichment/context-brief`, {
             method: 'POST',
@@ -342,45 +342,52 @@ const TechnicalAnalysisGenerator = forwardRef<TechnicalAnalysisGeneratorRef>((pr
             body: JSON.stringify({ ticker })
           });
           
+          let contextBrief = null;
           if (contextRes.ok) {
-            const contextBrief = await contextRes.json();
-            contextBriefs[ticker] = contextBrief;
+            contextBrief = await contextRes.json();
             console.log(`[ENRICHED WGO] ${ticker}: Successfully fetched context brief`);
           }
+
+          // Step 2: Call WGO No News endpoint with context brief
+          const requestBody: any = { 
+            ticker, 
+            aiProvider: provider,
+            contextBriefs: contextBrief ? { [ticker]: contextBrief } : undefined
+          };
+
+          const res = await fetch('/api/generate/wgo-no-news', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(requestBody),
+          });
+
+          const data = await res.json();
+          if (!res.ok || !data.story) {
+            results.push({
+              ticker,
+              companyName: ticker,
+              analysis: '',
+              error: data.error || 'Failed to generate enriched WGO story'
+            });
+            continue;
+          }
+
+          results.push({
+            ticker,
+            companyName: data.stockData?.priceAction?.companyName || ticker,
+            analysis: data.story
+          });
         } catch (err: any) {
-          console.warn(`[ENRICHED WGO] ${ticker}: Failed to fetch context brief:`, err.message);
+          results.push({
+            ticker,
+            companyName: ticker,
+            analysis: '',
+            error: err.message || 'Failed to generate enriched WGO story'
+          });
         }
       }
 
-      // Step 2: Call technical-analysis route with context briefs
-      const requestBody: any = { 
-        tickers: tickerList.join(','), 
-        provider,
-        contextBriefs: Object.keys(contextBriefs).length > 0 ? contextBriefs : undefined
-      };
-
-      const res = await fetch('/api/generate/technical-analysis', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(requestBody),
-      });
-
-      const data = await res.json();
-      if (!res.ok || !data.analyses) {
-        setError(data.error || 'Failed to generate enriched WGO story');
-        return;
-      }
-
-      const results: TechnicalAnalysisResult[] = data.analyses.map((analysis: any) => ({
-        ticker: analysis.ticker,
-        companyName: analysis.companyName || analysis.ticker,
-        analysis: analysis.analysis || '',
-        error: analysis.error,
-        data: analysis.data
-      }));
-
       setAnalyses(results);
-      setTimestamp(formatTimestampET());
     } catch (error: unknown) {
       console.error('Error generating enriched WGO:', error);
       if (error instanceof Error) setError(error.message);

@@ -4137,7 +4137,7 @@ export async function POST(request: Request) {
 
   try {
 
-    const { tickers, provider, newsUrl, scrapedContent, selectedArticles, primaryArticle, contextBriefs } = await request.json();
+    const { tickers, provider, newsUrl, scrapedContent, selectedArticles, primaryArticle } = await request.json();
 
     
 
