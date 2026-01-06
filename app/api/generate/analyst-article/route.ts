@@ -589,10 +589,14 @@ export async function POST(req: Request) {
         priceActionLine = `<strong>${finalTicker} Price Action:</strong> Price data unavailable, according to <a href="https://pro.benzinga.com">Benzinga Pro</a>.`;
       }
     } else {
-      console.warn(`No valid ticker available for price action line (ticker: ${finalTicker})`);
+      console.warn(`⚠️⚠️⚠️ No valid ticker available for price action line (ticker: "${finalTicker}")`);
+      console.warn(`⚠️⚠️⚠️ This means priceActionLine will use fallback message. Ticker check failed.`);
       // If no ticker found, use a generic price action line
       priceActionLine = 'Price Action: Stock price data unavailable at the time of publication.';
     }
+    
+    // Log final price action line that will be used
+    console.log(`[PRICE ACTION FINAL] Ticker: "${finalTicker}", Price action line length: ${priceActionLine.length}, Preview: ${priceActionLine.substring(0, 150)}`);
 
     // Estimate token count (rough: 1 token ≈ 4 characters)
     // Reserve space for prompt (~2000 tokens) and response (~2000 tokens)
@@ -1026,10 +1030,15 @@ ${truncatedText}
     // Remove any Price Action line that the AI might have generated
     // We'll add the real one from Benzinga API
     // Match both "Price Action:" and "TICKER Price Action:" patterns
+    const beforeRemoval = articleBody;
     articleBody = articleBody.replace(/\n\n[A-Z]+ Price Action:.*$/i, '');
     articleBody = articleBody.replace(/\n\nPrice Action:.*$/i, '');
     articleBody = articleBody.replace(/[A-Z]+ Price Action:.*$/i, '');
     articleBody = articleBody.replace(/Price Action:.*$/i, '');
+    
+    if (beforeRemoval !== articleBody) {
+      console.log('✅ Removed AI-generated price action line from article body');
+    }
     
     // Remove essay-style conclusion paragraphs and sentences
     // Pattern: Paragraphs that start with "In conclusion", "In summary", "To conclude", etc.
@@ -1067,8 +1076,10 @@ ${truncatedText}
     }
     
     // Additional catch-all: Remove any paragraph that ends with typical conclusion language
-    articleBody = articleBody.replace(/\n\n[^<]*?(?:poised for|watching closely|aiming to|set towards|capture a|significant upside|market disruption|advances its|later stages)[^<]*?\.$/gim, '');
-    articleBody = articleBody.replace(/<p>[^<]*?(?:poised for|watching closely|aiming to|set towards|capture a|significant upside|market disruption|advances its|later stages)[^<]*?\.<\/p>/gi, '');
+    articleBody = articleBody.replace(/\n\n[^<]*?(?:poised for|watching closely|aiming to|set towards|capture a|significant upside|market disruption|advances its|later stages|continues to innovate|market's response|crucial for investors)[^<]*?\.$/gim, '');
+    articleBody = articleBody.replace(/<p>[^<]*?(?:poised for|watching closely|aiming to|set towards|capture a|significant upside|market disruption|advances its|later stages|continues to innovate|market's response|crucial for investors)[^<]*?\.<\/p>/gi, '');
+    // More aggressive: Remove paragraphs that end with conclusion-like phrases anywhere in the article
+    articleBody = articleBody.replace(/[^<]*?(?:continues to innovate|market's response|crucial for investors|watching the biotech|response to these developments)[^<]*?\./gi, '');
     
     // More aggressive removal: Match "In summary" even if it's part of a longer paragraph
     articleBody = articleBody.replace(/\n\n[^<]*?In summary[^<]*?\./gi, '');
@@ -1288,7 +1299,9 @@ ${truncatedText}
     
     // Price action line is already formatted with bold prefix, no need to modify
     // Add the real price action line from Benzinga API
+    console.log(`[BEFORE APPENDING] Price action line to append: ${priceActionLine.substring(0, 150)}`);
     articleBody = articleBody.trim() + '\n\n' + priceActionLine;
+    console.log(`[AFTER APPENDING] Article ends with: ${articleBody.substring(articleBody.length - 200)}`);
     
     // ONE MORE FINAL PASS on the complete article (including price action line)
     articleBody = articleBody.replace(/([a-zA-Z])"([sS])([^"'])/g, "$1'$2$3");
@@ -1308,6 +1321,15 @@ ${truncatedText}
     }
     
     console.log('Returning article. Headline length:', headline?.length, 'Article length:', finalArticleBody.length);
+    console.log('Article preview (first 500 chars):', finalArticleBody.substring(0, 500));
+    console.log('Article contains HTML tags:', {
+      hasH2: finalArticleBody.includes('<h2>'),
+      hasStrong: finalArticleBody.includes('<strong>'),
+      hasLinks: finalArticleBody.includes('<a href='),
+      hasAlsoRead: finalArticleBody.includes('Also Read:'),
+      hasReadNext: finalArticleBody.includes('Read Next:'),
+      hasPriceAction: finalArticleBody.includes('Price Action:')
+    });
     
     return NextResponse.json({ 
       headline: headline || 'No headline generated',
