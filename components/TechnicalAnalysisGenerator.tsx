@@ -348,21 +348,21 @@ const TechnicalAnalysisGenerator = forwardRef<TechnicalAnalysisGeneratorRef>((pr
             console.log(`[ENRICHED WGO] ${ticker}: Successfully fetched context brief`);
           }
 
-          // Step 2: Call WGO No News endpoint with context brief
+          // Step 2: Call technical-analysis endpoint with context brief
           const requestBody: any = { 
-            ticker, 
-            aiProvider: provider,
+            tickers: ticker,
+            provider: provider,
             contextBriefs: contextBrief ? { [ticker]: contextBrief } : undefined
           };
 
-          const res = await fetch('/api/generate/wgo-no-news', {
+          const res = await fetch('/api/generate/technical-analysis', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(requestBody),
           });
 
           const data = await res.json();
-          if (!res.ok || !data.story) {
+          if (!res.ok || !data.analyses || !Array.isArray(data.analyses) || data.analyses.length === 0) {
             results.push({
               ticker,
               companyName: ticker,
@@ -372,10 +372,12 @@ const TechnicalAnalysisGenerator = forwardRef<TechnicalAnalysisGeneratorRef>((pr
             continue;
           }
 
+          const analysis = data.analyses[0];
           results.push({
-            ticker,
-            companyName: data.stockData?.priceAction?.companyName || ticker,
-            analysis: data.story
+            ticker: analysis.ticker || ticker,
+            companyName: analysis.companyName || ticker,
+            analysis: analysis.analysis || '',
+            error: analysis.error
           });
         } catch (err: any) {
           results.push({

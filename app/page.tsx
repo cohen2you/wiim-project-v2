@@ -416,7 +416,8 @@ export default function PRStoryGeneratorPage() {
           endpoint = '/api/generate/wgo';
           break;
         case 'wgoNoNews':
-          endpoint = '/api/generate/wgo-no-news';
+          endpoint = '/api/generate/technical-analysis';
+          requestBody = { tickers: ticker, provider: aiProvider };
           break;
       }
 
@@ -427,9 +428,23 @@ export default function PRStoryGeneratorPage() {
       });
 
       const data = await res.json();
-      if (!res.ok || !data.story) throw new Error(data.error || `Failed to generate ${type} story`);
-
-      setArticle(data.story);
+      
+      if (type === 'wgoNoNews') {
+        // technical-analysis returns { analyses: [...] }
+        if (!res.ok || !data.analyses || !Array.isArray(data.analyses) || data.analyses.length === 0) {
+          throw new Error(data.error || `Failed to generate ${type} story`);
+        }
+        const analysis = data.analyses[0];
+        if (analysis.error) {
+          throw new Error(analysis.error);
+        }
+        setArticle(analysis.analysis || '');
+      } else {
+        // wiiim and wgo return { story: ... }
+        if (!res.ok || !data.story) throw new Error(data.error || `Failed to generate ${type} story`);
+        setArticle(data.story);
+      }
+      
       setLastGeneratedStoryType(type);
     } catch (err: any) {
       setStandardStoryError(err.message || `Failed to generate ${type} story`);
@@ -476,23 +491,30 @@ export default function PRStoryGeneratorPage() {
         console.warn(`[ENRICHED WGO] ${tickerUpper}: Failed to fetch context brief:`, contextRes.status, errorText.substring(0, 200));
       }
 
-      // Step 2: Call WGO No News endpoint with context brief
+      // Step 2: Call technical-analysis endpoint with context brief
       const requestBody: any = { 
-        ticker: tickerUpper, 
-        aiProvider,
+        tickers: tickerUpper,
+        provider: aiProvider,
         contextBriefs: contextBrief ? { [tickerUpper]: contextBrief } : undefined
       };
 
-      const res = await fetch('/api/generate/wgo-no-news', {
+      const res = await fetch('/api/generate/technical-analysis', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(requestBody),
       });
 
       const data = await res.json();
-      if (!res.ok || !data.story) throw new Error(data.error || 'Failed to generate enriched WGO story');
+      if (!res.ok || !data.analyses || !Array.isArray(data.analyses) || data.analyses.length === 0) {
+        throw new Error(data.error || 'Failed to generate enriched WGO story');
+      }
 
-      setArticle(data.story);
+      const analysis = data.analyses[0];
+      if (analysis.error) {
+        throw new Error(analysis.error);
+      }
+
+      setArticle(analysis.analysis || '');
       setLastGeneratedStoryType('wgoNoNews');
     } catch (err: any) {
       setEnrichedWGOError(err.message || 'Failed to generate enriched WGO story');
