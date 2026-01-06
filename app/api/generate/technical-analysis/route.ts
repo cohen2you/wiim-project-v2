@@ -4994,7 +4994,8 @@ export async function POST(request: Request) {
         }
         
         // Now insert "Read Next" at the VERY END, after ETF and Price Action sections
-        if (relatedArticles && relatedArticles.length > 0) {
+        // Only add "Read Next" if we have a different article (at least 2 articles) to avoid duplicate links
+        if (relatedArticles && relatedArticles.length > 1) {
           // Remove any existing "Read Next" section first (it might have been added earlier by AI or other logic)
           const readNextPattern = /<p>Read Next:.*?<\/p>/gi;
           analysisWithPriceAction = analysisWithPriceAction.replace(readNextPattern, '').trim();
@@ -5002,12 +5003,16 @@ export async function POST(request: Request) {
           const readNextPlainPattern = /Read Next:.*?(?=\n\n|$)/gi;
           analysisWithPriceAction = analysisWithPriceAction.replace(readNextPlainPattern, '').trim();
           
+          // Use the second article (index 1) for "Read Next" to ensure it's different from "Also Read" (index 0)
+          const readNextArticle = relatedArticles[1];
           // Always use HTML link format (for clickable links)
-          const readNextSection = `<p>Read Next: <a href="${relatedArticles[1]?.url || relatedArticles[0].url}">${relatedArticles[1]?.headline || relatedArticles[0].headline}</a></p>`;
+          const readNextSection = `<p>Read Next: <a href="${readNextArticle.url}">${readNextArticle.headline}</a></p>`;
           
           // Append to the very end of the content
           analysisWithPriceAction = `${analysisWithPriceAction.trim()}\n\n${readNextSection}`;
           console.log('✅ Added "Read Next" section at the very end (after ETF and Price Action)');
+        } else if (relatedArticles && relatedArticles.length === 1) {
+          console.log('⚠️ Only one related article available, skipping "Read Next" to avoid duplicate link');
         }
 
         return {

@@ -22,6 +22,85 @@ function truncateText(text: string, maxChars: number): string {
          text.substring(text.length - lastPart);
 }
 
+// Helper function to extract date and convert to day of week from analyst note text
+function extractDateAndDayOfWeek(text: string): string {
+  // Common date patterns in analyst notes:
+  // - "January 5, 2026" or "January 5, 2025"
+  // - "January 5" (year might be implied)
+  // - "5 January 2026"
+  // - "1/5/2026" or "1/5/25"
+  // - "2026-01-05" (ISO format)
+  
+  const datePatterns = [
+    // Full date: "January 5, 2026" or "January 5, 2025"
+    /(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2}),\s+(\d{4})/i,
+    // Date without year: "January 5" (assume current year)
+    /(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2})(?:,|\.|\s|$)/i,
+    // ISO format: "2026-01-05"
+    /(\d{4})-(\d{1,2})-(\d{1,2})/,
+    // US format: "1/5/2026" or "01/05/2026"
+    /(\d{1,2})\/(\d{1,2})\/(\d{4})/,
+    // US format without century: "1/5/25"
+    /(\d{1,2})\/(\d{1,2})\/(\d{2})/,
+  ];
+  
+  const monthNames: { [key: string]: number } = {
+    'january': 0, 'february': 1, 'march': 2, 'april': 3, 'may': 4, 'june': 5,
+    'july': 6, 'august': 7, 'september': 8, 'october': 9, 'november': 10, 'december': 11
+  };
+  
+  for (let i = 0; i < datePatterns.length; i++) {
+    const pattern = datePatterns[i];
+    const match = text.match(pattern);
+    if (match) {
+      try {
+        let month: number, day: number, year: number;
+        
+        // Check which pattern matched by index
+        if (i === 0 || i === 1) {
+          // Month name format: "January 5, 2026" (pattern 0) or "January 5" (pattern 1)
+          const monthName = match[1].toLowerCase();
+          month = monthNames[monthName];
+          day = parseInt(match[2], 10);
+          // Pattern 0 has year in match[3], pattern 1 doesn't
+          year = i === 0 && match[3] ? parseInt(match[3], 10) : new Date().getFullYear();
+          // Handle 2-digit years
+          if (year < 100) {
+            year += 2000;
+          }
+        } else if (i === 2) {
+          // ISO format: 2026-01-05
+          year = parseInt(match[1], 10);
+          month = parseInt(match[2], 10) - 1;
+          day = parseInt(match[3], 10);
+        } else {
+          // US format: 1/5/2026 (pattern 3) or 1/5/25 (pattern 4)
+          month = parseInt(match[1], 10) - 1;
+          day = parseInt(match[2], 10);
+          year = parseInt(match[3], 10);
+          if (year < 100) {
+            year += 2000;
+          }
+        }
+        
+        const date = new Date(year, month, day);
+        if (!isNaN(date.getTime())) {
+          const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+          const dayName = days[date.getDay()];
+          console.log(`Extracted date: ${month + 1}/${day}/${year} -> ${dayName}`);
+          return dayName;
+        }
+      } catch (error) {
+        console.log('Error parsing date:', error);
+      }
+    }
+  }
+  
+  // Fallback: return current day or "today"
+  console.log('No date found in analyst note, using current day');
+  return 'today';
+}
+
 // Helper function to extract ticker from analyst note text
 function extractTickerFromText(text: string): string | null {
   // Common patterns for ticker symbols in analyst notes:
@@ -144,6 +223,16 @@ async function fetchRelatedArticles(ticker: string, excludeUrl?: string): Promis
       }))
       .slice(0, 5);
     
+    console.log(`[RELATED ARTICLES] Fetched ${data.length} articles, filtered to ${filteredArticles.length}, returning ${relatedArticles.length} articles`);
+    if (relatedArticles.length > 0) {
+      console.log(`[RELATED ARTICLES] First article: ${relatedArticles[0].headline}`);
+      if (relatedArticles.length > 1) {
+        console.log(`[RELATED ARTICLES] Second article: ${relatedArticles[1].headline}`);
+      } else {
+        console.log(`[RELATED ARTICLES] WARNING: Only one article available - "Read Next" will be skipped`);
+      }
+    }
+    
     return relatedArticles;
   } catch (error) {
     console.error('Error fetching related articles:', error);
@@ -151,7 +240,7 @@ async function fetchRelatedArticles(ticker: string, excludeUrl?: string): Promis
   }
 }
 
-// Helper function to fetch price data from Benzinga
+// Helper function to fetch price data from Benzinga (matching add-price-action format)
 async function fetchPriceData(ticker: string) {
   try {
     const apiUrl = `https://api.benzinga.com/api/v2/quoteDelayed?token=${process.env.BENZINGA_API_KEY}&symbols=${encodeURIComponent(ticker)}`;
@@ -176,11 +265,20 @@ async function fetchPriceData(ticker: string) {
           last: quote.lastTradePrice || 0,
           change: quote.change || 0,
           change_percent: quote.changePercent || quote.change_percent || 0,
+          volume: quote.volume || 0,
+          high: quote.high || 0,
+          low: quote.low || 0,
+          open: quote.open || 0,
           close: quote.close || quote.lastTradePrice || 0,
           previousClose: quote.previousClosePrice || quote.previousClose || 0,
+          // Company name
           companyName: quote.companyStandardName || quote.name || ticker.toUpperCase(),
-          extendedHoursPrice: quote.ethPrice || quote.extendedHoursPrice || quote.afterHoursPrice || null,
-          extendedHoursChangePercent: quote.ethChangePercent || quote.extendedHoursChangePercent || quote.afterHoursChangePercent || null,
+          // Extended hours data with multiple field name support (matching add-price-action)
+          extendedHoursPrice: quote.ethPrice || quote.extendedHoursPrice || quote.afterHoursPrice || quote.ahPrice || quote.extendedPrice || null,
+          extendedHoursChange: quote.ethChange || quote.extendedHoursChange || quote.afterHoursChange || quote.ahChange || quote.extendedChange || null,
+          extendedHoursChangePercent: quote.ethChangePercent || quote.extendedHoursChangePercent || quote.afterHoursChangePercent || quote.ahChangePercent || quote.extendedChangePercent || null,
+          extendedHoursTime: quote.ethTime || quote.extendedHoursTime || quote.afterHoursTime || quote.ahTime || quote.extendedTime || null,
+          extendedHoursVolume: quote.ethVolume || null
         };
         console.log(`Processed price data for ${ticker}:`, {
           last: priceData.last,
@@ -234,11 +332,13 @@ function getCurrentDayName() {
   return days[currentDay];
 }
 
-// Helper function to generate price action line (matching add-price-action format)
+// Helper function to generate price action line (matching add-price-action format exactly)
 function generatePriceActionLine(ticker: string, priceData: any): string {
+  // Only bold the ticker prefix (e.g., "MSFT Price Action:"), not the entire line
+  const prefix = `${ticker} Price Action:`;
+  
   if (!priceData) {
-    console.log(`No price data available for ${ticker}, using generic price action line`);
-    return `Price Action: ${ticker} shares closed on ${getCurrentDayName()}.`;
+    return `<strong>${prefix}</strong> Price data unavailable, according to <a href="https://pro.benzinga.com">Benzinga Pro</a>.`;
   }
 
   const marketSession = getMarketSession();
@@ -261,23 +361,26 @@ function generatePriceActionLine(ticker: string, priceData: any): string {
   });
   
   // Regular session data
+  // Use 'close' for regular trading hours close price (not lastTradePrice which may be extended hours)
   const regularLast = parseFloat(priceData.close || priceData.last || 0).toFixed(2);
   
-  // Calculate regular trading hours change percent
+  // Calculate regular trading hours change percent from close and previousClose
+  // The API's changePercent may reflect extended hours, so we calculate regular hours separately
   let regularChangePercent: string;
   if (priceData.previousClose && priceData.previousClose > 0 && priceData.close) {
+    // Calculate from regular hours close vs previous close
+    // This gives us the regular trading hours performance
     const regularChange = parseFloat(priceData.close) - parseFloat(priceData.previousClose);
     const calculatedChangePercent = (regularChange / parseFloat(priceData.previousClose) * 100).toFixed(2);
     regularChangePercent = calculatedChangePercent;
-    console.log(`Calculated change percent from close/previousClose: ${regularChangePercent}%`);
   } else if (priceData.change && priceData.previousClose && priceData.previousClose > 0) {
+    // Fallback: calculate from change amount if close is not available
     const calculatedChangePercent = (parseFloat(priceData.change.toString()) / parseFloat(priceData.previousClose.toString()) * 100).toFixed(2);
     regularChangePercent = calculatedChangePercent;
-    console.log(`Calculated change percent from change/previousClose: ${regularChangePercent}%`);
   } else {
+    // Last resort: use API field directly (but this may be extended hours)
     const apiChangePercent = parseFloat(priceData.change_percent || 0);
     regularChangePercent = apiChangePercent.toFixed(2);
-    console.log(`Using API change_percent: ${regularChangePercent}%`);
   }
   
   const regularDisplayChangePercent = regularChangePercent.startsWith('-') ? regularChangePercent.substring(1) : regularChangePercent;
@@ -288,6 +391,7 @@ function generatePriceActionLine(ticker: string, priceData: any): string {
   const extChangePercent = priceData.extendedHoursChangePercent ? parseFloat(priceData.extendedHoursChangePercent || 0).toFixed(2) : null;
   const extDisplayChangePercent = extChangePercent && extChangePercent.startsWith('-') ? extChangePercent.substring(1) : extChangePercent;
   
+  // Calculate extended hours change if we have the price but not the change percentage
   const regularClose = parseFloat(priceData.close || priceData.last || 0);
   const calculatedExtChangePercent = priceData.extendedHoursPrice && !priceData.extendedHoursChangePercent ? 
     ((parseFloat(priceData.extendedHoursPrice) - regularClose) / regularClose * 100).toFixed(2) : null;
@@ -297,28 +401,39 @@ function generatePriceActionLine(ticker: string, priceData: any): string {
   const finalExtDisplayChangePercent = finalExtChangePercent && finalExtChangePercent.startsWith('-') ? finalExtChangePercent.substring(1) : finalExtChangePercent;
   
   if (marketSession === 'regular') {
-    return `Price Action: ${companyName} shares were ${regularChangePercent.startsWith('-') ? 'down' : 'up'} ${regularDisplayChangePercent}% at $${regularLast} at the time of publication ${dayName}.`;
+    return `<strong>${prefix}</strong> ${companyName} shares were ${regularChangePercent.startsWith('-') ? 'down' : 'up'} ${regularDisplayChangePercent}% at $${regularLast} during regular trading hours on ${dayName}, according to <a href="https://pro.benzinga.com">Benzinga Pro</a>.`;
   } else if (marketSession === 'premarket') {
-    if (priceData.change_percent && priceData.change_percent !== 0) {
-      const premarketChangePercent = parseFloat(priceData.change_percent).toFixed(2);
+    // For premarket, use the API's change_percent directly (matching WGO behavior)
+    // During premarket, if changePercent is 0 or missing, skip the change percentage
+    // (Benzinga's delayed feed may not have updated it yet, showing 0.00% is misleading)
+    const premarketPrice = priceData.extendedHoursPrice ? parseFloat(priceData.extendedHoursPrice).toFixed(2) : parseFloat(priceData.last).toFixed(2);
+    
+    // Use API's change_percent if provided and not 0
+    const shouldShowChangePercent = priceData.change_percent !== undefined && priceData.change_percent !== 0;
+    
+    if (shouldShowChangePercent) {
+      const premarketChangePercent = parseFloat(priceData.change_percent.toString()).toFixed(2);
       const premarketDisplayChangePercent = premarketChangePercent.startsWith('-') ? premarketChangePercent.substring(1) : premarketChangePercent;
-      const premarketPrice = priceData.extendedHoursPrice ? parseFloat(priceData.extendedHoursPrice).toFixed(2) : parseFloat(priceData.last).toFixed(2);
-      return `Price Action: ${companyName} shares were ${premarketChangePercent.startsWith('-') ? 'down' : 'up'} ${premarketDisplayChangePercent}% at $${premarketPrice} at the time of publication ${dayName}.`;
-    } else if (finalHasExtendedHours && finalExtChangePercent && finalExtDisplayChangePercent) {
-      return `Price Action: ${companyName} shares were ${finalExtChangePercent.startsWith('-') ? 'down' : 'up'} ${finalExtDisplayChangePercent}% at $${extPrice} at the time of publication ${dayName}.`;
+      return `<strong>${prefix}</strong> ${companyName} shares were ${premarketChangePercent.startsWith('-') ? 'down' : 'up'} ${premarketDisplayChangePercent}% at $${premarketPrice} during pre-market trading on ${dayName}, according to <a href="https://pro.benzinga.com">Benzinga Pro</a>.`;
+    } else {
+      // Skip change percentage if it's 0 or undefined (stock unchanged or API hasn't updated)
+      return `<strong>${prefix}</strong> ${companyName} shares were trading at $${premarketPrice} during pre-market trading on ${dayName}, according to <a href="https://pro.benzinga.com">Benzinga Pro</a>.`;
     }
-    return `Price Action: ${companyName} shares were trading during pre-market hours on ${dayName}.`;
   } else if (marketSession === 'afterhours') {
     if (finalHasExtendedHours && finalExtChangePercent && finalExtDisplayChangePercent) {
+      // Show both regular session and after-hours changes
       const regularDirection = regularChangePercent.startsWith('-') ? 'fell' : 'rose';
       const extDirection = finalExtChangePercent.startsWith('-') ? 'down' : 'up';
-      return `Price Action: ${companyName} shares ${regularDirection} ${regularDisplayChangePercent}% to $${regularLast} during regular trading hours, and were ${extDirection} ${finalExtDisplayChangePercent}% at $${extPrice} at the time of publication ${dayName}.`;
+      
+      return `<strong>${prefix}</strong> ${companyName} shares ${regularDirection} ${regularDisplayChangePercent}% to $${regularLast} during regular trading hours, and were ${extDirection} ${finalExtDisplayChangePercent}% at $${extPrice} during after-hours trading on ${dayName}, according to <a href="https://pro.benzinga.com">Benzinga Pro</a>.`;
     } else {
+      // Show regular session data with after-hours indication
       const regularDirection = regularChangePercent.startsWith('-') ? 'fell' : 'rose';
-      return `Price Action: ${companyName} shares ${regularDirection} ${regularDisplayChangePercent}% to $${regularLast} during regular trading hours on ${dayName}.`;
+      return `<strong>${prefix}</strong> ${companyName} shares ${regularDirection} ${regularDisplayChangePercent}% to $${regularLast} during regular trading hours on ${dayName}. The stock is currently trading in after-hours session, according to <a href="https://pro.benzinga.com">Benzinga Pro</a>.`;
     }
   } else {
-    return `Price Action: ${companyName} shares ${regularChangePercent.startsWith('-') ? 'fell' : 'rose'} ${regularDisplayChangePercent}% to $${regularLast} during regular trading hours on ${dayName}.`;
+    // Market is closed, use last regular session data
+    return `<strong>${prefix}</strong> ${companyName} shares ${regularChangePercent.startsWith('-') ? 'fell' : 'rose'} ${regularDisplayChangePercent}% to $${regularLast} during regular trading hours on ${dayName}, according to <a href="https://pro.benzinga.com">Benzinga Pro</a>.`;
   }
 }
 
@@ -389,14 +504,54 @@ export async function POST(req: Request) {
       console.log(`✓ Final ticker for price action: ${finalTicker}`);
     }
     
+    // Extract date/day of week from analyst note text
+    const ratingDayOfWeek = extractDateAndDayOfWeek(combinedNoteText);
+    
     // Fetch related articles for "Also Read" and "Read Next" sections
+    // Note: Analyst articles don't have a sourceUrl to exclude, but we could exclude the analyst note URL if available
+    // For now, we don't exclude any URL since analyst notes come from PDFs, not URLs
     const relatedArticles = finalTicker ? await fetchRelatedArticles(finalTicker) : [];
     
-    // Fetch price data for price action line (if ticker is available)
+    // Fetch price data for price action line and implied upside calculation (if ticker is available)
     let priceActionLine = '';
+    let currentPrice: number | null = null;
+    let priceTarget: number | null = null;
+    let impliedUpside: number | null = null;
+    
     if (finalTicker && finalTicker.trim() !== '' && finalTicker.trim().toUpperCase() !== 'PRICE') {
       console.log(`Fetching price data for ticker: ${finalTicker}`);
       const priceData = await fetchPriceData(finalTicker);
+      
+      // Extract current price for upside calculation
+      if (priceData && priceData.last) {
+        currentPrice = typeof priceData.last === 'number' ? priceData.last : parseFloat(priceData.last);
+      }
+      
+      // Extract price target from analyst note text
+      const priceTargetPatterns = [
+        /\$(\d+(?:\.\d+)?)\s+(?:price\s+)?target/i,
+        /price\s+target.*?\$(\d+(?:\.\d+)?)/i,
+        /target.*?\$(\d+(?:\.\d+)?)/i,
+        /\$(\d+(?:\.\d+)?)\s*PT/i,
+        /PT.*?\$(\d+(?:\.\d+)?)/i,
+        /raised.*?\$(\d+(?:\.\d+)?)/i,
+        /to\s+\$(\d+(?:\.\d+)?)/i,
+      ];
+      
+      for (const pattern of priceTargetPatterns) {
+        const match = combinedNoteText.match(pattern);
+        if (match && match[1]) {
+          priceTarget = parseFloat(match[1]);
+          console.log(`Extracted price target: $${priceTarget}`);
+          break;
+        }
+      }
+      
+      // Calculate implied upside if we have both current price and price target
+      if (currentPrice && currentPrice > 0 && priceTarget && priceTarget > 0) {
+        impliedUpside = ((priceTarget - currentPrice) / currentPrice) * 100;
+        console.log(`Calculated implied upside: ${impliedUpside.toFixed(2)}% (Target: $${priceTarget}, Current: $${currentPrice})`);
+      }
       
       // Validate price data - ensure we have valid price information
       const hasValidPrice = priceData && 
@@ -408,11 +563,11 @@ export async function POST(req: Request) {
         console.log(`Generated price action line: ${priceActionLine.substring(0, 100)}...`);
         
         // Double-check the generated price action line doesn't have invalid data
+        // Note: 0.00% is valid during premarket/closed if stock is truly unchanged, so don't reject it
         if (priceActionLine.includes('PRICE shares') || 
-            priceActionLine.includes('$0.00') || 
-            priceActionLine.includes('0.00%') && !priceActionLine.includes('unchanged')) {
+            priceActionLine.includes('$0.00')) {
           console.warn(`Generated price action line contains invalid data, using fallback: ${priceActionLine}`);
-          priceActionLine = `Price Action: ${finalTicker} shares closed on ${getCurrentDayName()}.`;
+          priceActionLine = `<strong>${finalTicker} Price Action:</strong> Price data unavailable, according to <a href="https://pro.benzinga.com">Benzinga Pro</a>.`;
         }
         
         // Fetch and append ETF information
@@ -431,7 +586,7 @@ export async function POST(req: Request) {
       } else {
         console.warn(`Price data unavailable or invalid for ${finalTicker}, using fallback`);
         // Use a fallback that doesn't include specific price data
-        priceActionLine = `Price Action: ${finalTicker} shares closed on ${getCurrentDayName()}.`;
+        priceActionLine = `<strong>${finalTicker} Price Action:</strong> Price data unavailable, according to <a href="https://pro.benzinga.com">Benzinga Pro</a>.`;
       }
     } else {
       console.warn(`No valid ticker available for price action line (ticker: ${finalTicker})`);
@@ -462,32 +617,45 @@ export async function POST(req: Request) {
 
 ### STYLE GUIDELINES:
 
-1. **Headline:** Create a narrative, editorial headline that tells a story. Use quotes, conflict, or intrigue when possible. Include specific numbers/metrics.
-   - Good examples: "BofA Says 'Ignore The Noise': Broadcom Poised For $500 As AI Backlog Swells To $73 Billion" or "[Firm] Sees [Company] Hitting $[Target] As [Key Metric] Surges"
-   - Use company name without "Inc." in headline (just "Broadcom" not "Broadcom Inc.")
-   - **CRITICAL: Headline must be PLAIN TEXT ONLY - NO HTML TAGS, NO BOLD TAGS, NO TICKER FORMATS like (NASDAQ:XXX). Just plain text.**
-   - Create intrigue: "Mystery Customer", "Ignore The Noise", "Beat Goes On"
-   - Include specific numbers when impactful: "$73 billion", "$500 target"
-   - Keep under 100 characters when possible
+1. **Headline:** Create an SEO-optimized headline that captures search intent. Prioritize financial data (firm, action, ticker, target) over generic storytelling.
+   - **SEO-OPTIMIZED FORMAT:** "[Firm] [Action] [Rating] on [Company] ([Ticker]): [Key Catalyst] Drives $[Target] Target"
+   - Examples: "H.C. Wainwright Reiterates Buy on OKYO Pharma (OKYO): New CEO & Data Drive $7 Target" or "BofA Reiterates Buy on Broadcom (AVGO): AI Backlog Drives $500 Target"
+   - **CRITICAL: Always include the firm name, rating action (Reiterates, Upgrades, Downgrades), company name, ticker in parentheses, and price target in the headline**
+   - Use company name without "Inc." in headline (just "OKYO Pharma" not "OKYO Pharma Limited")
+   - **CRITICAL: Headline must be PLAIN TEXT ONLY - NO HTML TAGS, NO BOLD TAGS. Ticker format: ([TICKER]) - no exchange prefix needed**
+   - Include specific price target: "$7 Target" or "$500 Target"
+   - Keep under 120 characters when possible
    - **CRITICAL: If you use quotation marks in the headline, use SINGLE QUOTES (') not double quotes ("). Example: 'Accelerating Momentum' not "Accelerating Momentum".**
    - **CRITICAL: If you use quotation marks in the headline, the quoted text MUST be an exact word-for-word copy from the source analyst note. Do NOT invent quotes or paraphrase. If you cannot find an exact quote in the source, do not use quotation marks in the headline.**
 
 2. **NO DATELINE:** Do NOT include formal wire service datelines. Jump straight into the lede paragraph.
 
-3. **The Lede (Opening Paragraph):** Start with a narrative hook that creates intrigue or conflict. Then state the analyst action.
-   - Create a hook: "sitting on a 'massive' AI order book that bears are ignoring" or "post-earnings volatility has investors worried, but..."
-   - Then state: Analyst Name AND Firm, Rating Action, and Price Target change
-   - Use phrases like "telling investors that", "argues that", "notes that" to create narrative flow
+3. **The Lede (Opening Paragraph):** Lead with the most clickable financial data - firm, analyst name, rating, price target, and implied upside. Make it "greedy" and urgent.
+   - **Structure:** Use a section header "<strong>The Analyst Call</strong>" (wrapped in <strong> tags) followed by the opening paragraph.
+   - **Opening Paragraph Format:** "[Firm] analysts, led by [Analyst Name], [action] a [Rating] rating on [Company Name] ([Exchange:Ticker]) [day of week], maintaining a bullish $[Target] price target. The firm cites [key catalysts] as the catalysts for a potential [X]%+ rally."
+   - **CRITICAL - Analyst Name Required:** You MUST include the specific analyst's name (e.g., "Yi Chen") along with the firm name. Format: "[Firm] analysts, led by [Analyst Name]," or "[Firm]'s [Analyst Name]" or "According to [Analyst Name] of [Firm],". The analyst name is MANDATORY in the lead paragraph.
+   - **CRITICAL - Day of Week:** You MUST include the day of the week when the rating was issued in the lead paragraph. ${ratingDayOfWeek && ratingDayOfWeek !== 'today' ? `The analyst note indicates the rating was issued on ${ratingDayOfWeek}. Use "${ratingDayOfWeek}" in the lead (e.g., "reiterated a Buy rating on OKYO Pharma (NASDAQ:OKYO) ${ratingDayOfWeek}").` : 'If a date is found in the analyst note source text, extract it and convert to day name (Monday, Tuesday, etc.). If no date is found, use "today".'}
+   - **CRITICAL - Implied Upside in Lead:** If price target and current price are available, you MUST include the implied upside percentage in the lead paragraph to make it more "greedy" and urgent. Use phrases like "potential [X]%+ rally" or "potential [X]% upside" where X is the rounded upside percentage. This creates urgency and makes the lead irresistible.
+   - **CRITICAL - Hyperlink in Lead (MANDATORY):** You MUST include exactly one hyperlink in the lead paragraph. The hyperlink must point to the Benzinga analyst ratings page for this stock: ${finalTicker ? `https://www.benzinga.com/quote/${finalTicker}/analyst-ratings` : 'https://www.benzinga.com/quote/[TICKER]/analyst-ratings'}. Select ANY THREE CONSECUTIVE WORDS from your lead paragraph and wrap them in the hyperlink. The hyperlink should be embedded naturally within the sentence flow - do NOT use phrases like "according to analyst ratings" or "see analyst ratings" to introduce it. Simply select three consecutive words that are part of the natural sentence structure and hyperlink them. Example: "H.C. Wainwright reiterated a <a href="https://www.benzinga.com/quote/OKYO/analyst-ratings">Buy rating on</a> OKYO Pharma (NASDAQ:OKYO) today" or "The firm cites the <a href="https://www.benzinga.com/quote/OKYO/analyst-ratings">appointment of a</a> new CEO". The hyperlink MUST appear in the lead paragraph - this is mandatory, not optional.
+   - **Example Format (with upside and day):** "<strong>The Analyst Call</strong> H.C. Wainwright analysts, led by Yi Chen, reiterated a <a href="https://www.benzinga.com/quote/OKYO/analyst-ratings">Buy rating on</a> OKYO Pharma (NASDAQ:OKYO) ${ratingDayOfWeek && ratingDayOfWeek !== 'today' ? ratingDayOfWeek : 'today'}, maintaining a bullish $7.00 price target. The firm cites the appointment of a new CEO and promising clinical data as the catalysts for a potential 200%+ rally."
+   - **Example Format (without upside - fallback):** "<strong>The Analyst Call</strong> H.C. Wainwright analysts, led by Yi Chen, reiterated a <a href="https://www.benzinga.com/quote/OKYO/analyst-ratings">Buy rating on</a> OKYO Pharma (NASDAQ:OKYO) ${ratingDayOfWeek && ratingDayOfWeek !== 'today' ? ratingDayOfWeek : 'today'}, maintaining a $7.00 price target, citing the appointment of a new CEO and promising clinical data as pivotal growth drivers."
    - **Keep the lede to 2-3 sentences maximum - break into multiple short paragraphs if needed**
-   - Example: "Broadcom Inc. (NASDAQ:AVGO) is sitting on a 'massive' AI order book that bears are ignoring, according to BofA Securities. Analyst Vivek Arya reiterated a Buy rating and raised the price target from $460 to $500, telling investors that the 'beat goes on' for the semiconductor giant as its AI backlog hits $73 billion—smashing consensus expectations."
+${impliedUpside !== null && currentPrice && priceTarget ? `\n   - **IMPLIED UPSIDE FOR LEAD:** Current price: ~$${currentPrice.toFixed(2)}, Price target: $${priceTarget.toFixed(2)}, Implied upside: ${impliedUpside > 0 ? '+' : ''}${impliedUpside.toFixed(0)}%. **You MUST include this upside percentage in the LEAD paragraph** using phrases like "potential ${impliedUpside.toFixed(0)}%+ rally" or "potential ${impliedUpside > 50 ? 'aggressive ' : ''}${impliedUpside.toFixed(0)}% upside". Round to the nearest whole number (e.g., ${impliedUpside.toFixed(0)}% not ${impliedUpside.toFixed(2)}%).` : '\n   - **DATE/DAY EXTRACTION:** Extract the date from the analyst note source text and include the day of the week (Monday, Tuesday, Wednesday, etc.) in the lead. Look for date patterns like "January 5, 2026" or "January 5" and convert to day name. If no date is found, use "today".'}
+${impliedUpside !== null && currentPrice && priceTarget ? `\n   - **IMPLIED UPSIDE CALCULATION - "The Math" Section (OPTIONAL):** After the opening paragraph, you may optionally create a separate short section: "<strong>The Math:</strong> With the stock currently trading at ~$${currentPrice.toFixed(2)}, this target implies an ${impliedUpside > 50 ? '"Aggressive Upside"' : impliedUpside > 20 ? '"Significant Upside"' : 'upside'} potential of ${impliedUpside > 0 ? '+' : ''}${impliedUpside.toFixed(0)}%." However, since the upside is already in the lead, this section is optional and may be omitted to avoid redundancy.` : ''}
 
-4. **The Body Structure:** Use 2-3 editorial section headers to organize the narrative:
-   - Headers should be narrative/editorial: "The [Company] Thesis", "The 'Mystery' Customer Catalyst", "Valuation & Risks", "The [Company] Factor"
+4. **The Body Structure:** Use 2-4 SEO-optimized section headers that are specific and keyword-rich, not vague:
+   - **CRITICAL: All section headers MUST be in H2 format using <h2> tags, NOT <strong> tags. Example: <h2>Strategic Shift: Former Shire Exec Named CEO</h2>**
+   - **SEO RULE #3 - The Name Drop Rule:** If the analyst note mentions competitor drugs (e.g., Xiidra, Restasis), previous companies (e.g., Shire, Takeda), or other high-value keywords, **BOLD these terms** in the article body. These are high-value keywords that associate the small cap stock with large cap success. Format: "<strong>Xiidra</strong>" or "<strong>Shire</strong>" (not just "Xiidra" or "Shire")
+   - **Header Format Examples (SEO-Optimized):**
+     * BAD (vague): "The Leadership Catalyst", "The Clinical Breakthrough"  
+     * GOOD (specific, keyword-rich): "Strategic Shift: The 'Blockbuster' CEO", "Phase 2 Data: De-Risking the Asset", "Valuation Insight"
+   - Headers should be specific and include keywords: "Phase 2 [Drug Name] Results", "Valuation Insight", "[Firm]'s Investment Thesis", "[Competitor Drug] Creator Joins Leadership"
    - **CRITICAL: NEVER place a section header before the first paragraph. Always start with the opening paragraph (the lede), then place section headers after the first paragraph and throughout the rest of the article.**
-   - **IMPORTANT: All section headers MUST be wrapped in <strong> tags to make them bold**
    - **CRITICAL: Keep paragraphs SHORT - maximum 2 sentences per paragraph. Break up long thoughts into multiple short paragraphs for better readability.**
-   - Under each header, write 3-5 very short paragraphs (1-2 sentences each) with specific details
-   - Create story elements: "mystery customer", "undue noise", "beat goes on"
+   - **CRITICAL - Use Bullets for Credentials/Keywords:** When listing credentials, track records, or key achievements (especially CEO backgrounds, drug names, company names), use bullet points instead of burying them in sentences. This makes high-value keywords instantly visible. Format:
+     * Use bullet points with labels: "Former Role: [text]", "Track Record: [text]", "The Impact: [text]"
+     * Example: "Dempsey's resume includes:\n• Former Role: Head of Global Ophthalmology at <strong>Shire</strong> (now <strong>Takeda</strong>).\n• Track Record: Successfully led the commercial launches of <strong>Xiidra</strong> and <strong>Restasis</strong>—two of the most dominant dry-eye therapies in the world."
+   - Under each header, write 3-5 very short paragraphs (1-2 sentences each) with specific details, using bullets for credentials/keywords when appropriate
    - **QUOTE FORMATTING (CRITICAL): In the BODY of the article, use DOUBLE QUOTES (") for all direct quotes. Example: "momentum is accelerating" not 'momentum is accelerating'. Single quotes (') are ONLY for headlines.**
    - **QUOTE ACCURACY (CRITICAL): When you use quotation marks, the text inside MUST be a word-for-word exact copy from the source. Do NOT reorder words, change word forms, or paraphrase. Example: If source says "momentum is accelerating", you MUST write "momentum is accelerating" - NOT "accelerating momentum". Before using ANY quote, search the source text for the exact phrase word-for-word. If you cannot find the exact phrase, do NOT use quotation marks - paraphrase without quotes instead (e.g., "Cassidy noted that momentum is accelerating" without quotes).**
    - **QUOTE PLACEMENT (CRITICAL): NEVER place quotation marks before dollar amounts or numbers. Examples: Write "consensus $2.5 billion" NOT "consensus" $2.5 billion". Write "target of $61" NOT "target of" $61". Quotes are ONLY for exact word-for-word phrases from the source, never for numbers or dollar amounts.**
@@ -498,8 +666,11 @@ export async function POST(req: Request) {
 
 5. **Bolding Strategy:** 
    - Bold company names on first mention only (see formatting rules below)
-   - **Bold ALL section headers/subheads** using <strong> tags
-   - Do NOT bold narrative phrases, analyst names, firms, ratings, price targets, numbers, dollar amounts, or metrics (except headers and company names)
+   - **Bold executive/official names on first mention only.** When mentioning company executives, CEOs, CFOs, or other officials (e.g., "Robert J. Dempsey"), bold their full name on the FIRST mention. Example: "<strong>Robert J. Dempsey</strong>" on first mention, then just "Dempsey" without bolding in subsequent references.
+   - **Do NOT bold analyst names.** Analyst names (e.g., "Yi Chen") should remain unbolded even on first mention.
+   - **All section headers/subheads MUST be in <h2> format, NOT <strong> tags**
+   - **Bold competitor drugs, products, and related companies** mentioned in the analyst note (Name Drop Rule). If the note mentions competitor drugs like Xiidra, Restasis, or previous companies like Shire, Takeda, these should be bolded as high-value keywords. Examples: "<strong>Xiidra</strong>", "<strong>Restasis</strong>", "<strong>Shire</strong>", "<strong>Takeda</strong>"
+   - Do NOT bold narrative phrases, analyst names, firms, ratings, price targets, numbers, dollar amounts, or metrics (except company names, executive/official names, and competitor products/companies)
    - **CRITICAL: NEVER bold dollar amounts like "$2.5 billion" or numbers - these should always be plain text**
 
 6. **Formatting:** - Use HTML <strong> tags to bold text. DO NOT use markdown ** syntax.
@@ -508,17 +679,31 @@ export async function POST(req: Request) {
    
    - After first mention: Do NOT bold the company name in follow-up references. Just use "Broadcom" or "Apple" without bolding.
    
-   - Do NOT bold any other text - no numbers, metrics, analyst names, firms, or phrases
+   - **Bold executive/official names on first mention only.** When mentioning CEOs, CFOs, or other company officials, bold their full name on first mention. Example: "<strong>Robert J. Dempsey</strong>" on first mention, then "Dempsey" without bolding afterwards.
+   
+   - **Do NOT bold analyst names.** Analyst names like "Yi Chen" should remain unbolded even on first mention.
+   
+   - **Bold competitor drugs and related companies** mentioned in the analyst note when they appear (Name Drop Rule). These are high-value SEO keywords. Examples: "<strong>Xiidra</strong>", "<strong>Shire</strong>", "<strong>Takeda</strong>"
+   
+   - Do NOT bold any other text - no numbers, metrics, analyst names, firms, or phrases (except company names, executive/official names, and competitor products/companies mentioned above)
 
 7. **Price Action Footer (REQUIRED):** Every article MUST end with a one-sentence "Price Action" line. DO NOT generate this yourself - it will be provided separately. Just end your article content before the Price Action line.
 
-8. **Tone & Voice:** 
+8. **Valuation & Upside Section (REQUIRED when price target available):**
+   - If a price target is mentioned, create a dedicated section discussing the valuation and implied upside
+   - **Calculate and prominently display the implied upside percentage** using the formula: ((Target Price - Current Price) / Current Price) * 100
+   - Use phrases like "Implied Upside", "Upside Potential", or "Aggressive Upside" (if >50%)
+   - Include the current price and price target in this section: "With shares trading at $[Current], the $[Target] target implies [X]% upside potential"
+   - Explain why the target is justified based on the analyst's thesis
+
+9. **Tone & Voice:** 
    - Editorial, narrative-driven - tell a story, create intrigue
    - Use phrases that create conflict or tension: "bears are ignoring", "undue noise", "smashing expectations"
    - Include analyst quotes to support narrative points
    - Fast-paced but with narrative flow - not just a list of facts
    - Create story elements around key catalysts (e.g., "mystery customer", "Apple Factor")
    - Use active voice and engaging language
+   - **Prioritize financial data and SEO keywords** - don't bury the most clickable information under generic narrative
 
 ### INPUT TEXT (Analyst Note${isMultipleNotes ? 's' : ''}):
 
@@ -526,11 +711,15 @@ ${truncatedText}
 
 ### OUTPUT ARTICLE:`;
 
+    const impliedUpsideInstruction = impliedUpside !== null && currentPrice && priceTarget 
+      ? ` CRITICAL SEO REQUIREMENT - IMPLIED UPSIDE: Current price is $${currentPrice.toFixed(2)}, price target is $${priceTarget.toFixed(2)}, which implies ${impliedUpside > 0 ? '+' : ''}${impliedUpside.toFixed(2)}% upside. ${impliedUpside > 50 ? 'This represents Aggressive Upside (>50%) - use the phrase "Aggressive Upside" in your article.' : impliedUpside > 20 ? 'This represents Significant Upside (>20%) - use the phrase "Significant Upside" in your article.' : ''} You MUST prominently include this implied upside calculation, preferably in the lede paragraph or a dedicated "Valuation & Upside Potential" section.`
+      : '';
+
     const result = await aiProvider.generateCompletion(
       [
         {
           role: "system",
-          content: "You are an editorial financial journalist writing for Benzinga, a fast-paced trading news site. Your articles are read by traders who scan content quickly but appreciate compelling narratives. Create editorial, story-driven content with intrigue, conflict, and tradeable information. Use narrative hooks, create story elements (like 'mystery customer'), and include analyst quotes to support the narrative. Use 2-3 editorial section headers (e.g., 'The Broadcom Thesis', 'The Mystery Customer Catalyst'). NEVER include formal datelines or conclusion sections. Do NOT generate a Price Action line - it will be added automatically. Use HTML <strong> tags for bold text, NOT markdown ** syntax. CRITICAL: You MUST bold ALL section headers/subheads using <strong> tags. ONLY bold company names on first mention - do NOT bold any other text (no numbers, metrics, analyst names, firms, or phrases) except for section headers. Always include the analyst's name along with the firm name. On first mention, bold ONLY the company name (e.g., <strong>Broadcom Inc.</strong>), then include the full exchange ticker format (NASDAQ:AVGO) without bolding and with no space after the colon. MOST IMPORTANT: Keep ALL paragraphs SHORT - maximum 2 sentences per paragraph. Break up any long thoughts into multiple short, punchy paragraphs. Never create dense blocks of text. CRITICAL: Use APOSTROPHES (') for possessives (e.g., company's, BofA's, Bristol-Myers Squibb's). NEVER use double quotes (\") for possessives. QUOTE FORMATTING: Use SINGLE QUOTES (') in headlines only. Use DOUBLE QUOTES (\") in the body of the article for all direct quotes. QUOTE ACCURACY IS ABSOLUTELY CRITICAL IN HEADLINES AND BODY: If you use quotation marks anywhere (headline or body), the text inside MUST be a word-for-word exact copy from the source. Do NOT reorder words, change word forms, or paraphrase. Example: If source says 'momentum is accelerating', you MUST write 'momentum is accelerating' in headlines or \"momentum is accelerating\" in body - NOT 'accelerating momentum' or \"accelerating momentum\". Before using ANY quote in the headline or body, search the source text for the exact phrase word-for-word. If you cannot find the exact phrase, do NOT use quotation marks - paraphrase without quotes instead."
+          content: `You are an editorial financial journalist writing for Benzinga, a fast-paced trading news site. Your articles are read by traders who scan content quickly but appreciate compelling narratives with strong SEO optimization. Create editorial, story-driven content with intrigue, conflict, and tradeable information, BUT prioritize SEO-friendly financial data (price targets, upside, analyst names, firm names) over generic storytelling. Use narrative hooks, create story elements (like 'mystery customer'), and include analyst quotes to support the narrative. CRITICAL: Use <h2> tags for ALL section headers/subheads (NOT <strong> tags), except for "The Analyst Call" and "The Math:" which should use <strong> tags. Example: <h2>Strategic Shift: The 'Blockbuster' CEO</h2> or <strong>The Analyst Call</strong>. NEVER include formal datelines or conclusion sections. NEVER use essay-style phrases like "In conclusion", "In summary", "To conclude", "In closing", "To wrap up", "To sum up", "In final analysis", "Ultimately", or "In the end" - news articles don't have conclusions, they just end. Do NOT generate a Price Action line - it will be added automatically. Use HTML <strong> tags for bold text, NOT markdown ** syntax. ONLY bold company names on first mention. BOLD executive/official names (CEOs, CFOs, etc.) on first mention only (e.g., <strong>Robert J. Dempsey</strong> on first mention, then "Dempsey" without bolding). Do NOT bold analyst names (e.g., "Yi Chen" should remain unbolded). Also BOLD competitor drugs, products, and related companies mentioned in the note (e.g., <strong>Xiidra</strong>, <strong>Shire</strong>, <strong>Takeda</strong>) as these are high-value SEO keywords. Use bullet points (•) for credentials, track records, and key achievements to make high-value keywords instantly visible - don't bury them in dense paragraphs. Format bullets with labels like "Former Role:", "Track Record:", "The Impact:". AVOID CLICHÉS: Do NOT use fluff phrases like "has sent ripples through", "brings a wealth of experience", "brings a wealth", "has sent ripples" - instead use direct language like "signals a commercial pivot for", "is a veteran of", "has experience", "signals". Do NOT bold any other text (no numbers, metrics, analyst names, firms, or phrases) except for company names, executive/official names, and competitor products/companies. Always include the analyst's full name (e.g., "Yi Chen") along with the firm name (e.g., "H.C. Wainwright") in the first paragraph. CRITICAL LEAD PARAGRAPH FORMAT: Include the day of the week when the rating was issued (e.g., "today", "Monday", "Tuesday") and include the implied upside percentage if available (e.g., "potential 200%+ rally") to make the lead more compelling and urgent. MANDATORY HYPERLINK: You MUST include exactly one hyperlink in the lead paragraph pointing to ${finalTicker ? `https://www.benzinga.com/quote/${finalTicker}/analyst-ratings` : 'the Benzinga analyst ratings page'}. Select any three consecutive words from the lead and wrap them in <a href="${finalTicker ? `https://www.benzinga.com/quote/${finalTicker}/analyst-ratings` : 'https://www.benzinga.com/quote/[TICKER]/analyst-ratings'}">three consecutive words</a>. Embed it naturally in the sentence flow - do NOT use intro phrases. On first mention, bold ONLY the company name (e.g., <strong>Broadcom Inc.</strong>), then include the full exchange ticker format (NASDAQ:AVGO) without bolding and with no space after the colon. MOST IMPORTANT: Keep ALL paragraphs SHORT - maximum 2 sentences per paragraph. Break up any long thoughts into multiple short, punchy paragraphs. Never create dense blocks of text. CRITICAL: Use APOSTROPHES (') for possessives (e.g., company's, BofA's, Bristol-Myers Squibb's). NEVER use double quotes (\") for possessives. QUOTE FORMATTING: Use SINGLE QUOTES (') in headlines only. Use DOUBLE QUOTES (\") in the body of the article for all direct quotes. QUOTE ACCURACY IS ABSOLUTELY CRITICAL IN HEADLINES AND BODY: If you use quotation marks anywhere (headline or body), the text inside MUST be a word-for-word exact copy from the source. Do NOT reorder words, change word forms, or paraphrase. Example: If source says 'momentum is accelerating', you MUST write 'momentum is accelerating' in headlines or \"momentum is accelerating\" in body - NOT 'accelerating momentum' or \"accelerating momentum\". Before using ANY quote in the headline or body, search the source text for the exact phrase word-for-word. If you cannot find the exact phrase, do NOT use quotation marks - paraphrase without quotes instead.${impliedUpsideInstruction}`
         },
         {
           role: "user",
@@ -778,20 +967,24 @@ ${truncatedText}
     articleBody = articleBody.replace(/([a-zA-Z])"\s*(\$[\d.,]+)/gi, "$1 $2");
     articleBody = articleBody.replace(/"\s*(\$[\d.,]+)/g, "$1");
     
-    // Bold section headers that might not be bolded (common patterns)
-    // Look for headers that are on their own line and not already bolded
-    articleBody = articleBody.replace(/^(The [A-Z][^<\n]+?)(\n|$)/gm, (match, header, newline) => {
-      if (!header.includes('<strong>')) {
-        return `<strong>${header}</strong>${newline}`;
+    // Convert <strong> headers to <h2> format if they're section headers
+    // Pattern: <strong>Header Text</strong> at start of line (but not "The Analyst Call" or "The Math" which should stay as <strong>)
+    articleBody = articleBody.replace(/^(<strong>)([^<]+)(<\/strong>)(\s*\n|$)/gm, (match, openTag, headerText, closeTag, newline) => {
+      // Keep "The Analyst Call" and "The Math" as <strong>, convert others to <h2>
+      if (headerText.trim() === 'The Analyst Call' || headerText.trim() === 'The Math:') {
+        return match; // Keep as is
       }
-      return match;
+      // Convert other headers to H2 format
+      return `<h2>${headerText.trim()}</h2>${newline}`;
     });
     
-    // Bold other common header patterns
-    articleBody = articleBody.replace(/^([A-Z][^<\n]{5,50}:?)(\n|$)/gm, (match, header, newline) => {
-      // Only bold if it looks like a header (starts with capital, reasonable length, not already bolded)
-      if (!header.includes('<strong>') && header.length > 5 && header.length < 50 && !header.includes('.')) {
-        return `<strong>${header}</strong>${newline}`;
+    // Also convert standalone headers (not wrapped in tags) to H2 format
+    // Pattern: Header text that looks like a section header (starts with capital, has colon, reasonable length)
+    articleBody = articleBody.replace(/^([A-Z][^<\n]{5,80}:?)(\s*\n|$)/gm, (match, header, newline) => {
+      // Only convert if it looks like a header (not already in tags, not a sentence, reasonable length)
+      if (!header.includes('<') && !header.includes('>') && header.length > 5 && header.length < 80 && !header.includes('.') && !header.trim().toLowerCase().startsWith('in a')) {
+        // Skip if it's the first paragraph or looks like regular text
+        return `<h2>${header.trim()}</h2>${newline}`;
       }
       return match;
     });
@@ -832,8 +1025,95 @@ ${truncatedText}
     
     // Remove any Price Action line that the AI might have generated
     // We'll add the real one from Benzinga API
+    // Match both "Price Action:" and "TICKER Price Action:" patterns
+    articleBody = articleBody.replace(/\n\n[A-Z]+ Price Action:.*$/i, '');
     articleBody = articleBody.replace(/\n\nPrice Action:.*$/i, '');
+    articleBody = articleBody.replace(/[A-Z]+ Price Action:.*$/i, '');
     articleBody = articleBody.replace(/Price Action:.*$/i, '');
+    
+    // Remove essay-style conclusion paragraphs and sentences
+    // Pattern: Paragraphs that start with "In conclusion", "In summary", "To conclude", etc.
+    // Match both plain text and HTML wrapped versions
+    const conclusionPatterns = [
+      /(In conclusion|In summary|To conclude|In closing|To wrap up|To sum up|In final analysis|Ultimately,|In the end,)[^<]*?\./gi,
+      /(In conclusion|In summary|To conclude|In closing|To wrap up|To sum up|In final analysis|Ultimately,|In the end,)[^<]*?$/gi,
+    ];
+    
+    for (const pattern of conclusionPatterns) {
+      // Remove from plain text (double newline format)
+      articleBody = articleBody.replace(new RegExp(`\\n\\n${pattern.source}`, 'gi'), '');
+      // Remove from HTML format (wrapped in <p> tags)
+      articleBody = articleBody.replace(new RegExp(`<p>${pattern.source}<\\/p>`, 'gi'), '');
+      // Remove standalone (might be at start of line or after other content)
+      articleBody = articleBody.replace(pattern, '');
+    }
+    
+    // Remove essay-style conclusion language at the end (e.g., "By positioning...", "With strategic leadership...")
+    // Pattern: Paragraphs that use conclusion-like language at the end
+    const conclusionLanguagePatterns = [
+      /By positioning[^<]*?(?:outlook|growth|disruption|future|potential|success|commitment|innovation|case|trajectory|upside|poised|watching|aiming|capture)\./gi,
+      /With strategic leadership[^<]*?(?:growth|disruption|future|potential|success|outlook|trajectory|set towards|poised|watching|aiming|capture)\./gi,
+      /With [^<]*?at the helm[^<]*?(?:poised|watching|aiming|capture|growth|potential|success|outlook|trajectory)\./gi,
+      /Investors are watching[^<]*?(?:poised|aiming|capture|growth|potential|success|outlook|trajectory|development|advance)\./gi,
+    ];
+    
+    for (const pattern of conclusionLanguagePatterns) {
+      // Remove from plain text (double newline format)
+      articleBody = articleBody.replace(new RegExp(`\\n\\n${pattern.source}`, 'gi'), '');
+      // Remove from HTML format (wrapped in <p> tags)
+      articleBody = articleBody.replace(new RegExp(`<p>${pattern.source}<\\/p>`, 'gi'), '');
+      // Also try to match full paragraphs ending with these patterns
+      articleBody = articleBody.replace(new RegExp(`[^<]*?${pattern.source}`, 'gi'), '');
+    }
+    
+    // Additional catch-all: Remove any paragraph that ends with typical conclusion language
+    articleBody = articleBody.replace(/\n\n[^<]*?(?:poised for|watching closely|aiming to|set towards|capture a|significant upside|market disruption|advances its|later stages)[^<]*?\.$/gim, '');
+    articleBody = articleBody.replace(/<p>[^<]*?(?:poised for|watching closely|aiming to|set towards|capture a|significant upside|market disruption|advances its|later stages)[^<]*?\.<\/p>/gi, '');
+    
+    // More aggressive removal: Match "In summary" even if it's part of a longer paragraph
+    articleBody = articleBody.replace(/\n\n[^<]*?In summary[^<]*?\./gi, '');
+    articleBody = articleBody.replace(/<p>[^<]*?In summary[^<]*?\.<\/p>/gi, '');
+    articleBody = articleBody.replace(/In summary[^<]*?\./gi, '');
+    
+    // Remove cliché phrases and replace with more direct language
+    articleBody = articleBody.replace(/has sent ripples through/gi, 'signals a commercial pivot for');
+    articleBody = articleBody.replace(/brings a wealth of experience/gi, 'is a veteran of');
+    articleBody = articleBody.replace(/brings a wealth/gi, 'has experience');
+    articleBody = articleBody.replace(/has sent ripples/gi, 'signals');
+    
+    // Fix executive name bolding - ensure only first mention is bolded
+    // Pattern: Find all bolded full names (e.g., <strong>Robert J. Dempsey</strong>)
+    // Then unbold any subsequent bolded references to that person's last name
+    const boldedExecutiveMatches = articleBody.matchAll(/<strong>([A-Z][a-z]+(?:\s+[A-Z]\.?\s*)*[A-Z][a-z]+)<\/strong>/g);
+    const boldedNames = Array.from(boldedExecutiveMatches);
+    
+    if (boldedNames.length > 0) {
+      boldedNames.forEach(match => {
+        const fullName = match[1]; // The captured name without tags
+        // Extract last name (last word)
+        const nameParts = fullName.trim().split(/\s+/);
+        const lastName = nameParts[nameParts.length - 1];
+        
+        if (lastName && lastName.length > 1) {
+          // Find the first occurrence of this specific bolded full name
+          const firstOccurrenceIndex = articleBody.indexOf(match[0]);
+          
+          // After the first occurrence, unbold any bolded instances of the last name
+          if (firstOccurrenceIndex >= 0) {
+            const beforeFirst = articleBody.substring(0, firstOccurrenceIndex + match[0].length);
+            const afterFirst = articleBody.substring(firstOccurrenceIndex + match[0].length);
+            
+            // Replace <strong>LastName</strong> with just LastName (only after first mention)
+            const fixedAfter = afterFirst.replace(
+              new RegExp(`<strong>${lastName}<\\/strong>`, 'gi'),
+              lastName
+            );
+            
+            articleBody = beforeFirst + fixedAfter;
+          }
+        }
+      });
+    }
     
     // FINAL PASS: Fix any remaining possessives that might have been missed or re-introduced
     // This is the absolute last step to ensure ALL possessives are fixed
@@ -841,8 +1121,59 @@ ${truncatedText}
     articleBody = articleBody.replace(/([a-zA-Z])"([sS])/g, "$1'$2");
     articleBody = articleBody.replace(/([a-zA-Z]{2,})"([td])/g, "$1'$2");
     
+    // Ensure hyperlink to Benzinga analyst ratings page is in the lead paragraph
+    if (finalTicker && finalTicker.trim() !== '') {
+      const analystRatingsUrl = `https://www.benzinga.com/quote/${finalTicker}/analyst-ratings`;
+      const hyperlinkPattern = new RegExp(`https://www\\.benzinga\\.com/quote/${finalTicker}/analyst-ratings`, 'i');
+      
+      // Check if hyperlink already exists in the first few paragraphs (lead area)
+      const leadArea = articleBody.substring(0, Math.min(1000, articleBody.length));
+      
+      if (!hyperlinkPattern.test(leadArea)) {
+        console.log('Adding hyperlink to Benzinga analyst ratings page in lead paragraph');
+        
+        // Try to find "reiterated a Buy rating" or similar pattern and wrap three words
+        const ratingPattern = /(reiterated|maintains|upgraded|downgraded)\s+(a|an)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s+(rating)/i;
+        const match = leadArea.match(ratingPattern);
+        
+        if (match && match.index !== undefined) {
+          // Insert hyperlink around "a Buy rating" or similar
+          const beforeMatch = articleBody.substring(0, match.index + match[1].length + 1);
+          const threeWords = `${match[2]} ${match[3]} ${match[4]}`;
+          const afterMatch = articleBody.substring(match.index + match[0].length);
+          const hyperlinkText = `<a href="${analystRatingsUrl}">${threeWords}</a>`;
+          
+          articleBody = beforeMatch + ' ' + hyperlinkText + afterMatch;
+          console.log(`✅ Added hyperlink to analyst ratings page: "${threeWords}" -> ${analystRatingsUrl}`);
+        } else {
+          // Fallback: try to find "analysts, led by" pattern
+          const analystPattern = /(analysts, led by\s+)([A-Z][a-z]+\s+[A-Z][a-z]+)/i;
+          const analystMatch = leadArea.match(analystPattern);
+          
+          if (analystMatch && analystMatch.index !== undefined) {
+            const beforeMatch = articleBody.substring(0, analystMatch.index);
+            const threeWords = `analysts, led by`;
+            const afterMatch = articleBody.substring(analystMatch.index + threeWords.length);
+            const hyperlinkText = `<a href="${analystRatingsUrl}">${threeWords}</a>`;
+            
+            articleBody = beforeMatch + hyperlinkText + afterMatch;
+            console.log(`✅ Added hyperlink to analyst ratings page (fallback): "${threeWords}" -> ${analystRatingsUrl}`);
+          } else {
+            console.warn('⚠️ Could not find suitable location to insert analyst ratings hyperlink in lead paragraph');
+          }
+        }
+      } else {
+        console.log('✅ Hyperlink to analyst ratings page already present in lead paragraph');
+      }
+    }
+    
     // Add "Also Read" and "Read Next" sections if related articles are available
     if (relatedArticles && relatedArticles.length > 0) {
+      // Use different articles for "Also Read" and "Read Next" when possible
+      // If only one article is available, skip "Read Next" to avoid duplicate links
+      const alsoReadArticle = relatedArticles[0];
+      const readNextArticle = relatedArticles.length > 1 ? relatedArticles[1] : null;
+      
       // Check if "Also Read" section exists
       const alsoReadPattern = /(?:<p>)?Also Read:.*?(?:<\/p>)?/i;
       const alsoReadMatch = articleBody.match(alsoReadPattern);
@@ -863,49 +1194,72 @@ ${truncatedText}
           paragraphs = articleBody.split(/\n\s*\n/).filter(p => p.trim().length > 0);
         }
         
-        // Insert "Also Read" after the second paragraph (index 2)
-        if (paragraphs.length >= 2) {
-          // Always use HTML link format even if content is plain text (for clickable links)
-          const alsoReadSection = `Also Read: <a href="${relatedArticles[0].url}">${relatedArticles[0].headline}</a>`;
-          
-          // Insert at index 2 (after second paragraph)
+        // Insert "Also Read" BEFORE the first header (h2 tag), not after paragraphs
+        // Find the first header (h2) and insert before it
+        let headerIndex = -1;
+        for (let i = 0; i < paragraphs.length; i++) {
+          if (paragraphs[i].includes('<h2>') || paragraphs[i].match(/^<strong>[A-Z][^<]+:<\/strong>/)) {
+            headerIndex = i;
+            break;
+          }
+        }
+        
+        // Always use HTML link format even if content is plain text (for clickable links)
+        // Add line break after for proper spacing
+        const alsoReadSection = `Also Read: <a href="${alsoReadArticle.url}">${alsoReadArticle.headline}</a>`;
+        
+        if (headerIndex > 0) {
+          // Insert before the first header
+          paragraphs.splice(headerIndex, 0, alsoReadSection);
+          console.log(`✅ "Also Read" section placed before header at index ${headerIndex}`);
+        } else if (paragraphs.length >= 2) {
+          // Fallback: If no header found, insert after second paragraph (original behavior)
           paragraphs.splice(2, 0, alsoReadSection);
-          
-          // Rejoin content
+          console.log(`✅ "Also Read" section placed after second paragraph (no header found)`);
+        } else {
+          console.log('⚠️ Not enough paragraphs to insert "Also Read"');
+        }
+        
+        // Rejoin content (after insertion, if it happened)
+        if (headerIndex > 0 || (paragraphs.length >= 2 && headerIndex === -1)) {
           if (hasHTMLTags) {
             articleBody = paragraphs.map(p => {
               // If it already ends with </p>, return as-is
               if (p.trim().endsWith('</p>')) return p;
-              // If it's the alsoReadSection, wrap in <p> tags
-              if (p.includes('Also Read:')) return `<p>${p}</p>`;
+              // If it's the alsoReadSection, wrap in <p> tags and ensure line break after
+              if (p.includes('Also Read:')) return `<p>${p}</p>\n\n`;
               // Otherwise, add </p> back
               return p + '</p>';
             }).join('');
           } else {
-            articleBody = paragraphs.join('\n\n');
+            // For plain text, ensure line break after "Also Read" section
+            articleBody = paragraphs.map(p => {
+              if (p.includes('Also Read:')) return p + '\n\n';
+              return p;
+            }).join('\n\n');
           }
-          
-          console.log('✅ "Also Read" section placed after second paragraph');
-        } else {
-          console.log('⚠️ Not enough paragraphs to insert "Also Read" (need at least 2)');
         }
       } else {
         console.log('"Also Read" section already exists');
       }
       
-      // Check if "Read Next" section exists, if not add it before price action
-      if (!articleBody.includes('Read Next:')) {
+      // Only add "Read Next" if we have a different article (at least 2 articles)
+      if (readNextArticle && !articleBody.includes('Read Next:')) {
         console.log('Adding "Read Next" section');
         // Check if article uses HTML format
         const hasHTMLTags = articleBody.includes('</p>');
         // Always use HTML link format (for clickable links)
-        const readNextLink = `Read Next: <a href="${relatedArticles[1]?.url || relatedArticles[0].url}">${relatedArticles[1]?.headline || relatedArticles[0].headline}</a>`;
+        const readNextLink = `Read Next: <a href="${readNextArticle.url}">${readNextArticle.headline}</a>`;
         const readNextSection = hasHTMLTags ? `<p>${readNextLink}</p>` : readNextLink;
+        
+        console.log(`✅ Using different article for "Read Next" (article 2 of ${relatedArticles.length})`);
         
         // Insert before price action line (which will be added next)
         // Add it at the end for now, it will be before price action
         articleBody = articleBody.trim() + '\n\n' + readNextSection;
         console.log('✅ "Read Next" section added before price action');
+      } else if (!readNextArticle) {
+        console.log('⚠️ Only one related article available, skipping "Read Next" to avoid duplicate link');
       } else {
         console.log('"Read Next" section already exists');
       }
@@ -915,10 +1269,11 @@ ${truncatedText}
     
     // Replace company name in price action line with the one from the article (if extracted)
     // This ensures consistency - the price action uses the same company name as the article
+    // Price action line format is now: "<strong>TICKER Price Action:</strong> CompanyName shares..."
     if (extractedCompanyName && priceActionLine) {
-      // Extract the current company name from price action (everything between "Price Action: " and " shares")
-      // This pattern handles various formats: "Price Action: CompanyName shares" or "Price Action: Company Name shares"
-      const priceActionMatch = priceActionLine.match(/^Price Action:\s+(.+?)\s+shares/i);
+      // Extract the current company name from price action (everything after "> " and before " shares")
+      // Pattern: "<strong>TICKER Price Action:</strong> CompanyName shares"
+      const priceActionMatch = priceActionLine.match(/<\/strong>\s+(.+?)\s+shares/i);
       if (priceActionMatch) {
         const currentCompanyName = priceActionMatch[1].trim();
         // Replace the first occurrence (the company name) with the one from the article
@@ -931,11 +1286,9 @@ ${truncatedText}
       console.warn(`⚠️ No company name extracted from article body, using API company name in price action`);
     }
     
-    // Bold "Price Action:" in the price action line
-    const boldedPriceActionLine = priceActionLine.replace(/^(Price Action:)/i, '<strong>$1</strong>');
-    
+    // Price action line is already formatted with bold prefix, no need to modify
     // Add the real price action line from Benzinga API
-    articleBody = articleBody.trim() + '\n\n' + boldedPriceActionLine;
+    articleBody = articleBody.trim() + '\n\n' + priceActionLine;
     
     // ONE MORE FINAL PASS on the complete article (including price action line)
     articleBody = articleBody.replace(/([a-zA-Z])"([sS])([^"'])/g, "$1'$2$3");
