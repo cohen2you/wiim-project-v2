@@ -182,8 +182,8 @@ async function fetchNextEarningsDate(ticker: string) {
             eps_prior: nextEarnings.eps_prior || nextEarnings.epsPrior || nextEarnings.eps_prev || nextEarnings.previous_eps || null,
             revenue_estimate: nextEarnings.revenue_est || nextEarnings.revenueEst || nextEarnings.revenue_estimate || nextEarnings.revenueEstimate || nextEarnings.estimated_revenue || null,
             revenue_prior: nextEarnings.revenue_prior || nextEarnings.revenuePrior || nextEarnings.rev_prev || nextEarnings.previous_revenue || null,
-            implied_volatility: impliedVolatility ? (typeof impliedVolatility === 'number' ? impliedVolatility : parseFloat(impliedVolatility)) : null,
-            iv_rank: ivRank ? (typeof ivRank === 'number' ? ivRank : parseFloat(ivRank)) : null,
+            implied_volatility: impliedVolatility ? (typeof impliedVolatility === 'number' ? impliedVolatility : (typeof impliedVolatility === 'string' ? parseFloat(impliedVolatility) : null)) : null,
+            iv_rank: ivRank ? (typeof ivRank === 'number' ? ivRank : (typeof ivRank === 'string' ? parseFloat(ivRank) : null)) : null,
           };
         }
       }
