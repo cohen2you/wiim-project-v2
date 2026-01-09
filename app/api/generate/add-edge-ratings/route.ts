@@ -61,18 +61,49 @@ async function fetchEdgeRatings(ticker: string) {
     // Handle the tickerDetail API response structure
     if (data.result && Array.isArray(data.result) && data.result.length > 0) {
       const tickerData = data.result[0];
-      if (tickerData.rankings && tickerData.rankings.exists) {
+      
+      // Extract rankings - check for both rank and score properties
+      const getRankingValue = (obj: any, prefix: string): number | null => {
+        // Try various possible property names
+        if (obj[prefix] !== undefined && obj[prefix] !== null && typeof obj[prefix] === 'number') return obj[prefix];
+        if (obj[`${prefix}_score`] !== undefined && obj[`${prefix}_score`] !== null && typeof obj[`${prefix}_score`] === 'number') return obj[`${prefix}_score`];
+        if (obj[`${prefix}Score`] !== undefined && obj[`${prefix}Score`] !== null && typeof obj[`${prefix}Score`] === 'number') return obj[`${prefix}Score`];
+        if (obj[`${prefix}Rank`] !== undefined && obj[`${prefix}Rank`] !== null && typeof obj[`${prefix}Rank`] === 'number') return obj[`${prefix}Rank`];
+        return null;
+      };
+      
+      if (tickerData.rankings && typeof tickerData.rankings === 'object') {
+        console.log('Add Edge Ratings: Raw rankings object:', JSON.stringify(tickerData.rankings, null, 2));
+        
         edgeData = {
           ticker: ticker.toUpperCase(),
-          value_rank: tickerData.rankings.value,
-          growth_rank: tickerData.rankings.growth,
-          quality_rank: tickerData.rankings.quality,
-          momentum_rank: tickerData.rankings.momentum,
-          value_score: tickerData.rankings.value,
-          growth_score: tickerData.rankings.growth,
-          quality_score: tickerData.rankings.quality,
-          momentum_score: tickerData.rankings.momentum,
+          value_rank: getRankingValue(tickerData.rankings, 'value'),
+          growth_rank: getRankingValue(tickerData.rankings, 'growth'),
+          quality_rank: getRankingValue(tickerData.rankings, 'quality'),
+          momentum_rank: getRankingValue(tickerData.rankings, 'momentum'),
+          value_score: getRankingValue(tickerData.rankings, 'value'),
+          growth_score: getRankingValue(tickerData.rankings, 'growth'),
+          quality_score: getRankingValue(tickerData.rankings, 'quality'),
+          momentum_score: getRankingValue(tickerData.rankings, 'momentum'),
         };
+        
+        // Also check percentiles array if rankings object didn't have the data
+        if ((!edgeData.value_rank && !edgeData.growth_rank && !edgeData.quality_rank && !edgeData.momentum_rank) && 
+            tickerData.percentiles && Array.isArray(tickerData.percentiles)) {
+          console.log('Add Edge Ratings: Checking percentiles array for ranking data');
+          for (const percentile of tickerData.percentiles) {
+            if (percentile && typeof percentile === 'object') {
+              if (!edgeData.value_rank) edgeData.value_rank = getRankingValue(percentile, 'value');
+              if (!edgeData.growth_rank) edgeData.growth_rank = getRankingValue(percentile, 'growth');
+              if (!edgeData.quality_rank) edgeData.quality_rank = getRankingValue(percentile, 'quality');
+              if (!edgeData.momentum_rank) edgeData.momentum_rank = getRankingValue(percentile, 'momentum');
+              if (!edgeData.value_score) edgeData.value_score = getRankingValue(percentile, 'value');
+              if (!edgeData.growth_score) edgeData.growth_score = getRankingValue(percentile, 'growth');
+              if (!edgeData.quality_score) edgeData.quality_score = getRankingValue(percentile, 'quality');
+              if (!edgeData.momentum_score) edgeData.momentum_score = getRankingValue(percentile, 'momentum');
+            }
+          }
+        }
       }
     }
     
@@ -80,15 +111,24 @@ async function fetchEdgeRatings(ticker: string) {
     if (!edgeData) {
       edgeData = {
         ticker: ticker.toUpperCase(),
-        value_rank: data.value_rank || data.valueRank || data.value || data.rankings?.value,
-        growth_rank: data.growth_rank || data.growthRank || data.growth || data.rankings?.growth,
-        quality_rank: data.quality_rank || data.qualityRank || data.quality || data.rankings?.quality,
-        momentum_rank: data.momentum_rank || data.momentumRank || data.momentum || data.rankings?.momentum,
-        value_score: data.value_score || data.valueScore || data.scores?.value,
-        growth_score: data.growth_score || data.growthScore || data.scores?.growth,
-        quality_score: data.quality_score || data.qualityScore || data.scores?.quality,
-        momentum_score: data.momentum_score || data.momentumScore || data.scores?.momentum,
+        value_rank: data.value_rank || data.valueRank || data.value || (data.rankings && data.rankings.value) || null,
+        growth_rank: data.growth_rank || data.growthRank || data.growth || (data.rankings && data.rankings.growth) || null,
+        quality_rank: data.quality_rank || data.qualityRank || data.quality || (data.rankings && data.rankings.quality) || null,
+        momentum_rank: data.momentum_rank || data.momentumRank || data.momentum || (data.rankings && data.rankings.momentum) || null,
+        value_score: data.value_score || data.valueScore || (data.scores && data.scores.value) || null,
+        growth_score: data.growth_score || data.growthScore || (data.scores && data.scores.growth) || null,
+        quality_score: data.quality_score || data.qualityScore || (data.scores && data.scores.quality) || null,
+        momentum_score: data.momentum_score || data.momentumScore || (data.scores && data.scores.momentum) || null,
       };
+    }
+    
+    // Only return if we have at least one valid ranking (non-null, non-undefined)
+    // Note: 0 is a valid score, so we check specifically for null/undefined
+    if (!edgeData || 
+        (edgeData.value_rank === null && edgeData.growth_rank === null && 
+         edgeData.quality_rank === null && edgeData.momentum_rank === null)) {
+      console.log('Add Edge Ratings: No valid Edge rankings found in response');
+      return null;
     }
     
     console.log('Add Edge Ratings: Processed data:', edgeData);

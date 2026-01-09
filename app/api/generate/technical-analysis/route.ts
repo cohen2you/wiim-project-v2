@@ -2802,14 +2802,45 @@ async function fetchEdgeRatings(ticker: string) {
     // Handle the tickerDetail API response structure
     if (data.result && Array.isArray(data.result) && data.result.length > 0) {
       const tickerData = data.result[0];
-      if (tickerData.rankings && tickerData.rankings.exists) {
+      
+      // Check if rankings exist and extract directly from rankings object
+      if (tickerData.rankings && typeof tickerData.rankings === 'object') {
+        // Log the raw rankings for debugging
+        console.log('[WGO W/ News] Raw rankings object:', JSON.stringify(tickerData.rankings, null, 2));
+        
+        // Extract rankings - check for both rank and score properties
+        // The API may return rankings as direct properties or nested in score fields
+        const getRankingValue = (obj: any, prefix: string): number | null => {
+          // Try various possible property names
+          if (obj[prefix] !== undefined && obj[prefix] !== null && typeof obj[prefix] === 'number') return obj[prefix];
+          if (obj[`${prefix}_score`] !== undefined && obj[`${prefix}_score`] !== null && typeof obj[`${prefix}_score`] === 'number') return obj[`${prefix}_score`];
+          if (obj[`${prefix}Score`] !== undefined && obj[`${prefix}Score`] !== null && typeof obj[`${prefix}Score`] === 'number') return obj[`${prefix}Score`];
+          if (obj[`${prefix}Rank`] !== undefined && obj[`${prefix}Rank`] !== null && typeof obj[`${prefix}Rank`] === 'number') return obj[`${prefix}Rank`];
+          return null;
+        };
+        
         edgeData = {
           ticker: ticker.toUpperCase(),
-          value_rank: tickerData.rankings.value,
-          growth_rank: tickerData.rankings.growth,
-          quality_rank: tickerData.rankings.quality,
-          momentum_rank: tickerData.rankings.momentum,
+          value_rank: getRankingValue(tickerData.rankings, 'value'),
+          growth_rank: getRankingValue(tickerData.rankings, 'growth'),
+          quality_rank: getRankingValue(tickerData.rankings, 'quality'),
+          momentum_rank: getRankingValue(tickerData.rankings, 'momentum'),
         };
+        
+        // Also check percentiles array if rankings object didn't have the data
+        if ((!edgeData.value_rank && !edgeData.growth_rank && !edgeData.quality_rank && !edgeData.momentum_rank) && 
+            tickerData.percentiles && Array.isArray(tickerData.percentiles)) {
+          console.log('[WGO W/ News] Checking percentiles array for ranking data');
+          // Percentiles array might contain ranking data
+          for (const percentile of tickerData.percentiles) {
+            if (percentile && typeof percentile === 'object') {
+              if (!edgeData.value_rank) edgeData.value_rank = getRankingValue(percentile, 'value');
+              if (!edgeData.growth_rank) edgeData.growth_rank = getRankingValue(percentile, 'growth');
+              if (!edgeData.quality_rank) edgeData.quality_rank = getRankingValue(percentile, 'quality');
+              if (!edgeData.momentum_rank) edgeData.momentum_rank = getRankingValue(percentile, 'momentum');
+            }
+          }
+        }
       }
     }
     
@@ -2817,16 +2848,20 @@ async function fetchEdgeRatings(ticker: string) {
     if (!edgeData) {
       edgeData = {
         ticker: ticker.toUpperCase(),
-        value_rank: data.value_rank || data.valueRank || data.value || data.rankings?.value,
-        growth_rank: data.growth_rank || data.growthRank || data.growth || data.rankings?.growth,
-        quality_rank: data.quality_rank || data.qualityRank || data.quality || data.rankings?.quality,
-        momentum_rank: data.momentum_rank || data.momentumRank || data.momentum || data.rankings?.momentum,
+        value_rank: data.value_rank || data.valueRank || data.value || (data.rankings && data.rankings.value) || null,
+        growth_rank: data.growth_rank || data.growthRank || data.growth || (data.rankings && data.rankings.growth) || null,
+        quality_rank: data.quality_rank || data.qualityRank || data.quality || (data.rankings && data.rankings.quality) || null,
+        momentum_rank: data.momentum_rank || data.momentumRank || data.momentum || (data.rankings && data.rankings.momentum) || null,
       };
-      
-      // Only return if we have at least one valid ranking
-      if (!edgeData.value_rank && !edgeData.growth_rank && !edgeData.quality_rank && !edgeData.momentum_rank) {
-        return null;
-      }
+    }
+    
+    // Only return if we have at least one valid ranking (non-null, non-undefined)
+    // Note: 0 is a valid score, so we check specifically for null/undefined
+    if (!edgeData || 
+        (edgeData.value_rank === null && edgeData.growth_rank === null && 
+         edgeData.quality_rank === null && edgeData.momentum_rank === null)) {
+      console.log('[WGO W/ News] No valid Edge rankings found in response');
+      return null;
     }
     
     console.log('[WGO W/ News] Processed Edge data:', edgeData);
