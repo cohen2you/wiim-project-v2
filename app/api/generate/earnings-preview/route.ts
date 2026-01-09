@@ -153,12 +153,37 @@ async function fetchNextEarningsDate(ticker: string) {
         const nextEarnings = upcomingEarnings[0];
         const earningsDate = nextEarnings.date || nextEarnings.earnings_date || nextEarnings.earningsDate;
         if (earningsDate) {
+          // Log available fields for debugging (first time only, to see what data is available)
+          const earningsKeys = Object.keys(nextEarnings);
+          if (!earningsKeys.includes('volatility') && !earningsKeys.includes('implied_volatility') && !earningsKeys.includes('iv')) {
+            console.log(`[EARNINGS DEBUG] Available fields in earnings response for ${ticker}:`, earningsKeys.slice(0, 20).join(', '));
+          }
+          
+          // Extract implied volatility data (check multiple possible field names)
+          const impliedVolatility = nextEarnings.implied_volatility || 
+                                   nextEarnings.impliedVolatility || 
+                                   nextEarnings.iv || 
+                                   nextEarnings.volatility ||
+                                   nextEarnings.vol ||
+                                   nextEarnings.atm_iv ||
+                                   nextEarnings.atmIV ||
+                                   null;
+          
+          // Extract IV rank/percentile if available
+          const ivRank = nextEarnings.iv_rank || 
+                        nextEarnings.ivRank || 
+                        nextEarnings.iv_percentile || 
+                        nextEarnings.ivPercentile ||
+                        null;
+          
           return {
             date: earningsDate,
             eps_estimate: nextEarnings.eps_est || nextEarnings.epsEst || nextEarnings.eps_estimate || nextEarnings.epsEstimate || nextEarnings.estimated_eps || null,
             eps_prior: nextEarnings.eps_prior || nextEarnings.epsPrior || nextEarnings.eps_prev || nextEarnings.previous_eps || null,
             revenue_estimate: nextEarnings.revenue_est || nextEarnings.revenueEst || nextEarnings.revenue_estimate || nextEarnings.revenueEstimate || nextEarnings.estimated_revenue || null,
             revenue_prior: nextEarnings.revenue_prior || nextEarnings.revenuePrior || nextEarnings.rev_prev || nextEarnings.previous_revenue || null,
+            implied_volatility: impliedVolatility ? (typeof impliedVolatility === 'number' ? impliedVolatility : parseFloat(impliedVolatility)) : null,
+            iv_rank: ivRank ? (typeof ivRank === 'number' ? ivRank : parseFloat(ivRank)) : null,
           };
         }
       }
@@ -988,6 +1013,8 @@ async function generateEarningsPreview(
   const epsPrior = typeof nextEarnings === 'object' && nextEarnings.eps_prior ? parseFloat(nextEarnings.eps_prior.toString()) : null;
   const revenueEstimate = typeof nextEarnings === 'object' && nextEarnings.revenue_estimate ? nextEarnings.revenue_estimate : null;
   const revenuePrior = typeof nextEarnings === 'object' && nextEarnings.revenue_prior ? nextEarnings.revenue_prior : null;
+  const impliedVolatility = typeof nextEarnings === 'object' && nextEarnings.implied_volatility !== null && nextEarnings.implied_volatility !== undefined ? parseFloat(nextEarnings.implied_volatility.toString()) : null;
+  const ivRank = typeof nextEarnings === 'object' && nextEarnings.iv_rank !== null && nextEarnings.iv_rank !== undefined ? parseFloat(nextEarnings.iv_rank.toString()) : null;
   
   // Debug logging for revenue values
   console.log(`[EARNINGS PREVIEW] ${ticker}: Revenue values before formatting:`, {
@@ -1100,6 +1127,7 @@ CRITICAL CONTEXT INSTRUCTION: Review the context_brief data above. If major_even
 ${epsEstimate !== null ? `- EPS Estimate: $${epsEstimate.toFixed(2)}${epsPrior !== null ? ` (${epsEstimate > epsPrior ? 'Up' : epsEstimate < epsPrior ? 'Down' : 'Flat'} from $${epsPrior.toFixed(2)} YoY)` : ''}` : ''}
 ${revenueEstimate ? `- Revenue Estimate: ${formatRevenue(revenueEstimate)}${revenuePrior ? ` (${parseFloat(revenueEstimate.toString()) > parseFloat(revenuePrior.toString()) ? 'Up' : parseFloat(revenueEstimate.toString()) < parseFloat(revenuePrior.toString()) ? 'Down' : 'Flat'} from ${formatRevenue(revenuePrior)} YoY)` : ''}` : ''}
 ${peRatio !== null ? `- ${useForwardPE ? 'Forward' : ''} P/E Ratio: ${peRatio.toFixed(1)}x (${peRatio > 25 ? 'Indicates premium valuation' : peRatio < 15 ? 'Indicates value opportunity' : 'Suggests fair valuation'})` : ''}
+${impliedVolatility !== null ? `- Implied Volatility: ${impliedVolatility.toFixed(1)}%${ivRank !== null ? ` (IV Rank: ${ivRank.toFixed(0)}%)` : ''} - Higher IV indicates options traders expect significant price movement around earnings` : ''}
 
 ANALYST SENTIMENT:
 ${consensusRatings ? `- Consensus Rating: ${consensusRatings.consensus_rating ? consensusRatings.consensus_rating.charAt(0) + consensusRatings.consensus_rating.slice(1).toLowerCase() : 'N/A'}
@@ -1191,6 +1219,7 @@ CRITICAL STRUCTURAL REQUIREMENTS:
      <li><strong>EPS Estimate</strong>: $X.XX (Up/Down from $X.XX YoY) - but frame it: "EPS expectations of $X.XX represent [what this means for the challenge/opportunity]"</li>
      <li><strong>Revenue Estimate</strong>: $X.XX billion/million (Up/Down from $X.XX billion/million YoY) - connect to the narrative: "Revenue of $X.XX would validate/invalidate [the central thesis from Context Dossier]"</li>
      ${peRatio !== null ? `<li><strong>Valuation</strong>: ${useForwardPE ? 'Forward' : ''} P/E of ${peRatio.toFixed(1)}x - explain what this means for the narrative: "${peRatio > 25 ? 'Premium' : peRatio < 15 ? 'Value' : 'Fair'} valuation suggests investors are [betting on/challenging] [the central thesis]"</li>` : ''}
+     ${impliedVolatility !== null ? `<li><strong>Implied Volatility</strong>: ${impliedVolatility.toFixed(1)}%${ivRank !== null ? ` (IV Rank: ${ivRank.toFixed(0)}%)` : ''} - Options traders are pricing in significant expected price movement, ${impliedVolatility > 40 ? 'suggesting high uncertainty and potential for outsized moves' : impliedVolatility > 25 ? 'indicating moderate expectations for price swings' : 'reflecting relatively calm market expectations'}</li>` : ''}
      </ul>
    - Every number should answer "Why does this matter for the story?"` : `- Start with ONE introductory sentence referencing the earnings date
    - Format earnings data as HTML bullet points with bold labels:
@@ -1198,6 +1227,7 @@ CRITICAL STRUCTURAL REQUIREMENTS:
      <li><strong>EPS Estimate</strong>: $X.XX (Up/Down from $X.XX YoY)</li>
      <li><strong>Revenue Estimate</strong>: $X.XX billion/million (Up/Down from $X.XX billion/million YoY)</li>
      ${peRatio !== null ? `<li><strong>Valuation</strong>: ${useForwardPE ? 'Forward' : ''} P/E of ${peRatio.toFixed(1)}x (Indicates ${peRatio > 25 ? 'premium valuation' : peRatio < 15 ? 'value opportunity' : 'fair valuation'})</li>` : ''}
+     ${impliedVolatility !== null ? `<li><strong>Implied Volatility</strong>: ${impliedVolatility.toFixed(1)}%${ivRank !== null ? ` (IV Rank: ${ivRank.toFixed(0)}%)` : ''} - ${impliedVolatility > 40 ? 'High IV suggests options traders expect significant price movement' : impliedVolatility > 25 ? 'Moderate IV indicates expected price swings around earnings' : 'Lower IV reflects relatively calm market expectations'}</li>` : ''}
      </ul>`}
 
 ${historicalEarnings && historicalEarnings.quarters && historicalEarnings.quarters.length > 0 ? `5. **SECTION: Historical Performance** (MANDATORY - CRITICAL: Historical data has been provided above and you MUST use it):
