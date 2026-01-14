@@ -2517,7 +2517,16 @@ async function fetchRecentAnalystActions(ticker: string, limit: number = 3) {
           };
         });
       
-      console.log(`[RECENT ANALYST ACTIONS] Found ${recentActions.length} recent actions`);
+      // Filter: If there's only one unique firm, only keep the most recent action from that firm
+      const uniqueFirms = new Set(recentActions.map((a: any) => a.firm));
+      if (uniqueFirms.size === 1) {
+        // Only one firm - keep only the most recent action (already sorted, so first one)
+        const filteredActions = recentActions.slice(0, 1);
+        console.log(`[RECENT ANALYST ACTIONS] Only one firm (${Array.from(uniqueFirms)[0]}), showing only most recent action`);
+        return filteredActions;
+      }
+      
+      console.log(`[RECENT ANALYST ACTIONS] Found ${recentActions.length} recent actions from ${uniqueFirms.size} firms`);
       return recentActions;
     }
     
@@ -2727,6 +2736,28 @@ function formatEarningsDate(dateString: string | null | undefined): string {
   } catch (error) {
     console.error('Error formatting earnings date:', error);
     return dateString;
+  }
+}
+
+// Helper function to format date in AP style (e.g., "Jan. 11" or "Jan. 11, 2023")
+function formatDateAPStyle(date: Date | string | null, includeYear: boolean = false): string {
+  if (!date) return '';
+  try {
+    const actionDate = date instanceof Date ? date : new Date(date);
+    if (isNaN(actionDate.getTime())) return '';
+    
+    const monthNames = ['Jan.', 'Feb.', 'Mar.', 'Apr.', 'May', 'Jun.', 'Jul.', 'Aug.', 'Sep.', 'Oct.', 'Nov.', 'Dec.'];
+    const month = monthNames[actionDate.getMonth()];
+    const day = actionDate.getDate();
+    
+    if (includeYear) {
+      const year = actionDate.getFullYear();
+      return `${month} ${day}, ${year}`;
+    } else {
+      return `${month} ${day}`;
+    }
+  } catch (e) {
+    return '';
   }
 }
 
@@ -3465,7 +3496,7 @@ CRITICAL INSTRUCTIONS FOR THIS SECTION:
 - Group "Hard Numbers" together: EPS Estimate, Revenue Estimate, and Valuation (P/E Ratio) as separate bullet points
 - Group "Opinions" together: Create a subsection "Analyst Consensus & Recent Actions" that includes:
   - The consensus rating and average price target
-  - Recent analyst moves (last 3) with firm names and specific actions (e.g., "Goldman Sachs: Upgraded to Buy (Raised Target to $500)")
+  - Recent analyst moves (last 3) with firm names, specific actions, and dates (e.g., "Goldman Sachs: Upgraded to Buy (Raised Target to $500) (Jan. 15)" or "Goldman Sachs: Upgraded to Buy (Raised Target to $500) (Jan. 15, 2023)" if from previous year)
 - Format example:
   <ul>
   <li><strong>EPS Estimate</strong>: $X.XX (Up/Down from $X.XX YoY)</li>
@@ -3474,7 +3505,23 @@ CRITICAL INSTRUCTIONS FOR THIS SECTION:
   </ul>
   
   <strong>Analyst Consensus & Recent Actions:</strong>
-  The stock carries a ${consensusRatings?.consensus_rating ? consensusRatings.consensus_rating.charAt(0) + consensusRatings.consensus_rating.slice(1).toLowerCase() : 'N/A'} Rating with an <a href="https://www.benzinga.com/quote/${data.symbol}/analyst-ratings">average price target</a> of $${consensusRatings?.consensus_price_target ? parseFloat(consensusRatings.consensus_price_target.toString()).toFixed(2) : 'N/A'}. ${recentAnalystActions && recentAnalystActions.length > 0 ? `Recent analyst moves include:\n${recentAnalystActions.map((action: any) => `${action.firm}: ${action.action}`).join('\n')}` : 'No recent analyst actions available.'}
+  The stock carries a ${consensusRatings?.consensus_rating ? consensusRatings.consensus_rating.charAt(0) + consensusRatings.consensus_rating.slice(1).toLowerCase() : 'N/A'} Rating with an <a href="https://www.benzinga.com/quote/${data.symbol}/analyst-ratings">average price target</a> of $${consensusRatings?.consensus_price_target ? parseFloat(consensusRatings.consensus_price_target.toString()).toFixed(2) : 'N/A'}. ${recentAnalystActions && recentAnalystActions.length > 0 ? `Recent analyst moves include:\n${recentAnalystActions.map((action: any) => {
+    let dateStr = '';
+    if (action.date) {
+      try {
+        const actionDate = new Date(action.date);
+        const currentYear = new Date().getFullYear();
+        const actionYear = actionDate.getFullYear();
+        const formattedDate = formatDateAPStyle(actionDate, actionYear < currentYear);
+        if (formattedDate) {
+          dateStr = ` (${formattedDate})`;
+        }
+      } catch (e) {
+        // If date parsing fails, skip date
+      }
+    }
+    return `${action.firm}: ${action.action}${dateStr}`;
+  }).join('\n')}` : 'No recent analyst actions available.'}
 
 ${nextEarnings ? `
 UPCOMING EARNINGS DATA:
@@ -3506,7 +3553,23 @@ P/E RATIO CONTEXT:
 
 ${recentAnalystActions && recentAnalystActions.length > 0 ? `
 RECENT ANALYST ACTIONS (Last 3 Major Actions):
-${recentAnalystActions.map((action: any) => `- ${action.firm}: ${action.action}`).join('\n')}
+${recentAnalystActions.map((action: any) => {
+  let dateStr = '';
+  if (action.date) {
+    try {
+      const actionDate = new Date(action.date);
+      const currentYear = new Date().getFullYear();
+      const actionYear = actionDate.getFullYear();
+      const formattedDate = formatDateAPStyle(actionDate, actionYear < currentYear);
+      if (formattedDate) {
+        dateStr = ` (${formattedDate})`;
+      }
+    } catch (e) {
+      // If date parsing fails, skip date
+    }
+  }
+  return `- ${action.firm}: ${action.action}${dateStr}`;
+}).join('\n')}
 ` : ''}
 
 CRITICAL FORMATTING REQUIREMENTS:
@@ -4792,10 +4855,24 @@ export async function POST(request: Request) {
               // Extract recent analyst actions from content or use fetched data
               let analystActionsHTML = '';
               if (recentAnalystActionsForPost && recentAnalystActionsForPost.length > 0) {
-                // Format as HTML bullet points with bold firm names
-                const analystBullets = recentAnalystActionsForPost.map((action: any) => 
-                  `  <li><strong>${action.firm}</strong>: ${action.action}</li>`
-                ).join('\n');
+                // Format as HTML bullet points with bold firm names and dates
+                const analystBullets = recentAnalystActionsForPost.map((action: any) => {
+                  let dateStr = '';
+                  if (action.date) {
+                    try {
+                      const actionDate = new Date(action.date);
+                      const currentYear = new Date().getFullYear();
+                      const actionYear = actionDate.getFullYear();
+                      const formattedDate = formatDateAPStyle(actionDate, actionYear < currentYear);
+                      if (formattedDate) {
+                        dateStr = ` (${formattedDate})`;
+                      }
+                    } catch (e) {
+                      // If date parsing fails, skip date
+                    }
+                  }
+                  return `  <li><strong>${action.firm}</strong>: ${action.action}${dateStr}</li>`;
+                }).join('\n');
                 analystActionsHTML = `<ul>\n${analystBullets}\n</ul>`;
               } else {
                 // Try to extract from content
