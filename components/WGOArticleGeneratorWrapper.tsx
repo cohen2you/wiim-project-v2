@@ -2,6 +2,7 @@
 
 import TechnicalAnalysisGenerator from './TechnicalAnalysisGenerator';
 import EarningsPreviewGenerator from './EarningsPreviewGenerator';
+import AnalystNoteGenerator from './AnalystNoteGenerator';
 
 export default function WGOArticleGeneratorWrapper() {
   return (
@@ -13,6 +14,7 @@ export default function WGOArticleGeneratorWrapper() {
     }}>
       <TechnicalAnalysisGenerator />
       <EarningsPreviewGenerator />
+      <AnalystNoteGenerator />
     </div>
   );
 }
