@@ -68,6 +68,42 @@ function simplifyCompanyNameForEdge(name: string): string {
   return simplified || name; // Return original if simplified becomes empty
 }
 
+// Helper function to format EPS values: convert negative values under $1 to "Loss of X cents" format
+function formatEPS(epsValue: number | string | null | undefined): string {
+  if (epsValue === null || epsValue === undefined) return 'N/A';
+  
+  const eps = typeof epsValue === 'string' ? parseFloat(epsValue) : epsValue;
+  
+  if (isNaN(eps)) return 'N/A';
+  
+  // If negative and absolute value is less than $1, format as "Loss of X cents"
+  if (eps < 0 && Math.abs(eps) < 1) {
+    const cents = Math.abs(Math.round(eps * 100));
+    return `Loss of ${cents} cent${cents !== 1 ? 's' : ''}`;
+  }
+  
+  // For all other values (positive or negative >= $1), format as normal dollar amount
+  return `$${eps.toFixed(2)}`;
+}
+
+// Helper function to format EPS for use in sentences (handles negative values appropriately)
+function formatEPSForSentence(epsValue: number | string | null | undefined): string {
+  if (epsValue === null || epsValue === undefined) return 'N/A';
+  
+  const eps = typeof epsValue === 'string' ? parseFloat(epsValue) : epsValue;
+  
+  if (isNaN(eps)) return 'N/A';
+  
+  // If negative, format as "a loss of X cents per share"
+  if (eps < 0) {
+    const cents = Math.abs(Math.round(eps * 100));
+    return `a loss of ${cents} cent${cents !== 1 ? 's' : ''} per share`;
+  }
+  
+  // If positive, format as normal dollar amount
+  return `$${eps.toFixed(2)} per share`;
+}
+
 // Helper function to get exchange name from exchange code
 function getExchangeName(exchangeCode: string | null | undefined): string {
   const exchangeNames: { [key: string]: string } = {
@@ -3569,8 +3605,8 @@ CRITICAL INSTRUCTIONS FOR THIS SECTION:
 ${nextEarnings ? `
 UPCOMING EARNINGS DATA:
 - Next Earnings Date: ${typeof nextEarnings === 'object' && nextEarnings.date ? formatEarningsDate(nextEarnings.date) : nextEarningsDate ? formatEarningsDate(nextEarningsDate) : 'Not available'}
-${typeof nextEarnings === 'object' && nextEarnings.eps_estimate ? `- EPS Estimate: $${parseFloat(nextEarnings.eps_estimate.toString()).toFixed(2)}` : ''}
-${typeof nextEarnings === 'object' && nextEarnings.eps_prior ? `- Previous EPS: $${parseFloat(nextEarnings.eps_prior.toString()).toFixed(2)}` : ''}
+${typeof nextEarnings === 'object' && nextEarnings.eps_estimate ? `- EPS Estimate: ${formatEPS(nextEarnings.eps_estimate as number | string | null | undefined)}` : ''}
+${typeof nextEarnings === 'object' && nextEarnings.eps_prior ? `- Previous EPS: ${formatEPS(nextEarnings.eps_prior as number | string | null | undefined)}` : ''}
 ${typeof nextEarnings === 'object' && nextEarnings && 'revenue_estimate' in nextEarnings && nextEarnings.revenue_estimate != null ? `- Revenue Estimate: ${formatRevenue(nextEarnings.revenue_estimate as string | number | null)}` : ''}
 ${typeof nextEarnings === 'object' && nextEarnings && 'revenue_prior' in nextEarnings && nextEarnings.revenue_prior != null ? `- Previous Revenue: ${formatRevenue(nextEarnings.revenue_prior as string | number | null)}` : ''}
 
@@ -3631,7 +3667,7 @@ ${edgeRatings ? `
 ## Section: Benzinga Edge Rankings
 After the "## Section: Earnings & Analyst Outlook" section, include a section analyzing the Benzinga Edge rankings.
 
-CRITICAL FORMATTING: Immediately after the "## Section: Benzinga Edge Rankings" header, add this line: "Below is the <a href=\"https://www.benzinga.com/edge/\">Benzinga Edge scorecard</a> for ${simplifyCompanyNameForEdge(data.companyName || data.symbol)}, highlighting its strengths and weaknesses compared to the broader market:"
+CRITICAL FORMATTING: Immediately after the "## Section: Benzinga Edge Rankings" header, add this line: "Below is the <a href=\"https://www.benzinga.com/screener\">Benzinga Edge scorecard</a> for ${simplifyCompanyNameForEdge(data.companyName || data.symbol)}, highlighting its strengths and weaknesses compared to the broader market:"
 
 BENZINGA EDGE RANKINGS DATA:
 - Value Rank: ${edgeRatings.value_rank || 'N/A'}
@@ -4836,7 +4872,9 @@ export async function POST(request: Request) {
                 const epsEst = epsEstimateMatch[1];
                 const epsPrior = epsPriorMatch ? epsPriorMatch[1] : null;
                 const direction = epsPrior ? (parseFloat(epsEst) > parseFloat(epsPrior) ? 'Up' : parseFloat(epsEst) < parseFloat(epsPrior) ? 'Down' : '') : '';
-                hardNumbers.push(`<strong>EPS Estimate</strong>: $${epsEst}${epsPrior && direction ? ` (${direction} from $${epsPrior} YoY)` : ''}`);
+                const formattedEPS = formatEPS(parseFloat(epsEst));
+                const formattedPrior = epsPrior ? formatEPS(parseFloat(epsPrior)) : '';
+                hardNumbers.push(`<strong>EPS Estimate</strong>: ${formattedEPS}${epsPrior && direction ? ` (${direction} from ${formattedPrior} YoY)` : ''}`);
               }
               
               // Use actual earnings data if available, otherwise fall back to extraction
