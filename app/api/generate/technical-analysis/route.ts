@@ -4868,7 +4868,18 @@ export async function POST(request: Request) {
               // Build "Hard Numbers" lines (EPS, Revenue, P/E)
               const hardNumbers: string[] = [];
               
-              if (epsEstimateMatch) {
+              // Use actual earnings data if available (more reliable than extraction)
+              if (nextEarningsCheck && typeof nextEarningsCheck === 'object' && nextEarningsCheck.eps_estimate !== null && nextEarningsCheck.eps_estimate !== undefined) {
+                const epsEst = nextEarningsCheck.eps_estimate as number | string | null | undefined;
+                const epsPrior = (nextEarningsCheck.eps_prior || null) as number | string | null | undefined;
+                const epsEstNum = typeof epsEst === 'string' ? parseFloat(epsEst) : (epsEst as number);
+                const epsPriorNum = epsPrior ? (typeof epsPrior === 'string' ? parseFloat(epsPrior) : (epsPrior as number)) : null;
+                const direction = epsPriorNum !== null ? (epsEstNum > epsPriorNum ? 'Up' : epsEstNum < epsPriorNum ? 'Down' : '') : '';
+                const formattedEPS = formatEPS(epsEst);
+                const formattedPrior = epsPriorNum !== null ? formatEPS(epsPrior) : '';
+                hardNumbers.push(`<strong>EPS Estimate</strong>: ${formattedEPS}${epsPriorNum !== null && direction ? ` (${direction} from ${formattedPrior} YoY)` : ''}`);
+              } else if (epsEstimateMatch) {
+                // Fall back to extraction if actual data not available
                 const epsEst = epsEstimateMatch[1];
                 const epsPrior = epsPriorMatch ? epsPriorMatch[1] : null;
                 const direction = epsPrior ? (parseFloat(epsEst) > parseFloat(epsPrior) ? 'Up' : parseFloat(epsEst) < parseFloat(epsPrior) ? 'Down' : '') : '';
@@ -4877,7 +4888,7 @@ export async function POST(request: Request) {
                 hardNumbers.push(`<strong>EPS Estimate</strong>: ${formattedEPS}${epsPrior && direction ? ` (${direction} from ${formattedPrior} YoY)` : ''}`);
               }
               
-              // Use actual earnings data if available, otherwise fall back to extraction
+              // Use actual earnings data for revenue if available, otherwise fall back to extraction
               if (nextEarningsCheck && typeof nextEarningsCheck === 'object' && nextEarningsCheck.revenue_estimate !== null && nextEarningsCheck.revenue_estimate !== undefined) {
                 // Use actual formatted revenue values from API (this fixes the "$0.08 million" issue)
                 const revEstFormatted = formatRevenue(nextEarningsCheck.revenue_estimate as string | number | null);
