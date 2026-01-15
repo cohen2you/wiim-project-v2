@@ -22,6 +22,82 @@ function truncateText(text: string, maxChars: number): string {
          text.substring(text.length - lastPart);
 }
 
+// Helper function to detect if this is a strategy/sector note (not a single-company rating)
+function detectStrategyNote(text: string): boolean {
+  const textLower = text.toLowerCase();
+  
+  // Strategy note indicators:
+  // 1. Title patterns
+  const strategyTitlePatterns = [
+    /equity\s+strategy/i,
+    /\d{4}\s+outlook/i,
+    /outlook.*\d{4}/i,
+    /sector\s+outlook/i,
+    /market\s+outlook/i,
+    /investment\s+themes/i,
+    /top\s+investment\s+themes/i,
+    /top\s+picks/i,
+    /best\s+ideas/i,
+    /analyst.*picks/i,
+    /strategic\s+outlook/i,
+  ];
+  
+  // 2. Multiple company mentions (more than 5 different tickers suggests strategy note)
+  const tickerPattern = /\b([A-Z]{1,5})\b/g;
+  const tickerMatches = text.match(tickerPattern) || [];
+  const uniqueTickers = new Set(tickerMatches.filter(t => 
+    t.length >= 2 && t.length <= 5 && 
+    !['THE', 'AND', 'FOR', 'ARE', 'BUT', 'NOT', 'YOU', 'ALL', 'CAN', 'HER', 'WAS', 'ONE', 'OUR', 'OUT', 'DAY', 'GET', 'HAS', 'HIM', 'HIS', 'HOW', 'ITS', 'MAY', 'NEW', 'NOW', 'OLD', 'SEE', 'TWO', 'WAY', 'WHO', 'BOY', 'DID', 'ITS', 'LET', 'PUT', 'SAY', 'SHE', 'TOO', 'USE'].includes(t)
+  ));
+  
+  // 3. Strategy-specific phrases
+  const strategyPhrases = [
+    'top investment themes',
+    'top picks',
+    'best ideas',
+    'investment themes',
+    'macro scenario',
+    'base case',
+    'scenario',
+    'sector implications',
+    'positioning for',
+    'multiple companies',
+    'portfolio management',
+    'market volatility',
+    'geopolitical',
+    'fiscal policy',
+    'monetary policy',
+  ];
+  
+  // Check title patterns (first 2000 chars)
+  const firstPart = text.substring(0, 2000).toLowerCase();
+  const hasStrategyTitle = strategyTitlePatterns.some(pattern => pattern.test(firstPart));
+  
+  // Check for many unique tickers (strategy notes mention many companies)
+  const hasManyTickers = uniqueTickers.size > 5;
+  
+  // Check for strategy phrases
+  const hasStrategyPhrases = strategyPhrases.some(phrase => textLower.includes(phrase));
+  
+  // Strategy notes typically don't have a single clear rating action for one company
+  const hasSingleRating = /(upgrade|downgrade|initiate|maintain|reiterate).*rating.*on.*\([A-Z]{1,5}\)/i.test(text);
+  
+  // If it has strategy indicators but lacks a clear single-company rating, it's likely a strategy note
+  const isStrategy = (hasStrategyTitle || hasManyTickers || hasStrategyPhrases) && !hasSingleRating;
+  
+  if (isStrategy) {
+    console.log(`[STRATEGY NOTE DETECTION] Detected strategy note indicators:`, {
+      hasStrategyTitle,
+      uniqueTickersCount: uniqueTickers.size,
+      hasStrategyPhrases,
+      hasSingleRating,
+      sampleTickers: Array.from(uniqueTickers).slice(0, 10)
+    });
+  }
+  
+  return isStrategy;
+}
+
 // Helper function to extract date and convert to day of week from analyst note text
 function extractDateAndDayOfWeek(text: string): string {
   // Common date patterns in analyst notes:
@@ -99,6 +175,63 @@ function extractDateAndDayOfWeek(text: string): string {
   // Fallback: return current day or "today"
   console.log('No date found in analyst note, using current day');
   return 'today';
+}
+
+// Helper function to extract multiple tickers from strategy notes
+function extractMultipleTickers(text: string): string[] {
+  // Common ticker patterns: standalone uppercase letters (2-5 chars), often in parentheses or after company names
+  const tickerPatterns = [
+    /\(([A-Z]{1,5})\)/g,  // Tickers in parentheses: (AAPL), (PLTR)
+    /\b([A-Z]{2,5})\b/g,  // Standalone uppercase: AAPL, PLTR, NVDA
+  ];
+  
+  const tickers = new Set<string>();
+  const commonWords = new Set(['THE', 'AND', 'FOR', 'ARE', 'BUT', 'NOT', 'YOU', 'ALL', 'CAN', 'HER', 'WAS', 'ONE', 'OUR', 'OUT', 'DAY', 'GET', 'HAS', 'HIM', 'HIS', 'HOW', 'ITS', 'MAY', 'NEW', 'NOW', 'OLD', 'SEE', 'TWO', 'WAY', 'WHO', 'BOY', 'DID', 'LET', 'PUT', 'SAY', 'SHE', 'TOO', 'USE', 'VIA', 'YET', 'AI', 'IT', 'US', 'TV', 'CEO', 'CFO', 'EPS', 'P/E', 'EV', 'IPO', 'SEC', 'FED', 'GDP', 'CPI', 'PCE', 'NATO', 'TSMC']);
+  
+  // Extract from parentheses first (most reliable)
+  let match;
+  const parenPattern = /\(([A-Z]{2,5})\)/g;
+  while ((match = parenPattern.exec(text)) !== null) {
+    const ticker = match[1];
+    if (ticker.length >= 2 && ticker.length <= 5 && !commonWords.has(ticker)) {
+      tickers.add(ticker);
+    }
+  }
+  
+  // Also look for tickers mentioned in lists (e.g., "NVDA, MSFT, GOOGL, META")
+  const listPattern = /\b([A-Z]{2,5})(?:\s*,\s*[A-Z]{2,5})+/g;
+  while ((match = listPattern.exec(text)) !== null) {
+    const ticker = match[1];
+    if (ticker.length >= 2 && ticker.length <= 5 && !commonWords.has(ticker)) {
+      tickers.add(ticker);
+    }
+    // Also extract other tickers from the comma-separated list
+    const listMatch = match[0];
+    const listTickers = listMatch.match(/\b([A-Z]{2,5})\b/g);
+    if (listTickers) {
+      listTickers.forEach(t => {
+        if (t.length >= 2 && t.length <= 5 && !commonWords.has(t)) {
+          tickers.add(t);
+        }
+      });
+    }
+  }
+  
+  // Look for patterns like "Top Picks: AMZN, META, MELI" or "favor NVDA, MSFT"
+  const picksPattern = /(?:picks?|favor|recommend|highlight|include|mention).*?([A-Z]{2,5}(?:\s*,\s*[A-Z]{2,5}){2,})/gi;
+  while ((match = picksPattern.exec(text)) !== null) {
+    const tickerList = match[1];
+    const extracted = tickerList.match(/\b([A-Z]{2,5})\b/g);
+    if (extracted) {
+      extracted.forEach(t => {
+        if (t.length >= 2 && t.length <= 5 && !commonWords.has(t)) {
+          tickers.add(t);
+        }
+      });
+    }
+  }
+  
+  return Array.from(tickers).sort();
 }
 
 // Helper function to extract ticker from analyst note text
@@ -460,65 +593,75 @@ export async function POST(req: Request) {
 
     const provider: AIProvider = providerOverride || 'openai';
     
-    // Extract ticker from analyst notes - prioritize tickers from notes, then extract from text
-    // Do NOT use ticker from main app - price action should be based on note ticker only
+    // Detect if this is a strategy/sector note (not a single-company rating)
+    const isStrategyNote = detectStrategyNote(combinedNoteText);
+    
+    // Extract tickers from the note (for strategy notes, extract multiple; for single-company notes, extract one)
     let finalTicker = '';
+    let mentionedTickers: string[] = [];
     
-    console.log('Ticker extraction - provided ticker:', ticker);
-    console.log('Ticker extraction - multipleNotes count:', multipleNotes?.length || 0);
-    
-    // First, try to get ticker from multipleNotes if provided
-    if (multipleNotes && Array.isArray(multipleNotes) && multipleNotes.length > 0) {
-      const noteWithTicker = multipleNotes.find((note: any) => note.ticker);
-      if (noteWithTicker) {
-        finalTicker = noteWithTicker.ticker.toUpperCase();
-        console.log(`✓ Using ticker from analyst note object: ${finalTicker}`);
-      } else {
-        console.log('No ticker found in multipleNotes objects, will try extraction from text');
-      }
-    }
-    
-    // If no ticker from notes, try the provided ticker (which should only come from notes now)
-    if (!finalTicker && ticker?.trim()) {
-      finalTicker = ticker.trim().toUpperCase();
-      console.log(`✓ Using provided ticker parameter: ${finalTicker}`);
-    }
-    
-    // If still no ticker, extract from the text
-    if (!finalTicker) {
-      console.log('Attempting to extract ticker from combined note text...');
-      console.log('Text preview (first 500 chars):', combinedNoteText.substring(0, 500));
-      const extractedTicker = extractTickerFromText(combinedNoteText);
-      if (extractedTicker) {
-        finalTicker = extractedTicker;
-        console.log(`✓ Extracted ticker from analyst note text: ${finalTicker}`);
-      } else {
-        console.log('✗ Failed to extract ticker from text');
-      }
-    }
-    
-    if (!finalTicker) {
-      console.warn('⚠️ No ticker found in analyst notes. Price action will be generic.');
-      console.warn('Text sample for debugging:', combinedNoteText.substring(0, 1000));
+    if (isStrategyNote) {
+      console.log('✓ Detected strategy/sector note - will generate multi-company strategy article');
+      // Extract all mentioned tickers from strategy notes
+      mentionedTickers = extractMultipleTickers(combinedNoteText);
+      console.log(`✓ Found ${mentionedTickers.length} tickers mentioned in strategy note:`, mentionedTickers.slice(0, 10));
     } else {
-      console.log(`✓ Final ticker for price action: ${finalTicker}`);
+      // Single-company note - extract one ticker
+      console.log('Ticker extraction - provided ticker:', ticker);
+      console.log('Ticker extraction - multipleNotes count:', multipleNotes?.length || 0);
+      
+      // First, try to get ticker from multipleNotes if provided
+      if (multipleNotes && Array.isArray(multipleNotes) && multipleNotes.length > 0) {
+        const noteWithTicker = multipleNotes.find((note: any) => note.ticker);
+        if (noteWithTicker) {
+          finalTicker = noteWithTicker.ticker.toUpperCase();
+          console.log(`✓ Using ticker from analyst note object: ${finalTicker}`);
+        } else {
+          console.log('No ticker found in multipleNotes objects, will try extraction from text');
+        }
+      }
+      
+      // If no ticker from notes, try the provided ticker (which should only come from notes now)
+      if (!finalTicker && ticker?.trim()) {
+        finalTicker = ticker.trim().toUpperCase();
+        console.log(`✓ Using provided ticker parameter: ${finalTicker}`);
+      }
+      
+      // If still no ticker, extract from the text
+      if (!finalTicker) {
+        console.log('Attempting to extract ticker from combined note text...');
+        console.log('Text preview (first 500 chars):', combinedNoteText.substring(0, 500));
+        const extractedTicker = extractTickerFromText(combinedNoteText);
+        if (extractedTicker) {
+          finalTicker = extractedTicker;
+          console.log(`✓ Extracted ticker from analyst note text: ${finalTicker}`);
+        } else {
+          console.log('✗ Failed to extract ticker from text');
+        }
+      }
+      
+      if (!finalTicker) {
+        console.warn('⚠️ No ticker found in analyst notes. Price action will be generic.');
+        console.warn('Text sample for debugging:', combinedNoteText.substring(0, 1000));
+      } else {
+        console.log(`✓ Final ticker for price action: ${finalTicker}`);
+      }
     }
     
     // Extract date/day of week from analyst note text
     const ratingDayOfWeek = extractDateAndDayOfWeek(combinedNoteText);
     
-    // Fetch related articles for "Also Read" and "Read Next" sections
-    // Note: Analyst articles don't have a sourceUrl to exclude, but we could exclude the analyst note URL if available
-    // For now, we don't exclude any URL since analyst notes come from PDFs, not URLs
-    const relatedArticles = finalTicker ? await fetchRelatedArticles(finalTicker) : [];
+    // Related articles are disabled - articles focus solely on the analyst note content
+    // No "Also Read" or "Read Next" sections will be added
     
     // Fetch price data for price action line and implied upside calculation (if ticker is available)
+    // Skip price action for strategy notes (they cover multiple companies)
     let priceActionLine = '';
     let currentPrice: number | null = null;
     let priceTarget: number | null = null;
     let impliedUpside: number | null = null;
     
-    if (finalTicker && finalTicker.trim() !== '' && finalTicker.trim().toUpperCase() !== 'PRICE') {
+    if (!isStrategyNote && finalTicker && finalTicker.trim() !== '' && finalTicker.trim().toUpperCase() !== 'PRICE') {
       console.log(`Fetching price data for ticker: ${finalTicker}`);
       const priceData = await fetchPriceData(finalTicker);
       
@@ -588,15 +731,21 @@ export async function POST(req: Request) {
         // Use a fallback that doesn't include specific price data
         priceActionLine = `<strong>${finalTicker} Price Action:</strong> Price data unavailable, according to <a href="https://pro.benzinga.com">Benzinga Pro</a>.`;
       }
-    } else {
+    } else if (!isStrategyNote) {
       console.warn(`⚠️⚠️⚠️ No valid ticker available for price action line (ticker: "${finalTicker}")`);
       console.warn(`⚠️⚠️⚠️ This means priceActionLine will use fallback message. Ticker check failed.`);
       // If no ticker found, use a generic price action line
       priceActionLine = 'Price Action: Stock price data unavailable at the time of publication.';
+    } else {
+      // Strategy notes don't include price action
+      console.log('✓ Strategy note - skipping price action line');
+      priceActionLine = '';
     }
     
     // Log final price action line that will be used
-    console.log(`[PRICE ACTION FINAL] Ticker: "${finalTicker}", Price action line length: ${priceActionLine.length}, Preview: ${priceActionLine.substring(0, 150)}`);
+    if (!isStrategyNote) {
+      console.log(`[PRICE ACTION FINAL] Ticker: "${finalTicker}", Price action line length: ${priceActionLine.length}, Preview: ${priceActionLine.substring(0, 150)}`);
+    }
 
     // Estimate token count (rough: 1 token ≈ 4 characters)
     // Reserve space for prompt (~2000 tokens) and response (~2000 tokens)
@@ -617,7 +766,91 @@ export async function POST(req: Request) {
       ? `\n\nIMPORTANT: You are synthesizing information from ${multipleNotes.length} different analyst notes. Combine insights from all notes into a cohesive narrative. If analysts have different perspectives, ratings, or price targets, present both views clearly. Include all relevant analyst names and firms from the notes.`
       : '';
 
-    const prompt = `Write a news article based on the following analyst note text. Follow the "Benzinga Style" guidelines strictly. This is editorial content for traders - create a compelling narrative with intrigue, conflict, and tradeable information.${multipleNotesInstruction}
+    // Generate different prompts for strategy notes vs single-company notes
+    let prompt: string;
+    
+    if (isStrategyNote) {
+      // Strategy/Sector Note Prompt
+      const tickersList = mentionedTickers.length > 0 
+        ? mentionedTickers.slice(0, 20).join(', ') 
+        : 'various companies';
+      
+      prompt = `Write a strategy and sector outlook news article based on the following analyst research note. This is a multi-company strategy note covering investment themes, sectors, and market outlook - NOT a single-company rating. Follow "Benzinga Style" guidelines strictly. This is editorial content for traders - create a compelling narrative about market themes, sector positioning, and investment opportunities.${multipleNotesInstruction}
+
+### CRITICAL: THIS IS A STRATEGY NOTE
+- This note covers MULTIPLE companies and investment themes, not a single company rating
+- Mention specific companies and their tickers when they appear in the source text
+- Focus on investment themes, sector trends, and macro outlook
+- Do NOT focus on a single company - this is a strategy/sector outlook article
+- Companies mentioned in the note include: ${tickersList}
+- Extract ALL company names and tickers directly from the source text - do NOT invent or guess
+
+### STYLE GUIDELINES FOR STRATEGY NOTES:
+
+1. **Headline:** Create an SEO-optimized headline that captures the strategy theme and firm name.
+   - **FORMAT:** "[Firm] [Year] Outlook: [Key Theme] Drives [Sector/Theme] Focus" or "[Firm] Strategists See [Theme] as [Year] Investment Catalyst"
+   - Examples: "Wedbush 2026 Outlook: AI Dispersion Drives Stock-Picker's Market" or "JPMorgan Strategists See Power Infrastructure as 2026 Investment Catalyst"
+   - **CRITICAL: Headline must be PLAIN TEXT ONLY - NO HTML TAGS, NO BOLD TAGS**
+   - Include the year/outlook period if mentioned
+   - Keep under 120 characters when possible
+   - **CRITICAL: If you use quotation marks in the headline, use SINGLE QUOTES (') not double quotes ("). The quoted text MUST be an exact word-for-word copy from the source.**
+
+2. **NO DATELINE:** Do NOT include formal wire service datelines. Jump straight into the lede paragraph.
+
+3. **The Lede (Opening Paragraph):** Lead with the firm name, key strategist names (limit to 2-3 main names, not all), key themes, and investment outlook.
+   - **Structure:** Start directly with the opening paragraph (no "The Analyst Call" header for strategy notes).
+   - **Opening Paragraph Format:** "[Firm] strategists, led by [2-3 Key Analyst/Strategist Names], outline their [Year] investment outlook, highlighting [key themes] as primary drivers of market performance. The firm's base case scenario [summary of outlook] with [key sectors/themes] positioned to outperform."
+   - **CRITICAL - Analyst/Strategist Names:** Extract the specific analyst or strategist names from the source text, but ONLY include 2-3 key names (typically the lead strategists mentioned first). Do NOT list all strategists - this makes the lead too long. Format: "[Firm] strategists, led by [2-3 Names]," or "According to [Firm]'s [2-3 Names],". Do NOT invent names.
+   - **CRITICAL - Day of Week:** Extract the date from the analyst note source text and include the day of the week. ${ratingDayOfWeek && ratingDayOfWeek !== 'today' ? `The note indicates the outlook was issued on ${ratingDayOfWeek}.` : 'If a date is found, convert to day name. If no date is found, use "today".'}
+   - **CRITICAL - Hyperlink in Lead (MANDATORY):** You MUST include exactly one hyperlink in the lead paragraph. For strategy notes, link to https://www.benzinga.com/markets. Select ANY THREE CONSECUTIVE WORDS from your lead paragraph and wrap them in the hyperlink. Example: "Wedbush strategists <a href="https://www.benzinga.com/markets">outline their 2026</a> investment outlook..."
+   - **Keep the lede to 2-3 sentences maximum - be concise and punchy**
+
+4. **The Body Structure:** Use 3-5 SEO-optimized section headers covering the main investment themes.
+   - **CRITICAL: All section headers MUST be in H2 format using <h2> tags, NOT <strong> tags.**
+   - **Header Format Examples:**
+     * "AI Dispersion: Winners vs Pretenders"
+     * "Power Infrastructure: The Multi-Year Bottleneck"
+     * "Geopolitical Risks: Defense Spending Acceleration"
+     * "Top Investment Themes: Stock-Picker's Market"
+   - **CRITICAL: NEVER place a section header before the first paragraph. Always start with the opening paragraph, then place section headers after.**
+   - **CRITICAL: Keep paragraphs SHORT - maximum 2 sentences per paragraph.**
+   - Under each header, write 3-5 very short paragraphs (1-2 sentences each) with specific details
+   - **When mentioning companies, include their tickers in parentheses:** Example: "Palantir Technologies (PLTR)", "Nvidia Corp. (NVDA)", "Microsoft Corp. (MSFT)"
+   - **Bold company names on first mention only:** Example: "<strong>Palantir Technologies</strong> (PLTR)" on first mention, then "Palantir (PLTR)" without bolding
+   - **CRITICAL - Verify Ticker Accuracy:** You MUST verify that each ticker matches the correct company name. For example, General Electric's ticker is GE (not GEV). If you're unsure about a ticker, look it up in the source text or use only the company name without a ticker. Do NOT invent or guess tickers.
+   - **Include specific tickers mentioned in the source text:** ${tickersList}
+   - **QUOTE FORMATTING:** Use DOUBLE QUOTES (") in the body for direct quotes. Single quotes (') ONLY in headlines.
+   - **QUOTE ACCURACY:** Quotes MUST be exact word-for-word copies from the source. Do NOT paraphrase with quotes.
+   - **Include specific numbers, metrics, price targets, and themes from the source text** - make the article actionable with concrete details
+
+5. **Bolding Strategy:**
+   - Bold company names on first mention only
+   - Do NOT bold analyst names, firm names, or ticker symbols
+   - Do NOT bold numbers, dollar amounts, or metrics
+   - Bold key themes or sectors if they're high-value keywords (e.g., "<strong>AI infrastructure</strong>", "<strong>defense spending</strong>")
+
+6. **Formatting:**
+   - Use HTML <strong> tags to bold text. DO NOT use markdown ** syntax.
+   - On FIRST mention: Bold the company name, then include ticker in parentheses. Example: <strong>Palantir Technologies</strong> (PLTR)
+   - After first mention: Use company name without bolding. Example: Palantir (PLTR)
+
+7. **Price Action Footer:** Strategy notes typically do NOT include individual stock price action. Skip the price action section - the article will end with your content.
+
+8. **Tone & Voice:**
+   - Editorial, narrative-driven - tell a story about market themes and opportunities
+   - Use phrases that create insight: "strategists see", "the firm's base case", "key themes include"
+   - Fast-paced but with narrative flow
+   - Focus on actionable investment themes and sector positioning
+   - **CRITICAL - NO CONCLUSION SECTIONS:** Do NOT end the article with a conclusion-like section (e.g., "Risks and Opportunities: Navigating a Complex Landscape"). News articles don't have conclusions - they just end. The last section should be a substantive theme section, not a summary or conclusion.
+
+### INPUT TEXT (Strategy/Sector Analyst Note${isMultipleNotes ? 's' : ''}):
+
+${truncatedText}
+
+### OUTPUT ARTICLE:`;
+    } else {
+      // Single-Company Rating Note Prompt (existing prompt)
+      prompt = `Write a news article based on the following analyst note text. Follow the "Benzinga Style" guidelines strictly. This is editorial content for traders - create a compelling narrative with intrigue, conflict, and tradeable information.${multipleNotesInstruction}
 
 ### STYLE GUIDELINES:
 
@@ -637,7 +870,8 @@ export async function POST(req: Request) {
 3. **The Lede (Opening Paragraph):** Lead with the most clickable financial data - firm, analyst name, rating, price target, and implied upside. Make it "greedy" and urgent.
    - **Structure:** Use a section header "<strong>The Analyst Call</strong>" (wrapped in <strong> tags) followed by the opening paragraph.
    - **Opening Paragraph Format:** "[Firm] analysts, led by [Analyst Name], [action] a [Rating] rating on [Company Name] ([Exchange:Ticker]) [day of week], maintaining a bullish $[Target] price target. The firm cites [key catalysts] as the catalysts for a potential [X]%+ rally."
-   - **CRITICAL - Analyst Name Required:** You MUST include the specific analyst's name (e.g., "Yi Chen") along with the firm name. Format: "[Firm] analysts, led by [Analyst Name]," or "[Firm]'s [Analyst Name]" or "According to [Analyst Name] of [Firm],". The analyst name is MANDATORY in the lead paragraph.
+   - **CRITICAL - Company Name Extraction:** You MUST extract the company name directly from the analyst note source text above. Look for the company name that matches ticker ${finalTicker ? `(${finalTicker})` : ''}. DO NOT invent or guess company names. If the source text says "Palantir" and the ticker is PLTR, use "Palantir Technologies". If the source text says "General Motors" but the ticker is PLTR, there's an error - use the company that matches PLTR (Palantir Technologies). The company name MUST come from the source text and match the ticker.
+   - **CRITICAL - Analyst Name Required:** You MUST include the specific analyst's name (e.g., "Yi Chen") along with the firm name. Format: "[Firm] analysts, led by [Analyst Name]," or "[Firm]'s [Analyst Name]" or "According to [Analyst Name] of [Firm],". The analyst name is MANDATORY in the lead paragraph. Extract the analyst name from the source text - do NOT invent analyst names.
    - **CRITICAL - Day of Week:** You MUST include the day of the week when the rating was issued in the lead paragraph. ${ratingDayOfWeek && ratingDayOfWeek !== 'today' ? `The analyst note indicates the rating was issued on ${ratingDayOfWeek}. Use "${ratingDayOfWeek}" in the lead (e.g., "reiterated a Buy rating on OKYO Pharma (NASDAQ:OKYO) ${ratingDayOfWeek}").` : 'If a date is found in the analyst note source text, extract it and convert to day name (Monday, Tuesday, etc.). If no date is found, use "today".'}
    - **CRITICAL - Implied Upside in Lead:** If price target and current price are available, you MUST include the implied upside percentage in the lead paragraph to make it more "greedy" and urgent. Use phrases like "potential [X]%+ rally" or "potential [X]% upside" where X is the rounded upside percentage. This creates urgency and makes the lead irresistible.
    - **CRITICAL - Hyperlink in Lead (MANDATORY):** You MUST include exactly one hyperlink in the lead paragraph. The hyperlink must point to the Benzinga analyst ratings page for this stock: ${finalTicker ? `https://www.benzinga.com/quote/${finalTicker}/analyst-ratings` : 'https://www.benzinga.com/quote/[TICKER]/analyst-ratings'}. Select ANY THREE CONSECUTIVE WORDS from your lead paragraph and wrap them in the hyperlink. The hyperlink should be embedded naturally within the sentence flow - do NOT use phrases like "according to analyst ratings" or "see analyst ratings" to introduce it. Simply select three consecutive words that are part of the natural sentence structure and hyperlink them. Example: "H.C. Wainwright reiterated a <a href="https://www.benzinga.com/quote/OKYO/analyst-ratings">Buy rating on</a> OKYO Pharma (NASDAQ:OKYO) today" or "The firm cites the <a href="https://www.benzinga.com/quote/OKYO/analyst-ratings">appointment of a</a> new CEO". The hyperlink MUST appear in the lead paragraph - this is mandatory, not optional.
@@ -664,9 +898,10 @@ ${impliedUpside !== null && currentPrice && priceTarget ? `\n   - **IMPLIED UPSI
    - **QUOTE ACCURACY (CRITICAL): When you use quotation marks, the text inside MUST be a word-for-word exact copy from the source. Do NOT reorder words, change word forms, or paraphrase. Example: If source says "momentum is accelerating", you MUST write "momentum is accelerating" - NOT "accelerating momentum". Before using ANY quote, search the source text for the exact phrase word-for-word. If you cannot find the exact phrase, do NOT use quotation marks - paraphrase without quotes instead (e.g., "Cassidy noted that momentum is accelerating" without quotes).**
    - **QUOTE PLACEMENT (CRITICAL): NEVER place quotation marks before dollar amounts or numbers. Examples: Write "consensus $2.5 billion" NOT "consensus" $2.5 billion". Write "target of $61" NOT "target of" $61". Quotes are ONLY for exact word-for-word phrases from the source, never for numbers or dollar amounts.**
    - **POSSESSIVES AND CONTRACTIONS (CRITICAL): ALWAYS use apostrophes (') for possessives and contractions, NEVER use double quotes ("). Examples: "company's" NOT "company"s", "it's" NOT "it"s", "don't" NOT "don"t", "won't" NOT "won"t". Double quotes (") are ONLY for direct quotations, never for possessives or contractions.**
-   - Include specific numbers, metrics, and catalysts
-   - Use phrases like "Arya believes", "Arya pointed to", "Arya noted" to maintain narrative flow
+   - Include specific numbers, metrics, and catalysts - ALL must come from the source text
+   - Use phrases like "[Analyst Name] believes", "[Analyst Name] pointed to", "[Analyst Name] noted" to maintain narrative flow - use the actual analyst name from the source text
    - **Never create long, dense paragraphs - always break them into shorter, punchier segments**
+   - **CRITICAL - Source Text Accuracy:** ALL company names, analyst names, firm names, ratings, price targets, and key details MUST be extracted directly from the analyst note source text above. DO NOT invent, guess, or hallucinate any information. If the source text is about Palantir (PLTR), do NOT write about General Motors (GM). If the source text mentions "AI infrastructure" in the context of Palantir, do NOT write about "automotive technologies" or "EVs" which would be for an automaker. Match the industry, sector, and company details to what's actually in the source text.
 
 5. **Bolding Strategy:** 
    - Bold company names on first mention only (see formatting rules below)
@@ -709,21 +944,41 @@ ${impliedUpside !== null && currentPrice && priceTarget ? `\n   - **IMPLIED UPSI
    - Use active voice and engaging language
    - **Prioritize financial data and SEO keywords** - don't bury the most clickable information under generic narrative
 
+### CRITICAL: COMPANY NAME AND TICKER VERIFICATION
+
+**MANDATORY RULES:**
+1. **Extract the company name from the analyst note text above** - look for phrases like "on [Company Name]", "for [Company Name]", or company names mentioned in the note
+2. **Verify the company name matches the ticker ${finalTicker ? `(${finalTicker})` : ''}** - if the ticker is ${finalTicker ? finalTicker : 'provided'}, the company name MUST be the correct company for that ticker
+3. **DO NOT invent or guess company names** - if you cannot find a clear company name in the source text, use only the ticker symbol
+4. **If the source text mentions multiple companies, use ONLY the company that matches the ticker ${finalTicker ? `(${finalTicker})` : ''}**
+5. **If there's any confusion, prioritize the ticker symbol and company name that appear together in the source text**
+
+**TICKER VERIFICATION:**
+- Provided ticker: ${finalTicker || 'NOT PROVIDED'}
+- You MUST use the company name that corresponds to this ticker
+- Common ticker/company pairs: PLTR = Palantir Technologies, GM = General Motors, AAPL = Apple, etc.
+- If the source text mentions a different company than what matches the ticker, there may be an error - use the company that matches the ticker
+
 ### INPUT TEXT (Analyst Note${isMultipleNotes ? 's' : ''}):
 
 ${truncatedText}
 
 ### OUTPUT ARTICLE:`;
+    }
 
     const impliedUpsideInstruction = impliedUpside !== null && currentPrice && priceTarget 
       ? ` CRITICAL SEO REQUIREMENT - IMPLIED UPSIDE: Current price is $${currentPrice.toFixed(2)}, price target is $${priceTarget.toFixed(2)}, which implies ${impliedUpside > 0 ? '+' : ''}${impliedUpside.toFixed(2)}% upside. ${impliedUpside > 50 ? 'This represents Aggressive Upside (>50%) - use the phrase "Aggressive Upside" in your article.' : impliedUpside > 20 ? 'This represents Significant Upside (>20%) - use the phrase "Significant Upside" in your article.' : ''} You MUST prominently include this implied upside calculation, preferably in the lede paragraph or a dedicated "Valuation & Upside Potential" section.`
       : '';
 
+    const systemPrompt = isStrategyNote
+      ? `You are an editorial financial journalist writing for Benzinga, a fast-paced trading news site. You are writing a STRATEGY/SECTOR OUTLOOK article covering multiple companies and investment themes - NOT a single-company rating article. Your articles are read by traders who scan content quickly but appreciate compelling narratives with strong SEO optimization. Create editorial, story-driven content about market themes, sector positioning, and investment opportunities. CRITICAL: Use <h2> tags for ALL section headers/subheads (NOT <strong> tags). Example: <h2>AI Dispersion: Winners vs Pretenders</h2>. NEVER include formal datelines or conclusion sections. NEVER use essay-style phrases like "In conclusion", "In summary", "To conclude", "In closing", "To wrap up", "To sum up", "In final analysis", "Ultimately", or "In the end" - news articles don't have conclusions, they just end. NEVER create a final section titled "Risks and Opportunities" or similar conclusion-like sections - the article should end with a substantive theme section, not a summary. Do NOT generate a Price Action line - strategy notes don't include individual stock price action. Use HTML <strong> tags for bold text, NOT markdown ** syntax. ONLY bold company names on first mention. Do NOT bold analyst names, firm names, ticker symbols, numbers, or metrics. MOST IMPORTANT: Keep ALL paragraphs SHORT - maximum 2 sentences per paragraph. Break up any long thoughts into multiple short, punchy paragraphs. Never create dense blocks of text. When mentioning companies, include their tickers in parentheses: Example: "<strong>Palantir Technologies</strong> (PLTR)" on first mention, then "Palantir (PLTR)" without bolding. CRITICAL TICKER ACCURACY: You MUST verify that each ticker matches the correct company name. For example, General Electric's ticker is GE (not GEV). If you're unsure about a ticker, use only the company name without a ticker. Do NOT invent or guess tickers. CRITICAL: Use APOSTROPHES (') for possessives. NEVER use double quotes (\") for possessives. QUOTE FORMATTING: Use SINGLE QUOTES (') in headlines only. Use DOUBLE QUOTES (\") in the body for all direct quotes. QUOTE ACCURACY IS ABSOLUTELY CRITICAL: If you use quotation marks, the text inside MUST be a word-for-word exact copy from the source. MANDATORY HYPERLINK: You MUST include exactly one hyperlink in the lead paragraph pointing to https://www.benzinga.com/markets. Select any three consecutive words from the lead and wrap them in <a href="https://www.benzinga.com/markets">three consecutive words</a>.`
+      : `You are an editorial financial journalist writing for Benzinga, a fast-paced trading news site. Your articles are read by traders who scan content quickly but appreciate compelling narratives with strong SEO optimization. Create editorial, story-driven content with intrigue, conflict, and tradeable information, BUT prioritize SEO-friendly financial data (price targets, upside, analyst names, firm names) over generic storytelling. Use narrative hooks, create story elements (like 'mystery customer'), and include analyst quotes to support the narrative. CRITICAL: Use <h2> tags for ALL section headers/subheads (NOT <strong> tags), except for "The Analyst Call" and "The Math:" which should use <strong> tags. Example: <h2>Strategic Shift: The 'Blockbuster' CEO</h2> or <strong>The Analyst Call</strong>. NEVER include formal datelines or conclusion sections. NEVER use essay-style phrases like "In conclusion", "In summary", "To conclude", "In closing", "To wrap up", "To sum up", "In final analysis", "Ultimately", or "In the end" - news articles don't have conclusions, they just end. Do NOT generate a Price Action line - it will be added automatically. Use HTML <strong> tags for bold text, NOT markdown ** syntax. ONLY bold company names on first mention. BOLD executive/official names (CEOs, CFOs, etc.) on first mention only (e.g., <strong>Robert J. Dempsey</strong> on first mention, then "Dempsey" without bolding). Do NOT bold analyst names (e.g., "Yi Chen" should remain unbolded). Also BOLD competitor drugs, products, and related companies mentioned in the note (e.g., <strong>Xiidra</strong>, <strong>Shire</strong>, <strong>Takeda</strong>) as these are high-value SEO keywords. Use bullet points (•) for credentials, track records, and key achievements to make high-value keywords instantly visible - don't bury them in dense paragraphs. Format bullets with labels like "Former Role:", "Track Record:", "The Impact:". AVOID CLICHÉS: Do NOT use fluff phrases like "has sent ripples through", "brings a wealth of experience", "brings a wealth", "has sent ripples" - instead use direct language like "signals a commercial pivot for", "is a veteran of", "has experience", "signals". Do NOT bold any other text (no numbers, metrics, analyst names, firms, or phrases) except for company names, executive/official names, and competitor products/companies. Always include the analyst's full name (e.g., "Yi Chen") along with the firm name (e.g., "H.C. Wainwright") in the first paragraph. CRITICAL LEAD PARAGRAPH FORMAT: Include the day of the week when the rating was issued (e.g., "today", "Monday", "Tuesday") and include the implied upside percentage if available (e.g., "potential 200%+ rally") to make the lead more compelling and urgent. MANDATORY HYPERLINK: You MUST include exactly one hyperlink in the lead paragraph pointing to ${finalTicker ? `https://www.benzinga.com/quote/${finalTicker}/analyst-ratings` : 'the Benzinga analyst ratings page'}. Select any three consecutive words from the lead and wrap them in <a href="${finalTicker ? `https://www.benzinga.com/quote/${finalTicker}/analyst-ratings` : 'https://www.benzinga.com/quote/[TICKER]/analyst-ratings'}">three consecutive words</a>. Embed it naturally in the sentence flow - do NOT use intro phrases. On first mention, bold ONLY the company name (e.g., <strong>Broadcom Inc.</strong>), then include the full exchange ticker format (NASDAQ:AVGO) without bolding and with no space after the colon. MOST IMPORTANT: Keep ALL paragraphs SHORT - maximum 2 sentences per paragraph. Break up any long thoughts into multiple short, punchy paragraphs. Never create dense blocks of text. CRITICAL: Use APOSTROPHES (') for possessives (e.g., company's, BofA's, Bristol-Myers Squibb's). NEVER use double quotes (\") for possessives. QUOTE FORMATTING: Use SINGLE QUOTES (') in headlines only. Use DOUBLE QUOTES (\") in the body of the article for all direct quotes. QUOTE ACCURACY IS ABSOLUTELY CRITICAL IN HEADLINES AND BODY: If you use quotation marks anywhere (headline or body), the text inside MUST be a word-for-word exact copy from the source. Do NOT reorder words, change word forms, or paraphrase. Example: If source says 'momentum is accelerating', you MUST write 'momentum is accelerating' in headlines or \"momentum is accelerating\" in body - NOT 'accelerating momentum' or \"accelerating momentum\". Before using ANY quote in the headline or body, search the source text for the exact phrase word-for-word. If you cannot find the exact phrase, do NOT use quotation marks - paraphrase without quotes instead.${impliedUpsideInstruction}`;
+
     const result = await aiProvider.generateCompletion(
       [
         {
           role: "system",
-          content: `You are an editorial financial journalist writing for Benzinga, a fast-paced trading news site. Your articles are read by traders who scan content quickly but appreciate compelling narratives with strong SEO optimization. Create editorial, story-driven content with intrigue, conflict, and tradeable information, BUT prioritize SEO-friendly financial data (price targets, upside, analyst names, firm names) over generic storytelling. Use narrative hooks, create story elements (like 'mystery customer'), and include analyst quotes to support the narrative. CRITICAL: Use <h2> tags for ALL section headers/subheads (NOT <strong> tags), except for "The Analyst Call" and "The Math:" which should use <strong> tags. Example: <h2>Strategic Shift: The 'Blockbuster' CEO</h2> or <strong>The Analyst Call</strong>. NEVER include formal datelines or conclusion sections. NEVER use essay-style phrases like "In conclusion", "In summary", "To conclude", "In closing", "To wrap up", "To sum up", "In final analysis", "Ultimately", or "In the end" - news articles don't have conclusions, they just end. Do NOT generate a Price Action line - it will be added automatically. Use HTML <strong> tags for bold text, NOT markdown ** syntax. ONLY bold company names on first mention. BOLD executive/official names (CEOs, CFOs, etc.) on first mention only (e.g., <strong>Robert J. Dempsey</strong> on first mention, then "Dempsey" without bolding). Do NOT bold analyst names (e.g., "Yi Chen" should remain unbolded). Also BOLD competitor drugs, products, and related companies mentioned in the note (e.g., <strong>Xiidra</strong>, <strong>Shire</strong>, <strong>Takeda</strong>) as these are high-value SEO keywords. Use bullet points (•) for credentials, track records, and key achievements to make high-value keywords instantly visible - don't bury them in dense paragraphs. Format bullets with labels like "Former Role:", "Track Record:", "The Impact:". AVOID CLICHÉS: Do NOT use fluff phrases like "has sent ripples through", "brings a wealth of experience", "brings a wealth", "has sent ripples" - instead use direct language like "signals a commercial pivot for", "is a veteran of", "has experience", "signals". Do NOT bold any other text (no numbers, metrics, analyst names, firms, or phrases) except for company names, executive/official names, and competitor products/companies. Always include the analyst's full name (e.g., "Yi Chen") along with the firm name (e.g., "H.C. Wainwright") in the first paragraph. CRITICAL LEAD PARAGRAPH FORMAT: Include the day of the week when the rating was issued (e.g., "today", "Monday", "Tuesday") and include the implied upside percentage if available (e.g., "potential 200%+ rally") to make the lead more compelling and urgent. MANDATORY HYPERLINK: You MUST include exactly one hyperlink in the lead paragraph pointing to ${finalTicker ? `https://www.benzinga.com/quote/${finalTicker}/analyst-ratings` : 'the Benzinga analyst ratings page'}. Select any three consecutive words from the lead and wrap them in <a href="${finalTicker ? `https://www.benzinga.com/quote/${finalTicker}/analyst-ratings` : 'https://www.benzinga.com/quote/[TICKER]/analyst-ratings'}">three consecutive words</a>. Embed it naturally in the sentence flow - do NOT use intro phrases. On first mention, bold ONLY the company name (e.g., <strong>Broadcom Inc.</strong>), then include the full exchange ticker format (NASDAQ:AVGO) without bolding and with no space after the colon. MOST IMPORTANT: Keep ALL paragraphs SHORT - maximum 2 sentences per paragraph. Break up any long thoughts into multiple short, punchy paragraphs. Never create dense blocks of text. CRITICAL: Use APOSTROPHES (') for possessives (e.g., company's, BofA's, Bristol-Myers Squibb's). NEVER use double quotes (\") for possessives. QUOTE FORMATTING: Use SINGLE QUOTES (') in headlines only. Use DOUBLE QUOTES (\") in the body of the article for all direct quotes. QUOTE ACCURACY IS ABSOLUTELY CRITICAL IN HEADLINES AND BODY: If you use quotation marks anywhere (headline or body), the text inside MUST be a word-for-word exact copy from the source. Do NOT reorder words, change word forms, or paraphrase. Example: If source says 'momentum is accelerating', you MUST write 'momentum is accelerating' in headlines or \"momentum is accelerating\" in body - NOT 'accelerating momentum' or \"accelerating momentum\". Before using ANY quote in the headline or body, search the source text for the exact phrase word-for-word. If you cannot find the exact phrase, do NOT use quotation marks - paraphrase without quotes instead.${impliedUpsideInstruction}`
+          content: systemPrompt
         },
         {
           role: "user",
@@ -1132,8 +1387,9 @@ ${truncatedText}
     articleBody = articleBody.replace(/([a-zA-Z])"([sS])/g, "$1'$2");
     articleBody = articleBody.replace(/([a-zA-Z]{2,})"([td])/g, "$1'$2");
     
-    // Ensure hyperlink to Benzinga analyst ratings page is in the lead paragraph
-    if (finalTicker && finalTicker.trim() !== '') {
+    // Ensure hyperlink to Benzinga analyst ratings page is in the lead paragraph (for single-company notes only)
+    // Strategy notes use a different hyperlink (market/firm research page)
+    if (!isStrategyNote && finalTicker && finalTicker.trim() !== '') {
       const analystRatingsUrl = `https://www.benzinga.com/quote/${finalTicker}/analyst-ratings`;
       const hyperlinkPattern = new RegExp(`https://www\\.benzinga\\.com/quote/${finalTicker}/analyst-ratings`, 'i');
       
@@ -1178,105 +1434,8 @@ ${truncatedText}
       }
     }
     
-    // Add "Also Read" and "Read Next" sections if related articles are available
-    if (relatedArticles && relatedArticles.length > 0) {
-      // Use different articles for "Also Read" and "Read Next" when possible
-      // If only one article is available, skip "Read Next" to avoid duplicate links
-      const alsoReadArticle = relatedArticles[0];
-      const readNextArticle = relatedArticles.length > 1 ? relatedArticles[1] : null;
-      
-      // Check if "Also Read" section exists
-      const alsoReadPattern = /(?:<p>)?Also Read:.*?(?:<\/p>)?/i;
-      const alsoReadMatch = articleBody.match(alsoReadPattern);
-      const alsoReadExists = !!alsoReadMatch;
-      
-      if (!alsoReadExists) {
-        console.log('Adding "Also Read" section');
-        // Split content by double newlines (paragraph breaks) or </p> tags
-        // Handle both HTML and plain text formats
-        const hasHTMLTags = articleBody.includes('</p>');
-        let paragraphs: string[];
-        
-        if (hasHTMLTags) {
-          // HTML format: split by </p> tags
-          paragraphs = articleBody.split('</p>').filter(p => p.trim().length > 0);
-        } else {
-          // Plain text format: split by double newlines
-          paragraphs = articleBody.split(/\n\s*\n/).filter(p => p.trim().length > 0);
-        }
-        
-        // Insert "Also Read" BEFORE the first header (h2 tag), not after paragraphs
-        // Find the first header (h2) and insert before it
-        let headerIndex = -1;
-        for (let i = 0; i < paragraphs.length; i++) {
-          if (paragraphs[i].includes('<h2>') || paragraphs[i].match(/^<strong>[A-Z][^<]+:<\/strong>/)) {
-            headerIndex = i;
-            break;
-          }
-        }
-        
-        // Always use HTML link format even if content is plain text (for clickable links)
-        // Add line break after for proper spacing
-        const alsoReadSection = `Also Read: <a href="${alsoReadArticle.url}">${alsoReadArticle.headline}</a>`;
-        
-        if (headerIndex > 0) {
-          // Insert before the first header
-          paragraphs.splice(headerIndex, 0, alsoReadSection);
-          console.log(`✅ "Also Read" section placed before header at index ${headerIndex}`);
-        } else if (paragraphs.length >= 2) {
-          // Fallback: If no header found, insert after second paragraph (original behavior)
-          paragraphs.splice(2, 0, alsoReadSection);
-          console.log(`✅ "Also Read" section placed after second paragraph (no header found)`);
-        } else {
-          console.log('⚠️ Not enough paragraphs to insert "Also Read"');
-        }
-        
-        // Rejoin content (after insertion, if it happened)
-        if (headerIndex > 0 || (paragraphs.length >= 2 && headerIndex === -1)) {
-          if (hasHTMLTags) {
-            articleBody = paragraphs.map(p => {
-              // If it already ends with </p>, return as-is
-              if (p.trim().endsWith('</p>')) return p;
-              // If it's the alsoReadSection, wrap in <p> tags and ensure line break after
-              if (p.includes('Also Read:')) return `<p>${p}</p>\n\n`;
-              // Otherwise, add </p> back
-              return p + '</p>';
-            }).join('');
-          } else {
-            // For plain text, ensure line break after "Also Read" section
-            articleBody = paragraphs.map(p => {
-              if (p.includes('Also Read:')) return p + '\n\n';
-              return p;
-            }).join('\n\n');
-          }
-        }
-      } else {
-        console.log('"Also Read" section already exists');
-      }
-      
-      // Only add "Read Next" if we have a different article (at least 2 articles)
-      if (readNextArticle && !articleBody.includes('Read Next:')) {
-        console.log('Adding "Read Next" section');
-        // Check if article uses HTML format
-        const hasHTMLTags = articleBody.includes('</p>');
-        // Always use HTML link format (for clickable links)
-        const readNextLink = `Read Next: <a href="${readNextArticle.url}">${readNextArticle.headline}</a>`;
-        const readNextSection = hasHTMLTags ? `<p>${readNextLink}</p>` : readNextLink;
-        
-        console.log(`✅ Using different article for "Read Next" (article 2 of ${relatedArticles.length})`);
-        
-        // Insert before price action line (which will be added next)
-        // Add it at the end for now, it will be before price action
-        articleBody = articleBody.trim() + '\n\n' + readNextSection;
-        console.log('✅ "Read Next" section added before price action');
-      } else if (!readNextArticle) {
-        console.log('⚠️ Only one related article available, skipping "Read Next" to avoid duplicate link');
-      } else {
-        console.log('"Read Next" section already exists');
-      }
-    } else {
-      console.log('No related articles available for "Also Read" and "Read Next" sections');
-    }
+    // Related articles are disabled - articles focus solely on the analyst note content
+    // No "Also Read" or "Read Next" sections will be added
     
     // Replace company name in price action line with the one from the article (if extracted)
     // This ensures consistency - the price action uses the same company name as the article
@@ -1299,8 +1458,13 @@ ${truncatedText}
     
     // Price action line is already formatted with bold prefix, no need to modify
     // Add the real price action line from Benzinga API
-    console.log(`[BEFORE APPENDING] Price action line to append: ${priceActionLine.substring(0, 150)}`);
-    articleBody = articleBody.trim() + '\n\n' + priceActionLine;
+    // Append price action line only for single-company notes (not strategy notes)
+    if (!isStrategyNote && priceActionLine) {
+      console.log(`[BEFORE APPENDING] Price action line to append: ${priceActionLine.substring(0, 150)}`);
+      articleBody = articleBody.trim() + '\n\n' + priceActionLine;
+    } else if (isStrategyNote) {
+      console.log('✓ Strategy note - skipping price action line append');
+    }
     console.log(`[AFTER APPENDING] Article ends with: ${articleBody.substring(articleBody.length - 200)}`);
     
     // ONE MORE FINAL PASS on the complete article (including price action line)
@@ -1326,8 +1490,6 @@ ${truncatedText}
       hasH2: finalArticleBody.includes('<h2>'),
       hasStrong: finalArticleBody.includes('<strong>'),
       hasLinks: finalArticleBody.includes('<a href='),
-      hasAlsoRead: finalArticleBody.includes('Also Read:'),
-      hasReadNext: finalArticleBody.includes('Read Next:'),
       hasPriceAction: finalArticleBody.includes('Price Action:')
     });
     

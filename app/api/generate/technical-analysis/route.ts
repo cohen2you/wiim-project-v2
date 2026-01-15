@@ -25,6 +25,49 @@ function normalizeCompanyName(name: string): string {
   return name;
 }
 
+// Helper function to simplify company name for Edge Rankings (remove legal suffixes, stock types, etc.)
+function simplifyCompanyNameForEdge(name: string): string {
+  if (!name) return name;
+  
+  let simplified = name;
+  
+  // Remove stock type suffixes (case-insensitive)
+  const stockTypePatterns = [
+    /\s+Class\s+[A-Z]\s+Common\s+Stock\s*$/i,
+    /\s+Class\s+[A-Z]\s+Stock\s*$/i,
+    /\s+Common\s+Stock\s*$/i,
+    /\s+Class\s+[A-Z]\s*$/i,
+  ];
+  
+  for (const pattern of stockTypePatterns) {
+    simplified = simplified.replace(pattern, '');
+  }
+  
+  // Remove legal entity suffixes (case-insensitive)
+  const legalSuffixPatterns = [
+    /\s+Inc\.?\s*$/i,
+    /\s+Corp\.?\s*$/i,
+    /\s+Corporation\s*$/i,
+    /\s+LLC\.?\s*$/i,
+    /\s+Ltd\.?\s*$/i,
+    /\s+Limited\s*$/i,
+    /\s+Co\.?\s*$/i,
+    /\s+Company\s*$/i,
+  ];
+  
+  for (const pattern of legalSuffixPatterns) {
+    simplified = simplified.replace(pattern, '');
+  }
+  
+  // Remove ticker in parentheses if present (e.g., "Company Name (TICKER)")
+  simplified = simplified.replace(/\s*\([A-Z]{1,5}\)\s*$/, '');
+  
+  // Trim any extra whitespace
+  simplified = simplified.trim();
+  
+  return simplified || name; // Return original if simplified becomes empty
+}
+
 // Helper function to get exchange name from exchange code
 function getExchangeName(exchangeCode: string | null | undefined): string {
   const exchangeNames: { [key: string]: string } = {
@@ -3588,7 +3631,7 @@ ${edgeRatings ? `
 ## Section: Benzinga Edge Rankings
 After the "## Section: Earnings & Analyst Outlook" section, include a section analyzing the Benzinga Edge rankings.
 
-CRITICAL FORMATTING: Immediately after the "## Section: Benzinga Edge Rankings" header, add this line: "Below is the <a href=\"https://www.benzinga.com/edge/\">Benzinga Edge scorecard</a> for ${data.companyName || data.symbol} (${data.symbol}), highlighting its strengths and weaknesses compared to the broader market:"
+CRITICAL FORMATTING: Immediately after the "## Section: Benzinga Edge Rankings" header, add this line: "Below is the <a href=\"https://www.benzinga.com/edge/\">Benzinga Edge scorecard</a> for ${simplifyCompanyNameForEdge(data.companyName || data.symbol)}, highlighting its strengths and weaknesses compared to the broader market:"
 
 BENZINGA EDGE RANKINGS DATA:
 - Value Rank: ${edgeRatings.value_rank || 'N/A'}
@@ -3618,9 +3661,9 @@ BENZINGA EDGE SECTION RULES - FORMAT AS "TRADER'S SCORECARD":
 
 5. HANDLING N/A: If a ranking is "N/A" or missing (null/undefined), OMIT IT COMPLETELY. Do NOT write "Growth ranking N/A" or mention missing rankings at all. Only include rankings that have actual numeric values.
 
-6. THE VERDICT: After the bullet list, add a 2-sentence summary that synthesizes the rankings and provides actionable insight. Start with "<strong>The Verdict:</strong> ${data.companyName || data.symbol}'s Benzinga Edge signal reveals..." and continue with the analysis. Example: "<strong>The Verdict:</strong> Tesla's Benzinga Edge signal reveals a classic 'High-Flyer' setup. While the Momentum (83) confirms the strong trend, the extremely low Value (4) score warns that the stock is priced for perfection—investors should ride the trend but use tight stop-losses."
+6. THE VERDICT: After the bullet list, add a 2-sentence summary that synthesizes the rankings and provides actionable insight. Start with "<strong>The Verdict:</strong> ${simplifyCompanyNameForEdge(data.companyName || data.symbol)}'s Benzinga Edge signal reveals..." and continue with the analysis. Example: "<strong>The Verdict:</strong> Tesla's Benzinga Edge signal reveals a classic 'High-Flyer' setup. While the Momentum (83) confirms the strong trend, the extremely low Value (4) score warns that the stock is priced for perfection—investors should ride the trend but use tight stop-losses."
 
-7. IMAGE: After "The Verdict" summary, add this image HTML: <p><img src="https://www.benzinga.com/edge/${data.symbol.toUpperCase()}.png" alt="Benzinga Edge Rankings for ${data.companyName || data.symbol}" style="max-width: 100%; height: auto;" /></p>
+7. IMAGE: After "The Verdict" summary, add this image HTML: <p><img src="https://www.benzinga.com/edge/${data.symbol.toUpperCase()}.png" alt="Benzinga Edge Rankings for ${simplifyCompanyNameForEdge(data.companyName || data.symbol)}" style="max-width: 100%; height: auto;" /></p>
 
 8. ORDER: Present rankings in order of importance: Momentum first, then Quality, then Value, then Growth (if available).
 ` : ''}
