@@ -221,10 +221,27 @@ export default function EarningsPreviewGenerator() {
 
     try {
       const clone = targetDiv.cloneNode(true) as HTMLElement;
-      const copyButton = clone.querySelector('button');
-      if (copyButton) {
-        copyButton.remove();
-      }
+      
+      // Remove all buttons (Copy, Add SEO Subheads, etc.)
+      const allButtons = clone.querySelectorAll('button');
+      allButtons.forEach(button => button.remove());
+
+      // Remove the button container divs that might contain button text
+      const buttonContainers = clone.querySelectorAll('div');
+      buttonContainers.forEach(div => {
+        const text = div.textContent || '';
+        if (text.includes('Add SEO Subheads') || text.includes('Optimizing...') || text.includes('Copy') || text.includes('Copied!')) {
+          // Check if this div only contains button-related content
+          const hasOnlyButtons = div.querySelectorAll('button').length > 0 || 
+                                 text.trim() === 'Add SEO Subheads' || 
+                                 text.trim() === 'Optimizing...' ||
+                                 text.trim() === 'Copy' ||
+                                 text.trim() === '✓ Copied!';
+          if (hasOnlyButtons) {
+            div.remove();
+          }
+        }
+      });
 
       const htmlContent = clone.innerHTML.trim();
       const plainText = clone.textContent?.trim() || '';
@@ -245,10 +262,27 @@ export default function EarningsPreviewGenerator() {
       // Fallback to plain text
       try {
         const cloneForText = targetDiv.cloneNode(true) as HTMLElement;
-        const copyButtonInClone = cloneForText.querySelector('button');
-        if (copyButtonInClone) {
-          copyButtonInClone.remove();
-        }
+        
+        // Remove all buttons
+        const allButtonsInClone = cloneForText.querySelectorAll('button');
+        allButtonsInClone.forEach(button => button.remove());
+        
+        // Remove button container divs
+        const buttonContainersInClone = cloneForText.querySelectorAll('div');
+        buttonContainersInClone.forEach(div => {
+          const text = div.textContent || '';
+          if (text.includes('Add SEO Subheads') || text.includes('Optimizing...') || text.includes('Copy') || text.includes('Copied!')) {
+            const hasOnlyButtons = div.querySelectorAll('button').length > 0 || 
+                                   text.trim() === 'Add SEO Subheads' || 
+                                   text.trim() === 'Optimizing...' ||
+                                   text.trim() === 'Copy' ||
+                                   text.trim() === '✓ Copied!';
+            if (hasOnlyButtons) {
+              div.remove();
+            }
+          }
+        });
+        
         const plainText = cloneForText.textContent?.trim() || '';
         await navigator.clipboard.writeText(plainText);
         setCopiedIndex(index);

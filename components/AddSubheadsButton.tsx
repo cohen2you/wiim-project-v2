@@ -26,15 +26,73 @@ export default function AddSubheadsButton({
     setError(null);
 
     try {
-      const apiUrl = `${backendUrl}/api/seo/generate`;
+      // Use local API route if backendUrl is not provided or is localhost
+      // Otherwise, try external API first, then fallback to local
+      const useLocalApi = !backendUrl || backendUrl.includes('localhost') || backendUrl.includes('127.0.0.1');
+      let apiUrl = useLocalApi ? '/api/seo/generate' : `${backendUrl}/api/seo/generate`;
+      
       console.log('🔵 AddSubheadsButton: Starting request');
       console.log('🔵 API URL:', apiUrl);
       console.log('🔵 Backend URL:', backendUrl);
+      console.log('🔵 Using local API:', useLocalApi);
       console.log('🔵 Article text length:', articleText.length);
       console.log('🔵 Article text preview:', articleText.substring(0, 100) + '...');
       
-      // Call the News-Agent-Project API
-      const response = await fetch(apiUrl, {
+      // Helper function to process the response
+      const processResponse = async (response: Response) => {
+        if (!response.ok) {
+          let errorText = '';
+          try {
+            errorText = await response.text();
+            console.error('🔴 Error response body:', errorText);
+          } catch (e) {
+            console.error('🔴 Could not read error response body');
+          }
+          throw new Error(`HTTP ${response.status}: ${response.statusText}${errorText ? `. ${errorText.substring(0, 200)}` : ''}`);
+        }
+
+        let data;
+        try {
+          data = await response.json();
+          console.log('✅ Response data received:', data);
+        } catch (e) {
+          console.error('🔴 Could not parse JSON response');
+          const text = await response.text();
+          console.error('🔴 Response text:', text);
+          throw new Error('Invalid JSON response from server');
+        }
+        
+        if (data.optimizedText) {
+          console.log('✅ Updating article with optimized text, length:', data.optimizedText.length);
+          
+          // Clean up the optimized text: remove markdown wrappers, convert markdown headings to HTML
+          let cleanedText = data.optimizedText;
+          
+          // Remove markdown code block wrapper (```markdown ... ```)
+          cleanedText = cleanedText.replace(/^```markdown\s*/i, '').replace(/\s*```$/i, '');
+          cleanedText = cleanedText.replace(/^```\s*/, '').replace(/\s*```$/, '');
+          
+          // Convert markdown H2 (## Heading) to HTML H2 (<h2>Heading</h2>)
+          cleanedText = cleanedText.replace(/^##\s+(.+)$/gm, '<h2>$1</h2>');
+          
+          // Convert markdown H3 (### Heading) to HTML H3 (<h3>Heading</h3>)
+          cleanedText = cleanedText.replace(/^###\s+(.+)$/gm, '<h3>$1</h3>');
+          
+          // Remove trailing "..." if it exists at the very end
+          cleanedText = cleanedText.replace(/\s*\.{3,}\s*$/, '').trim();
+          
+          console.log('✅ Cleaned text length:', cleanedText.length);
+          onArticleUpdate(cleanedText);
+          setError(null); // Clear any previous errors
+          return true;
+        } else {
+          console.warn('⚠️ No optimizedText in response:', data);
+          throw new Error('No optimizedText in response. Response: ' + JSON.stringify(data));
+        }
+      };
+      
+      // Try the primary API (local or external)
+      let response = await fetch(apiUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -47,55 +105,21 @@ export default function AddSubheadsButton({
       console.log('🔵 Response ok:', response.ok);
       console.log('🔵 Response headers:', Object.fromEntries(response.headers.entries()));
 
-      if (!response.ok) {
-        let errorText = '';
-        try {
-          errorText = await response.text();
-          console.error('🔴 Error response body:', errorText);
-        } catch (e) {
-          console.error('🔴 Could not read error response body');
-        }
-        throw new Error(`HTTP ${response.status}: ${response.statusText}${errorText ? `. ${errorText.substring(0, 200)}` : ''}`);
+      // If external API fails with 404, try local API as fallback
+      if (!response.ok && !useLocalApi && response.status === 404) {
+        console.log('🟡 External API returned 404, trying local API...');
+        response = await fetch('/api/seo/generate', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ articleText }),
+        });
       }
 
-      let data;
-      try {
-        data = await response.json();
-        console.log('✅ Response data received:', data);
-      } catch (e) {
-        console.error('🔴 Could not parse JSON response');
-        const text = await response.text();
-        console.error('🔴 Response text:', text);
-        throw new Error('Invalid JSON response from server');
-      }
-      
-      // Update the parent state with the new optimized text
-      if (data.optimizedText) {
-        console.log('✅ Updating article with optimized text, length:', data.optimizedText.length);
-        
-        // Clean up the optimized text: remove markdown wrappers, convert markdown headings to HTML
-        let cleanedText = data.optimizedText;
-        
-        // Remove markdown code block wrapper (```markdown ... ```)
-        cleanedText = cleanedText.replace(/^```markdown\s*/i, '').replace(/\s*```$/i, '');
-        cleanedText = cleanedText.replace(/^```\s*/, '').replace(/\s*```$/, '');
-        
-        // Convert markdown H2 (## Heading) to HTML H2 (<h2>Heading</h2>)
-        cleanedText = cleanedText.replace(/^##\s+(.+)$/gm, '<h2>$1</h2>');
-        
-        // Convert markdown H3 (### Heading) to HTML H3 (<h3>Heading</h3>)
-        cleanedText = cleanedText.replace(/^###\s+(.+)$/gm, '<h3>$1</h3>');
-        
-        // Remove trailing "..." if it exists at the very end
-        cleanedText = cleanedText.replace(/\s*\.{3,}\s*$/, '').trim();
-        
-        console.log('✅ Cleaned text length:', cleanedText.length);
-        onArticleUpdate(cleanedText);
-        setError(null); // Clear any previous errors
-      } else {
-        console.warn('⚠️ No optimizedText in response:', data);
-        throw new Error('No optimizedText in response. Response: ' + JSON.stringify(data));
-      }
+      // Process the response (either primary or fallback)
+      await processResponse(response);
+
       
     } catch (err) {
       console.error('🔴 AddSubheadsButton error:', err);

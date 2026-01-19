@@ -84,6 +84,11 @@ const TechnicalAnalysisGenerator = forwardRef<TechnicalAnalysisGeneratorRef>((pr
   const [newsErrors, setNewsErrors] = useState<{ [key: number]: string | null }>({});
   const [loadingEnrichedWGO, setLoadingEnrichedWGO] = useState(false);
   const [enrichedWGOError, setEnrichedWGOError] = useState('');
+  // WGO Concise state
+  const [conciseTicker, setConciseTicker] = useState('');
+  const [conciseNewsUrl, setConciseNewsUrl] = useState('');
+  const [loadingConcise, setLoadingConcise] = useState(false);
+  const [showConciseForm, setShowConciseForm] = useState(false);
 
   const analysisRefs = useRef<(HTMLDivElement | null)[]>([]);
 
@@ -503,6 +508,48 @@ const TechnicalAnalysisGenerator = forwardRef<TechnicalAnalysisGeneratorRef>((pr
     }
   };
 
+  // Generate WGO Concise
+  const generateWGOConcise = async () => {
+    if (!conciseTicker.trim()) {
+      setError('Please enter a ticker first.');
+      return;
+    }
+
+    setAnalyses([]);
+    setError('');
+    setLoadingConcise(true);
+    try {
+      const res = await fetch('/api/generate/wgo-concise', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          ticker: conciseTicker.trim(),
+          newsUrl: conciseNewsUrl.trim() || undefined,
+          provider
+        }),
+      });
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.error || 'Failed to generate concise WGO');
+      }
+      const data = await res.json();
+      setAnalyses([{
+        ticker: data.ticker || conciseTicker.trim().toUpperCase(),
+        companyName: data.ticker || conciseTicker.trim().toUpperCase(),
+        analysis: data.article || '',
+        error: data.error
+      }]);
+      setTimestamp(formatTimestampET());
+      setShowConciseForm(false);
+    } catch (error: unknown) {
+      console.error('Error generating concise WGO:', error);
+      if (error instanceof Error) setError(error.message);
+      else setError(String(error));
+    } finally {
+      setLoadingConcise(false);
+    }
+  };
+
   // Generate WGO with news
   const generateWGOWithNews = async () => {
     if (!tickers.trim()) {
@@ -559,24 +606,31 @@ const TechnicalAnalysisGenerator = forwardRef<TechnicalAnalysisGeneratorRef>((pr
 
       const clone = targetDiv.cloneNode(true) as HTMLElement;
 
-      const copyButton = clone.querySelector('button');
+      // Remove all buttons (Copy, Add SEO Subheads, etc.)
+      const allButtons = clone.querySelectorAll('button');
+      allButtons.forEach(button => button.remove());
 
-      if (copyButton) {
-
-        copyButton.remove();
-
-      }
-
-      
+      // Remove the button container divs that might contain button text
+      const buttonContainers = clone.querySelectorAll('div');
+      buttonContainers.forEach(div => {
+        const text = div.textContent || '';
+        if (text.includes('Add SEO Subheads') || text.includes('Optimizing...') || text.includes('Copy') || text.includes('Copied!')) {
+          // Check if this div only contains button-related content
+          const hasOnlyButtons = div.querySelectorAll('button').length > 0 || 
+                                 text.trim() === 'Add SEO Subheads' || 
+                                 text.trim() === 'Optimizing...' ||
+                                 text.trim() === 'Copy' ||
+                                 text.trim() === '✓ Copied!';
+          if (hasOnlyButtons) {
+            div.remove();
+          }
+        }
+      });
 
       // Remove timestamp if present
-
       const timestampElement = clone.querySelector('[data-timestamp]');
-
       if (timestampElement) {
-
         timestampElement.remove();
-
       }
 
 
@@ -617,12 +671,27 @@ const TechnicalAnalysisGenerator = forwardRef<TechnicalAnalysisGeneratorRef>((pr
 
       try {
 
-        // Clone and remove button before getting text content
+        // Clone and remove all buttons before getting text content
         const cloneForText = targetDiv.cloneNode(true) as HTMLElement;
-        const copyButtonInClone = cloneForText.querySelector('button');
-        if (copyButtonInClone) {
-          copyButtonInClone.remove();
-        }
+        const allButtonsInClone = cloneForText.querySelectorAll('button');
+        allButtonsInClone.forEach(button => button.remove());
+        
+        // Remove button container divs
+        const buttonContainersInClone = cloneForText.querySelectorAll('div');
+        buttonContainersInClone.forEach(div => {
+          const text = div.textContent || '';
+          if (text.includes('Add SEO Subheads') || text.includes('Optimizing...') || text.includes('Copy') || text.includes('Copied!')) {
+            const hasOnlyButtons = div.querySelectorAll('button').length > 0 || 
+                                   text.trim() === 'Add SEO Subheads' || 
+                                   text.trim() === 'Optimizing...' ||
+                                   text.trim() === 'Copy' ||
+                                   text.trim() === '✓ Copied!';
+            if (hasOnlyButtons) {
+              div.remove();
+            }
+          }
+        });
+        
         const timestampInClone = cloneForText.querySelector('[data-timestamp]');
         if (timestampInClone) {
           timestampInClone.remove();
@@ -978,6 +1047,101 @@ const TechnicalAnalysisGenerator = forwardRef<TechnicalAnalysisGeneratorRef>((pr
         </div>
       )}
 
+      {/* WGO W/WO News Concise Section */}
+      <div style={{ 
+        marginTop: '32px', 
+        padding: '20px', 
+        backgroundColor: '#f9fafb', 
+        borderRadius: '8px',
+        border: '1px solid #e5e7eb'
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+          <h3 style={{ fontSize: '18px', fontWeight: '600', color: '#1e293b', margin: 0 }}>
+            WGO W/WO News Concise
+          </h3>
+          <button
+            onClick={() => setShowConciseForm(!showConciseForm)}
+            style={{
+              padding: '8px 16px',
+              backgroundColor: showConciseForm ? '#6b7280' : '#7c3aed',
+              color: 'white',
+              border: 'none',
+              borderRadius: '6px',
+              fontSize: '14px',
+              fontWeight: '500',
+              cursor: 'pointer'
+            }}
+          >
+            {showConciseForm ? 'Hide' : 'Show'}
+          </button>
+        </div>
+
+        {showConciseForm && (
+          <div>
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ display: 'block', fontSize: '14px', fontWeight: '500', marginBottom: '8px', color: '#374151' }}>
+                Ticker *
+              </label>
+              <input
+                type="text"
+                placeholder="Enter ticker (e.g., AAPL)"
+                value={conciseTicker}
+                onChange={(e) => setConciseTicker(e.target.value.toUpperCase())}
+                style={{
+                  width: '100%',
+                  padding: '10px 12px',
+                  border: '1px solid #d1d5db',
+                  borderRadius: '6px',
+                  fontSize: '14px',
+                  boxSizing: 'border-box'
+                }}
+              />
+            </div>
+
+            <div style={{ marginBottom: '20px' }}>
+              <label style={{ display: 'block', fontSize: '14px', fontWeight: '500', marginBottom: '8px', color: '#374151' }}>
+                News URL (Optional)
+              </label>
+              <input
+                type="url"
+                placeholder="Enter news article URL (optional)"
+                value={conciseNewsUrl}
+                onChange={(e) => setConciseNewsUrl(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '10px 12px',
+                  border: '1px solid #d1d5db',
+                  borderRadius: '6px',
+                  fontSize: '14px',
+                  boxSizing: 'border-box'
+                }}
+              />
+              <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '4px' }}>
+                Can run with or without the URL added
+              </p>
+            </div>
+
+            <button
+              onClick={generateWGOConcise}
+              disabled={loadingConcise || !conciseTicker.trim()}
+              style={{
+                padding: '12px 24px',
+                backgroundColor: loadingConcise || !conciseTicker.trim() ? '#9ca3af' : '#7c3aed',
+                color: 'white',
+                border: 'none',
+                borderRadius: '8px',
+                fontSize: '15px',
+                fontWeight: '600',
+                cursor: loadingConcise || !conciseTicker.trim() ? 'not-allowed' : 'pointer',
+                width: '100%'
+              }}
+            >
+              {loadingConcise ? 'Generating...' : 'Generate WGO W/WO News Concise'}
+            </button>
+          </div>
+        )}
+      </div>
+
       {/* News Articles Modal */}
       {showNewsModal && (
         <div 
@@ -1320,17 +1484,197 @@ const TechnicalAnalysisGenerator = forwardRef<TechnicalAnalysisGeneratorRef>((pr
                   fontFamily: 'Arial, sans-serif'
                 }}>
 
-                  {analysis.analysis.split('\n\n').filter((p: string) => p.trim()).map((paragraph: string, pIndex: number) => {
-
-                    // Render markdown bold (**text**) as HTML bold for the first paragraph
-
-                    // This will handle patterns like **Company Name** (TICKER) correctly
-
-                    // Process both markdown bold (**text**) and HTML bold (<strong>text</strong>) for all paragraphs
-                    let processedParagraph = paragraph.trim();
+                  {(() => {
+                    // Smart splitting that preserves HTML lists
+                    const content = analysis.analysis;
+                    const parts: string[] = [];
+                    let currentPart = '';
+                    let inList = false;
+                    let listDepth = 0;
+                    
+                    // Split by double newlines, but keep lists together
+                    const paragraphs = content.split(/\n\s*\n/);
+                    
+                    for (let i = 0; i < paragraphs.length; i++) {
+                      const para = paragraphs[i].trim();
+                      if (!para) continue;
+                      
+                      // Count list tags to track if we're inside a list
+                      const openTags = (para.match(/<ul>|<ol>/gi) || []).length;
+                      const closeTags = (para.match(/<\/ul>|<\/ol>/gi) || []).length;
+                      
+                      // If we're already in a list or this paragraph starts/contains a list
+                      if (inList || para.includes('<ul>') || para.includes('<ol>') || para.includes('<li>')) {
+                        currentPart += (currentPart ? '\n\n' : '') + para;
+                        listDepth += openTags - closeTags;
+                        inList = listDepth > 0;
+                        
+                        // If list is closed, push the accumulated part
+                        if (!inList && currentPart.trim()) {
+                          parts.push(currentPart.trim());
+                          currentPart = '';
+                        }
+                      } else {
+                        // If we have accumulated content, push it first
+                        if (currentPart.trim()) {
+                          parts.push(currentPart.trim());
+                          currentPart = '';
+                        }
+                        // Push this regular paragraph
+                        parts.push(para);
+                      }
+                    }
+                    
+                    // Push any remaining accumulated content
+                    if (currentPart.trim()) {
+                      parts.push(currentPart.trim());
+                    }
+                    
+                    return parts.filter(p => p.trim()).map((paragraph: string, pIndex: number) => {
+                      // Process both markdown bold (**text**) and HTML bold (<strong>text</strong>) for all paragraphs
+                      let processedParagraph = paragraph.trim();
+                    
+                    // Check if this paragraph is an H2 tag
+                    const h2Match = processedParagraph.match(/^<h2>(.*?)<\/h2>$/i);
+                    if (h2Match) {
+                      return (
+                        <h2
+                          key={pIndex}
+                          style={{
+                            fontSize: '20px',
+                            fontWeight: '600',
+                            marginTop: '24px',
+                            marginBottom: '12px',
+                            color: '#1e293b',
+                            lineHeight: '1.3'
+                          }}
+                        >
+                          {h2Match[1]}
+                        </h2>
+                      );
+                    }
+                    
+                    // Check if paragraph contains H2 tag (might have other content)
+                    if (processedParagraph.includes('<h2>')) {
+                      // Extract and render H2 separately, then render remaining content
+                      const h2Regex = /<h2>(.*?)<\/h2>/gi;
+                      const parts: Array<{ type: 'h2' | 'text'; content: string }> = [];
+                      let lastIndex = 0;
+                      let match;
+                      
+                      while ((match = h2Regex.exec(processedParagraph)) !== null) {
+                        // Add text before H2
+                        if (match.index > lastIndex) {
+                          const textBefore = processedParagraph.substring(lastIndex, match.index).trim();
+                          if (textBefore) {
+                            parts.push({ type: 'text', content: textBefore });
+                          }
+                        }
+                        // Add H2
+                        parts.push({ type: 'h2', content: match[1] });
+                        lastIndex = match.index + match[0].length;
+                      }
+                      
+                      // Add remaining text after last H2
+                      if (lastIndex < processedParagraph.length) {
+                        const textAfter = processedParagraph.substring(lastIndex).trim();
+                        if (textAfter) {
+                          parts.push({ type: 'text', content: textAfter });
+                        }
+                      }
+                      
+                      return (
+                        <React.Fragment key={pIndex}>
+                          {parts.map((part, partIndex) => {
+                            if (part.type === 'h2') {
+                              return (
+                                <h2
+                                  key={`${pIndex}-${partIndex}`}
+                                  style={{
+                                    fontSize: '20px',
+                                    fontWeight: '600',
+                                    marginTop: '24px',
+                                    marginBottom: '12px',
+                                    color: '#1e293b',
+                                    lineHeight: '1.3'
+                                  }}
+                                >
+                                  {part.content}
+                                </h2>
+                              );
+                            } else {
+                              // Process text content
+                              let textContent = part.content;
+                              textContent = textContent.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+                              
+                              // Check if this content contains a list
+                              const hasList = textContent.includes('<ul>') || textContent.includes('<ol>') || textContent.includes('<li>');
+                              
+                              if (hasList) {
+                                // Clean up list HTML formatting
+                                const listHtml = textContent
+                                  .replace(/\n\s*<li>/g, '<li>')
+                                  .replace(/<\/li>\s*\n/g, '</li>')
+                                  .replace(/\n\s*<\/ul>/g, '</ul>')
+                                  .replace(/\n\s*<\/ol>/g, '</ol>');
+                                
+                                return (
+                                  <div
+                                    key={`${pIndex}-${partIndex}`}
+                                    style={{
+                                      marginBottom: '16px',
+                                      marginTop: 0
+                                    }}
+                                    dangerouslySetInnerHTML={{ __html: listHtml }}
+                                  />
+                                );
+                              }
+                              
+                              return (
+                                <p
+                                  key={`${pIndex}-${partIndex}`}
+                                  style={{
+                                    marginBottom: '16px',
+                                    marginTop: 0
+                                  }}
+                                  dangerouslySetInnerHTML={(textContent.includes('<strong>') || textContent.includes('<a ')) ? { __html: textContent } : undefined}
+                                >
+                                  {!(textContent.includes('<strong>') || textContent.includes('<a ')) ? textContent : null}
+                                </p>
+                              );
+                            }
+                          })}
+                        </React.Fragment>
+                      );
+                    }
                     
                     // Convert markdown bold to HTML bold
                     processedParagraph = processedParagraph.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+                    
+                    // Check if paragraph contains HTML list tags (check before and after processing)
+                    const hasList = processedParagraph.includes('<ul>') || processedParagraph.includes('<ol>') || processedParagraph.includes('<li>');
+                    
+                    // If it's a list, render it as a div instead of p tag
+                    if (hasList) {
+                      // Ensure the list HTML is properly formatted
+                      // Replace newlines within list items with spaces to prevent breaking
+                      const listHtml = processedParagraph
+                        .replace(/\n\s*<li>/g, '<li>')
+                        .replace(/<\/li>\s*\n/g, '</li>')
+                        .replace(/\n\s*<\/ul>/g, '</ul>')
+                        .replace(/\n\s*<\/ol>/g, '</ol>');
+                      
+                      return (
+                        <div
+                          key={pIndex}
+                          style={{
+                            marginBottom: '16px',
+                            marginTop: 0
+                          }}
+                          dangerouslySetInnerHTML={{ __html: listHtml }}
+                        />
+                      );
+                    }
 
                     
 
@@ -1345,17 +1689,17 @@ const TechnicalAnalysisGenerator = forwardRef<TechnicalAnalysisGeneratorRef>((pr
                           marginTop: 0
                         }}
 
-                        dangerouslySetInnerHTML={(processedParagraph.includes('<strong>') || processedParagraph.includes('<a ')) ? { __html: processedParagraph } : undefined}
+                        dangerouslySetInnerHTML={(processedParagraph.includes('<strong>') || processedParagraph.includes('<a ') || processedParagraph.includes('<h2>') || processedParagraph.includes('<ul>') || processedParagraph.includes('<li>')) ? { __html: processedParagraph } : undefined}
 
                       >
 
-                        {!(processedParagraph.includes('<strong>') || processedParagraph.includes('<a ')) ? processedParagraph : null}
+                        {!(processedParagraph.includes('<strong>') || processedParagraph.includes('<a ') || processedParagraph.includes('<h2>') || processedParagraph.includes('<ul>') || processedParagraph.includes('<li>')) ? processedParagraph : null}
 
                       </p>
 
                     );
-
-                  })}
+                    });
+                  })()}
 
                 </div>
 
