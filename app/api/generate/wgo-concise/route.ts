@@ -192,6 +192,30 @@ function formatDate(dateString: string | null): string {
   }
 }
 
+function formatDateline(companyName: string): string {
+  // Extract city from company name or use a default
+  // For now, use a simple approach - could be enhanced with a lookup
+  const cityMap: { [key: string]: string } = {
+    'Palantir': 'DENVER',
+    'Micron': 'BOISE',
+    'Nvidia': 'SANTA CLARA',
+    'Apple': 'CUPERTINO',
+    'Microsoft': 'REDMOND',
+    'Amazon': 'SEATTLE',
+    'Meta': 'MENLO PARK',
+    'Google': 'MOUNTAIN VIEW',
+    'Tesla': 'AUSTIN'
+  };
+  
+  const city = cityMap[companyName.split(' ')[0]] || 'NEW YORK';
+  const now = new Date();
+  const month = now.toLocaleDateString('en-US', { month: 'short' });
+  const day = now.getDate();
+  const year = now.getFullYear();
+  
+  return `[DATELINE: ${city} — ${month}. ${day}, ${year}]`;
+}
+
 export async function POST(request: Request) {
   try {
     const { ticker, newsUrl, provider } = await request.json();
@@ -267,10 +291,13 @@ export async function POST(request: Request) {
 
     // Exchange name (already fetched in technicalData)
     const exchange = technicalData.exchange || 'NASDAQ';
+    
+    // Generate dateline
+    const dateline = formatDateline(technicalData.companyName);
 
     // Build the prompt
     const prompt = `# ROLE
-You are a Senior Financial Wire Correspondent. Your goal is to produce "Direct-Action" news reports for traders. You prioritize data density, structural clarity, and speed.
+You are a Senior Financial Wire Correspondent writing enhanced, analytical news reports for traders. Your goal is to produce insightful, data-dense stories that explain both the news AND the market reaction. You prioritize narrative clarity, analytical depth, and actionable insights.
 
 # PRIMARY CONSTRAINTS
 1. NO DANCING: Start with the news. No "In a rapidly evolving market..." or "Investors are looking at..."
@@ -287,8 +314,13 @@ You are a Senior Financial Wire Correspondent. Your goal is to produce "Direct-A
 
 # OUTPUT STRUCTURE
 
+## Dateline
+Start with: ${dateline} — 
+
 ## The Lead
-One paragraph (max 40 words). Format: **${technicalData.companyName} (${exchange}:${tickerUpper})** shares [rose/fell] [Percentage]% to **$${technicalData.currentPrice.toFixed(2)}** ${dayOfWeek} following [Catalyst]. [One sentence on why this matters for the sector].
+Two sentences that combine price action, news, and market interpretation. Format: Shares of ${technicalData.companyName} (${exchange}:${tickerUpper}) are trading [higher/lower] ${dayOfWeek}, [slipping/rising] ${Math.abs(technicalData.changePercent).toFixed(2)}% to $${technicalData.currentPrice.toFixed(2)}, [even after/despite] [the news catalyst]. [Second sentence: Interpret the market reaction - e.g., "The dip appears to be a 'sell the news' reaction to a major strategic win" or "The rally reflects strong fundamental support"].
+
+${newsUrl ? `CRITICAL HYPERLINK REQUIREMENT: You MUST include a hyperlink in the lead paragraph. Embed it naturally within three consecutive words using: <a href="${newsUrl}">three consecutive words</a>` : ''}
 
 ${newsUrl ? `CRITICAL HYPERLINK REQUIREMENT: You MUST include a hyperlink in the lead paragraph. Embed it naturally within three consecutive words of the existing text using this format: <a href="${newsUrl}">three consecutive words</a>
 
@@ -317,8 +349,47 @@ ${newsContent ? `CRITICAL: Use SPECIFIC DETAILS from the news content below.
 Here is the source news content:
 ${newsContent.substring(0, 4000)}${newsContent.length > 4000 ? '...' : ''}` : `No news provided - generate the article based on technical data and market context only.`}
 
+## Key Takeaways: The Deal at a Glance (Section Header - Use H2 format: <h2>Key Takeaways: The Deal at a Glance</h2>)
+Create 3-4 bullet points using <ul> and <li> tags that summarize the deal in digestible format:
+- **The News:** [One-sentence summary of what happened]
+- **The Scale:** [One-sentence description of scope/significance, use quotes from executives if available]
+- **The Tech/Details:** [One-sentence description of technology/products/services involved]
+- **New Hub/Timeline/Geography:** [One-sentence about future plans, timelines, or geographic expansion]
+
+Format:
+<h2>Key Takeaways: The Deal at a Glance</h2>
+<ul>
+<li><strong>The News:</strong> [Summary]</li>
+<li><strong>The Scale:</strong> [Scope/significance, can include executive quote]</li>
+<li><strong>The Tech:</strong> [Technology/products involved]</li>
+<li><strong>New Hub:</strong> [Future plans/timeline/geography]</li>
+</ul>
+
+## Why Is the Stock Down/Up? (Section Header - Use H2 format: <h2>Why Is the Stock ${technicalData.changePercent < 0 ? 'Down' : 'Up'}?</h2>)
+${technicalData.changePercent < 0 ? `Despite the positive news, ${tickerUpper} is testing key technical levels. Explain the disconnect between fundamentals and price action. Include 2-3 bullet points using <ul> and <li> tags:
+- **Technical Resistance/Support:** [Explain current technical position relative to key levels]
+- **Market Context:** [Explain broader market factors affecting the stock]
+- **Catalyst Timing:** [If applicable, explain why the reaction might be delayed or muted]
+
+Format:
+<h2>Why Is the Stock Down?</h2>
+<ul>
+<li><strong>Technical Resistance:</strong> The stock is [cooling off/rallying] after [hitting near all-time highs/testing support at $X].</li>
+<li><strong>Market Context:</strong> [Broad tech weakness/broader sector trends] may be [dragging the ticker down/boosting the stock] despite the [bullish/bearish] catalyst.</li>
+</ul>` : `The stock is trading higher. Explain why the news is being received positively. Include 2-3 bullet points using <ul> and <li> tags:
+- **Fundamental Strength:** [Explain why the news is bullish]
+- **Technical Momentum:** [Explain current technical position]
+- **Market Context:** [Explain broader market factors]
+
+Format:
+<h2>Why Is the Stock Up?</h2>
+<ul>
+<li><strong>Fundamental Strength:</strong> [Explanation]</li>
+<li><strong>Technical Momentum:</strong> [Explanation]</li>
+</ul>`}
+
 ## Execution & Synergy Details (Section Header - Use H2 format: <h2>Execution & Synergy Details</h2>)
-CRITICAL: This section MUST be formatted as an HTML bulleted list using <ul> and <li> tags.
+CRITICAL: This section MUST use numbered format (1., 2., 3.) with descriptive headers in bold, NOT HTML bulleted lists. Embed executive quotes directly within the narrative.
 
 # INFORMATION DENSITY RULE (CRITICAL FOR SEO)
 **DO NOT REPEAT FACTS FROM THE LEAD.** The Lead paragraph should contain the primary facts (deal value, facility size). The bullets must provide NEW, UNIQUE data points that were NOT mentioned in the Lead.
@@ -339,46 +410,39 @@ CRITICAL: This section MUST be formatted as an HTML bulleted list using <ul> and
 Format:
 <h2>Execution & Synergy Details</h2>
 
-<ul>
-<li><strong>[Category]:</strong> [NEW data point not in Lead - timeline, geography, or functional context]. [Benefit explanation]</li>
-<li><strong>[Category]:</strong> [NEW data point not in Lead - timeline, geography, or functional context]. [Benefit explanation]</li>
-<li><strong>[Category]:</strong> [NEW data point not in Lead - timeline, geography, or functional context]. [Benefit explanation]</li>
-</ul>
+<p><strong>1. [Descriptive Header]</strong></p>
+<p>[Narrative paragraph explaining the detail. If an executive quote exists, embed it naturally: "This expanded strategic partnership marks an important turning point in connecting data and workflows... into a single, cohesive system." — <strong>[Name]</strong>, [title in lowercase], [company].]</p>
 
-EXAMPLES OF CORRECT FORMAT (No Repetition):
-<ul>
-<li><strong>Investment Velocity:</strong> The $1.8B cash consideration secures an existing facility, bypassing the 3-year lead time required for greenfield construction.</li>
-<li><strong>Operational Horizon:</strong> Significant DRAM wafer output is projected to begin in H2 2027, following the transition of PSMC's existing operations.</li>
-<li><strong>Regional Synergy:</strong> The Tongluo site integrates directly into Micron's Taiwan cluster, streamlining logistics for post-wafer assembly.</li>
-</ul>
+<p><strong>2. [Descriptive Header]</strong></p>
+<p>[Narrative paragraph with timeline, geography, or functional context. DO NOT repeat facts from Lead.]</p>
+
+<p><strong>3. [Descriptive Header]</strong></p>
+<p>[Narrative paragraph with additional new information.]</p>
+
+EXAMPLE FORMAT:
+<h2>Execution & Synergy Details</h2>
+
+<p><strong>1. Shipbuilding Revolution ("Future of Shipyard")</strong></p>
+<p>Palantir is no longer just a software vendor; it is now the "orchestration layer" for HD Hyundai's massive shipbuilding division. "This expanded strategic partnership marks an important turning point in connecting data and workflows... into a single, cohesive system." — <strong>Chung Kisun</strong>, chairman of HD Hyundai.</p>
+
+<p><strong>2. From Oil to Robotics</strong></p>
+<p>Originally starting with HD Hyundai Oilbank in 2021 (refining), the partnership has proven its value by optimizing crude selection. Now, it expands to electric systems, construction equipment, and robotics.</p>
 
 CRITICAL REQUIREMENTS:
-1. You MUST use HTML <ul> and <li> tags - do NOT use markdown "- " format
-2. Wrap the entire list in <ul> tags
-3. Each bullet point must be wrapped in <li> tags
-4. **BOLD THE CATEGORY NAME** before the colon using <strong> tags (e.g., <strong>Investment Velocity:</strong>)
-5. **NO REPETITION:** Do NOT repeat dollar amounts, facility sizes, or other facts already stated in the Lead paragraph
-6. **INCLUDE GEOGRAPHIC ENTITIES:** Mention specific locations (e.g., "Tongluo, Taiwan", "proximity to Taichung") - Google's 2026 algorithm looks for geographic entity mapping
-7. **INCLUDE TIMELINES:** Include specific dates, quarters, or timeframes (e.g., "Q2 2026 closing", "H2 2027 production ramp") - this adds forward-looking value that generic summaries skip
-8. **USE FUNCTIONAL CONTEXT:** Instead of repeating numbers, explain what they enable (e.g., "bypassing 3-year construction lead times", "streamlining logistics")
-9. Every bullet must explain a BENEFIT or IMPACT with NEW information, not just restate facts from the Lead
+1. Use numbered format (1., 2., 3.) with descriptive headers in <strong> tags
+2. Write narrative paragraphs (2-3 sentences each), NOT bullet points
+3. **EMBED QUOTES:** If executive quotes exist, embed them naturally within the narrative paragraphs using AP style: <strong>[Name]</strong>, [title in lowercase], [company]
+4. **NO REPETITION:** Do NOT repeat dollar amounts, facility sizes, or other facts already stated in the Lead paragraph
+5. **INCLUDE GEOGRAPHIC ENTITIES:** Mention specific locations (e.g., "Tongluo, Taiwan", "South Korea") - Google's 2026 algorithm looks for geographic entity mapping
+6. **INCLUDE TIMELINES:** Include specific dates, quarters, or timeframes (e.g., "Q2 2026 closing", "H2 2027 production ramp", "began in 2021") - this adds forward-looking value
+7. **USE FUNCTIONAL CONTEXT:** Instead of repeating numbers, explain what they enable (e.g., "bypassing 3-year construction lead times", "streamlining logistics")
+8. Each numbered section must provide NEW, UNIQUE information not mentioned in the Lead
 
-## Executive Commentary (Section Header - Use H2 format: <h2>Executive Commentary</h2>)
-${newsContent ? `CRITICAL: Only include this section if you find a VERBATIM quote in the source text. If no direct quote exists, SKIP THIS SECTION ENTIRELY.
+## Technical Analysis: The [Bullish/Bearish] Signal (Section Header - Use H2 format: <h2>Technical Analysis: The ${technicalData.changePercent < 0 ? 'Bearish' : 'Bullish'} Signal</h2>)
 
-If a quote exists, format it using AP STYLE:
-- **Bold the executive's name** using <strong> tags
-- Use AP style for titles: lowercase titles that come AFTER the name, capitalize only when title comes BEFORE the name
-- Format: <strong>[Name]</strong>, [title in lowercase], stated [context/action] "[Exact verbatim quote from source]".
+Start with a brief narrative paragraph (1-2 sentences) explaining the technical situation: "While the fundamental story is [bullish/bearish], the chart is flashing [warning signs/positive signals]."
 
-AP STYLE EXAMPLES:
-- Correct: <strong>Manish Bhatia</strong>, executive vice president of global operations at Micron Technology, stated the acquisition "complements our current Taiwan operations and will enable Micron to increase production in a market where demand continues to outpace supply."
-- Correct: <strong>John Smith</strong>, chief executive officer, said "quote here."
-- Correct: Chief Executive Officer <strong>John Smith</strong> said "quote here." (title capitalized when before name)
-
-DO NOT paraphrase. DO NOT create quotes. Use the exact quote from the source. If uncertain, skip this section.` : 'Provide a brief market insight based on the technical data. Keep it under 25 words.'}
-
-## Technical & Market Profile (Section Header - Use H2 format: <h2>Technical & Market Profile</h2>)
+Then create an HTML table with "Signal" column instead of "Context":
 
 Create an HTML table. Use this EXACT format and order:
 
@@ -387,44 +451,39 @@ Create an HTML table. Use this EXACT format and order:
 <tr>
 <th>Metric</th>
 <th>Value</th>
-<th>Context</th>
+<th>Signal</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td><strong>Current Price</strong></td>
 <td>$${technicalData.currentPrice.toFixed(2)}</td>
-<td>Testing All-Time High ($${technicalData.fiftyTwoWeekHigh.toFixed(2)})</td>
-</tr>
-<tr>
-<td><strong>SMA 20</strong></td>
-<td>${technicalData.sma20 ? `$${technicalData.sma20.toFixed(2)}` : 'N/A'}</td>
-<td>Trading ${sma20Pct}% above average ${parseFloat(sma20Pct) > 15 ? '(Overextended)' : parseFloat(sma20Pct) > 0 ? '(Bullish)' : '(Bearish)'}</td>
+<td>${technicalData.currentPrice > technicalData.fiftyTwoWeekHigh * 0.95 ? `Bearish (Below 20-Day SMA)` : parseFloat(sma20Pct) < 0 ? `Bearish (Below 20-Day SMA)` : `Bullish (Above 20-Day SMA)`}</td>
 </tr>
 <tr>
 <td><strong>RSI (14)</strong></td>
 <td>${technicalData.rsi ? technicalData.rsi.toFixed(1) : 'N/A'}</td>
-<td>${technicalData.rsi ? (technicalData.rsi > 70 ? 'Overbought (Indicates potential pullback risk)' : technicalData.rsi < 30 ? 'Oversold (Potential bounce opportunity)' : 'Neutral') : 'N/A'}</td>
+<td>${technicalData.rsi ? (technicalData.rsi > 70 ? 'Overbought (Indicates potential pullback risk)' : technicalData.rsi < 30 ? 'Oversold (Potential bounce opportunity)' : 'Neutral (Approaching Oversold)') : 'N/A'}</td>
 </tr>
 <tr>
-<td><strong>SMA 100</strong></td>
-<td>${technicalData.sma100 ? `$${technicalData.sma100.toFixed(2)}` : 'N/A'}</td>
-<td>${parseFloat(sma100Pct) >= 0 ? `Strong long-term uptrend (+${sma100Pct}% vs average)` : `Long-term downtrend (${sma100Pct}% vs average)`}</td>
+<td><strong>Support Level</strong></td>
+<td>$${technicalData.sma20 ? technicalData.sma20.toFixed(2) : technicalData.fiftyTwoWeekLow.toFixed(2)}</td>
+<td>Key psychological floor</td>
 </tr>
 <tr>
-<td><strong>Next Earnings</strong></td>
+<td><strong>Next Catalyst</strong></td>
 <td>${formatDate(technicalData.nextEarningsDate)}</td>
-<td>${technicalData.nextEarningsDate ? 'Consensus anticipates AI-driven growth' : 'Not scheduled'}</td>
+<td>${technicalData.nextEarningsDate ? 'Q4 Earnings Report' : 'Not scheduled'}</td>
 </tr>
 </tbody>
 </table>
 
 CRITICAL REQUIREMENTS:
 - Use proper HTML table tags (<table>, <thead>, <tbody>, <tr>, <th>, <td>)
-- DO NOT include "52-Week Range" row - only include the 5 rows shown above in this exact order
-- Every "Context" cell must provide specific, actionable insight
+- Use "Signal" column instead of "Context"
+- Include only these 4 rows in this exact order: Current Price, RSI (14), Support Level, Next Catalyst
+- Every "Signal" cell must provide clear, actionable insight (Bullish/Bearish/Neutral with context)
 - Use concise, professional language
-- Match the exact context wording shown in the examples above
 
 # INSTRUCTIONS FOR ADDITIONAL DATA
 - If a stock is up >5%, emphasize the SMA 20 gap and RSI overbought risk.
@@ -443,46 +502,57 @@ CRITICAL REQUIREMENTS:
 
 # SELF-AUDIT STEP (REQUIRED BEFORE OUTPUT)
 Before finalizing your article, review:
-1. **INFORMATION DENSITY CHECK:** Have you repeated any facts from the Lead paragraph in the Execution & Synergy Details bullets? If yes, replace with NEW data (timeline, geography, functional context).
-2. **GEOGRAPHIC ENTITIES:** Have you included specific locations (e.g., "Tongluo, Taiwan", "proximity to Taichung") in the bullets? This is critical for 2026 SEO.
-3. **TIMELINES:** Have you included specific dates/quarters (e.g., "Q2 2026", "H2 2027") in the bullets? This adds forward-looking value.
-4. Does the "Executive Commentary" section contain a quote that exists VERBATIM in the source? If not, delete it.
-5. Are executive names bolded using <strong> tags?
-6. Are titles formatted in AP style (lowercase when after name, capitalized when before name)?
-7. Does every bullet point in "Execution & Synergy Details" explain a benefit/impact with NEW information, not just restate facts from the Lead?
-8. Does every row in the Technical table have a meaningful Context column with actionable insight?
+1. **DATELINE:** Does the article start with the dateline format: [DATELINE: CITY — Month. Day, Year]?
+2. **LEAD INTERPRETATION:** Does the lead explain WHY the stock is moving (e.g., "sell the news" reaction, fundamental support)?
+3. **KEY TAKEAWAYS:** Have you created the "Key Takeaways" section with The News, The Scale, The Tech, and New Hub/Timeline?
+4. **WHY IS STOCK DOWN/UP:** Have you explained the disconnect between fundamentals and price action (if stock is down despite good news) or why it's rallying (if up)?
+5. **INFORMATION DENSITY CHECK:** Have you repeated any facts from the Lead paragraph in the Execution & Synergy Details? If yes, replace with NEW data (timeline, geography, functional context).
+6. **GEOGRAPHIC ENTITIES:** Have you included specific locations in the Execution & Synergy Details? This is critical for 2026 SEO.
+7. **TIMELINES:** Have you included specific dates/quarters in the Execution & Synergy Details? This adds forward-looking value.
+8. **QUOTES EMBEDDED:** Are executive quotes embedded naturally within the Execution & Synergy Details narrative paragraphs (not in a separate section)?
+9. **TECHNICAL TABLE:** Does the table use "Signal" column instead of "Context", and include only Current Price, RSI (14), Support Level, and Next Catalyst?
+10. Are executive names bolded using <strong> tags and titles in AP style (lowercase when after name)?
 
 # OUTPUT ARTICLE:`;
 
-    const systemPrompt = `You are a Senior Financial Wire Correspondent writing direct-action news reports for traders. Your writing is:
-- Data-dense and structurally clear
-- Fast-paced with short, punchy sentences
-- Active voice only (never passive)
-- Starts immediately with the news (no fluff introductions)
-- Uses inverted pyramid structure (most important info first)
-- Includes technical data in a formatted table at the end
+    const systemPrompt = `You are a Senior Financial Wire Correspondent writing enhanced, analytical news reports for traders. Your writing is:
+- Narrative-driven with analytical depth
+- Conversational yet professional tone
+- Explains both the news AND the market reaction
+- Uses dateline format for wire service authenticity
+- Includes interpretive sections that explain price action
+- Embeds quotes naturally within narrative paragraphs
+- Includes technical analysis with clear signals
 
 CRITICAL RULES:
-1. NO HALLUCINATIONS: Never create quotes that don't exist verbatim in the source. If no quote exists, skip the Executive Commentary section.
-2. INFORMATION DENSITY (NO REPETITION): The Lead paragraph contains primary facts (deal value, facility size). The Execution & Synergy Details bullets MUST provide NEW, UNIQUE data points: timelines (Q2 2026, H2 2027), geography (Tongluo, Taiwan; proximity to Taichung), and functional context (bypassing construction lead times). DO NOT repeat facts from the Lead.
-3. GEOGRAPHIC ENTITIES: Include specific locations in the bullets (e.g., "Tongluo, Taiwan", "proximity to Taichung operations") - Google's 2026 algorithm looks for geographic entity mapping for Original Reporting and E-E-A-T.
-4. TIMELINES: Include specific dates/quarters in the bullets (e.g., "Q2 2026 closing", "H2 2027 production ramp") - this adds forward-looking value that generic AI summaries usually skip.
-5. THE "SO WHAT" RULE: Every bullet point must explain a benefit or impact with NEW information (timeline, geography, functional context), not just restate facts from the Lead.
-6. CONTEXTUAL TECHNICALS: Every table row must have a meaningful Context column with actionable insight, not just labels.
-7. MERGE NEWS INTO LEAD: Include primary facts (dollar amounts, facility size, basic purpose) directly in the Lead paragraph.
-8. HYPERLINK IN LEAD: ${newsUrl ? `You MUST include a hyperlink in the lead paragraph. Embed it naturally within three consecutive words using: <a href="${newsUrl}">three words</a>. Do NOT use phrases like "as detailed in" - just embed it naturally in the text.` : 'No hyperlink required (no newsUrl provided).'}
-9. SECTION HEADERS: You MUST use HTML <h2> tags for section headers:
+1. NO HALLUCINATIONS: Never create quotes that don't exist verbatim in the source. Embed quotes naturally within Execution & Synergy Details paragraphs.
+2. DATELINE FORMAT: Start with [DATELINE: CITY — Month. Day, Year] — format.
+3. LEAD INTERPRETATION: The lead must explain WHY the stock is moving (e.g., "sell the news" reaction, fundamental support, technical resistance).
+4. KEY TAKEAWAYS SECTION: Create a "Key Takeaways: The Deal at a Glance" section with The News, The Scale, The Tech, and New Hub/Timeline bullets.
+5. WHY IS STOCK DOWN/UP SECTION: Explain the disconnect between fundamentals and price action if stock is down despite good news, or explain why it's rallying if up.
+6. INFORMATION DENSITY (NO REPETITION): The Lead paragraph contains primary facts. The Execution & Synergy Details MUST provide NEW, UNIQUE data points: timelines, geography, and functional context. DO NOT repeat facts from the Lead.
+7. EXECUTION & SYNERGY FORMAT: Use numbered format (1., 2., 3.) with descriptive headers in bold, NOT bulleted lists. Write narrative paragraphs (2-3 sentences each).
+8. EMBED QUOTES: Embed executive quotes naturally within Execution & Synergy Details paragraphs using AP style: <strong>[Name]</strong>, [title in lowercase], [company].
+9. GEOGRAPHIC ENTITIES: Include specific locations in Execution & Synergy Details - Google's 2026 algorithm looks for geographic entity mapping.
+10. TIMELINES: Include specific dates/quarters in Execution & Synergy Details - this adds forward-looking value.
+11. TECHNICAL TABLE: Use "Signal" column (not "Context") with only 4 rows: Current Price, RSI (14), Support Level, Next Catalyst.
+12. HYPERLINK IN LEAD: ${newsUrl ? `You MUST include a hyperlink in the lead paragraph. Embed it naturally within three consecutive words using: <a href="${newsUrl}">three words</a>.` : 'No hyperlink required (no newsUrl provided).'}
+13. SECTION HEADERS: You MUST use HTML <h2> tags for section headers:
+   - <h2>Key Takeaways: The Deal at a Glance</h2>
+   - <h2>Why Is the Stock Down/Up?</h2>
    - <h2>Execution & Synergy Details</h2>
-   - <h2>Executive Commentary</h2>
-   - <h2>Technical & Market Profile</h2>
-10. BOLD CATEGORY NAMES: In the "Execution & Synergy Details" section, bold the category name before the colon using <strong> tags (e.g., <strong>Investment Velocity:</strong>).
-11. AP STYLE FOR EXECUTIVES: In "Executive Commentary", bold executive names with <strong> tags and use AP style for titles: lowercase when title comes AFTER the name, capitalize when title comes BEFORE the name (e.g., <strong>John Smith</strong>, chief executive officer, said... OR Chief Executive Officer <strong>John Smith</strong> said...).
-12. USE SPECIFIC DETAILS: Extract and use exact numbers, dates, dollar amounts, facility details, geographic locations, timelines, and quotes from the source text.
+   - <h2>Technical Analysis: The [Bullish/Bearish] Signal</h2>
+14. USE SPECIFIC DETAILS: Extract and use exact numbers, dates, dollar amounts, facility details, geographic locations, timelines, and quotes from the source text.
 
 CRITICAL: The output MUST include:
-- HTML <h2> tags for all section headers (Execution & Synergy Details, Executive Commentary, Technical & Market Profile)
-- An HTML table for "Technical & Market Profile" section with proper HTML table tags: <table>, <thead>, <tbody>, <tr>, <th>, <td>
-- Specific details from the source (dollar amounts, dates, facility sizes, etc.)
+- Dateline format: [DATELINE: CITY — Month. Day, Year] —
+- HTML <h2> tags for all section headers (Key Takeaways, Why Is the Stock Down/Up?, Execution & Synergy Details, Technical Analysis)
+- "Key Takeaways: The Deal at a Glance" section with The News, The Scale, The Tech, and New Hub/Timeline
+- "Why Is the Stock Down/Up?" section explaining the price action
+- Execution & Synergy Details in numbered format (1., 2., 3.) with narrative paragraphs, NOT bulleted lists
+- Executive quotes embedded naturally within Execution & Synergy Details paragraphs (not in a separate section)
+- An HTML table for "Technical Analysis" section with "Signal" column (not "Context") and only 4 rows: Current Price, RSI (14), Support Level, Next Catalyst
+- Specific details from the source (dollar amounts, dates, facility sizes, geographic locations, timelines, etc.)
 - Verbatim executive quotes only (if they exist in source)`;
 
     const result = await aiProvider.generateCompletion(
