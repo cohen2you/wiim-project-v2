@@ -15,9 +15,11 @@ export default function EarningsPreviewGenerator() {
   const [tickers, setTickers] = useState('');
   const [previews, setPreviews] = useState<EarningsPreviewResult[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadingMode, setLoadingMode] = useState<'standard' | 'enriched' | null>(null); // Track which button was clicked
   const [error, setError] = useState('');
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
   const [provider, setProvider] = useState<'openai' | 'gemini'>('openai');
+  const [sourceUrl, setSourceUrl] = useState('');
 
   const previewRefs = useRef<(HTMLDivElement | null)[]>([]);
   const [addingNewsIndex, setAddingNewsIndex] = useState<number | null>(null);
@@ -302,11 +304,13 @@ export default function EarningsPreviewGenerator() {
     setPreviews([]);
     setError('');
     setLoading(true);
+    setLoadingMode(enrichFirst ? 'enriched' : 'standard'); // Track which mode is running
 
     try {
       let requestBody: any = { 
         tickers, 
-        provider
+        provider,
+        sourceUrl: sourceUrl.trim() || undefined
       };
 
       // If enrichFirst is true, fetch context brief from external agent first
@@ -371,6 +375,7 @@ export default function EarningsPreviewGenerator() {
       else setError(String(error));
     } finally {
       setLoading(false);
+      setLoadingMode(null); // Reset loading mode when done
     }
   };
 
@@ -447,6 +452,43 @@ export default function EarningsPreviewGenerator() {
         }}
       />
 
+      <div style={{ marginBottom: '20px' }}>
+        <label style={{ 
+          display: 'block', 
+          fontSize: '14px', 
+          fontWeight: '600', 
+          marginBottom: '8px', 
+          color: '#374151' 
+        }}>
+          Source URL (Optional)
+        </label>
+        <input
+          type="url"
+          placeholder="Enter source URL for additional context (e.g., news article, PR)"
+          value={sourceUrl}
+          onChange={(e) => setSourceUrl(e.target.value)}
+          style={{
+            width: '100%',
+            padding: '12px 16px',
+            border: '1px solid #d1d5db',
+            borderRadius: '8px',
+            fontSize: '14px',
+            boxSizing: 'border-box',
+            transition: 'border-color 0.2s'
+          }}
+          onFocus={(e) => e.target.style.borderColor = '#8b5cf6'}
+          onBlur={(e) => e.target.style.borderColor = '#d1d5db'}
+        />
+        <p style={{ 
+          fontSize: '12px', 
+          color: '#6b7280', 
+          marginTop: '4px', 
+          marginBottom: 0 
+        }}>
+          Benzinga URLs will be hyperlinked in the lead paragraph. Other sources will be cited in the second paragraph.
+        </p>
+      </div>
+
       <div style={{ display: 'flex', gap: '12px', marginBottom: '20px' }}>
         <button
           onClick={() => generateEarningsPreview(false)}
@@ -479,7 +521,7 @@ export default function EarningsPreviewGenerator() {
             }
           }}
         >
-          {loading ? 'Generating Preview...' : 'Generate Earnings Preview'}
+          {loading && loadingMode === 'standard' ? 'Generating Preview...' : 'Generate Earnings Preview'}
         </button>
         <button
           onClick={() => generateEarningsPreview(true)}
@@ -512,7 +554,7 @@ export default function EarningsPreviewGenerator() {
             }
           }}
         >
-          {loading ? 'Enriching & Generating...' : 'Enriched Earnings Preview'}
+          {loading && loadingMode === 'enriched' ? 'Enriching & Generating...' : 'Enriched Earnings Preview'}
         </button>
       </div>
 

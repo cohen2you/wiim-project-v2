@@ -990,6 +990,32 @@ async function fetchNewsSection(ticker: string, articleText: string, backendUrl?
   }
 }
 
+// Helper to scrape news URL
+async function scrapeNewsUrl(url: string): Promise<string | null> {
+  try {
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+      }
+    });
+
+    if (!response.ok) return null;
+
+    const html = await response.text();
+    const text = html
+      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    return text.substring(0, 5000);
+  } catch (error) {
+    console.error('Error scraping URL:', error);
+    return null;
+  }
+}
+
 // Generate earnings preview article
 async function generateEarningsPreview(
   ticker: string,
@@ -1001,7 +1027,9 @@ async function generateEarningsPreview(
   currentPrice: number,
   historicalEarnings: any,
   contextBrief: any | null,
-  provider?: AIProvider
+  provider?: AIProvider,
+  sourceUrl?: string,
+  sourceContent?: string
 ): Promise<string> {
   const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
   const today = new Date();
@@ -1122,6 +1150,25 @@ ${JSON.stringify(contextBrief, null, 2)}
 
 CRITICAL CONTEXT INSTRUCTION: Review the context_brief data above. If major_event_detected is TRUE (e.g., a lawsuit, recall, crash, or significant negative news), you MUST mention this event in the first paragraph as a counter-weight to the financial expectations. Do not bury this news. If major_event_detected is FALSE, focus the lead paragraph purely on the financial growth/decline metrics.
 
+` : ''}${sourceContent ? `═══════════════════════════════════════════════════════════════
+SOURCE ARTICLE CONTENT (MANDATORY TO REFERENCE - DO NOT IGNORE):
+═══════════════════════════════════════════════════════════════
+${sourceContent.substring(0, 3000)}${sourceContent.length > 3000 ? '...' : ''}
+
+⚠️ CRITICAL SOURCE ARTICLE REQUIREMENTS - THIS IS MANDATORY:
+1. **YOU MUST MENTION THE SOURCE ARTICLE'S MAIN TOPIC IN THE LEAD PARAGRAPH**: The source article above contains information that MUST be referenced. This is NOT optional. If you ignore this requirement, the article will be incomplete.
+2. **For M&A/Strategic News**: If the source discusses acquisitions (e.g., "$82.7 billion all-cash offer"), partnerships, strategic moves, or major business developments, you MUST:
+   - Mention the specific deal/event in the lead paragraph (e.g., "Netflix's $82.7 billion all-cash offer for Warner Bros Discovery")
+   - Include specific numbers and company names from the source
+   - Connect it to earnings expectations or investor sentiment
+3. **For Benzinga URLs**: The source URL will be hyperlinked in the lead paragraph - you MUST mention the key development so the hyperlink has meaningful context. The hyperlink text should reference the main topic (e.g., "acquisition deal", "$82.7 billion offer", "strategic move").
+4. **Use Specific Details**: Include specific facts, numbers, company names, and details from the source. Examples:
+   - ✅ GOOD: "Netflix's $82.7 billion all-cash offer for Warner Bros Discovery"
+   - ✅ GOOD: "the strategic partnership expansion with HD Hyundai"
+   - ❌ BAD: "recent developments" or "strategic moves" (too vague)
+5. **Connect to Earnings**: Frame how the source article's news relates to earnings expectations, investor sentiment, or the company's financial outlook.
+
+═══════════════════════════════════════════════════════════════
 ` : ''}UPCOMING EARNINGS:
 - Earnings Date: ${earningsDate}
 ${epsEstimate !== null ? `- EPS Estimate: $${epsEstimate.toFixed(2)}${epsPrior !== null ? ` (${epsEstimate > epsPrior ? 'Up' : epsEstimate < epsPrior ? 'Down' : 'Flat'} from $${epsPrior.toFixed(2)} YoY)` : ''}` : ''}
@@ -1201,10 +1248,20 @@ CRITICAL STRUCTURAL REQUIREMENTS:
    
    **CRITICAL:** Include a THREE-WORD hyperlink to the Benzinga earnings page in the first sentence. Format: <a href="https://www.benzinga.com/quote/${ticker}/earnings">[three consecutive words]</a>. Embed it naturally (e.g., "is scheduled to <a href="https://www.benzinga.com/quote/${ticker}/earnings">report earnings on</a> February 26").
    
-   **OUTPUT:** Provide only the lead paragraph text with the embedded hyperlink. No labels, no section headers.
+   ${sourceUrl && sourceUrl.includes('benzinga.com') ? `**MANDATORY SOURCE ARTICLE REFERENCE:** The source article provided above contains critical information that MUST be mentioned in the lead paragraph. You MUST:
+   1. Reference the main topic/event from the source article (e.g., "Netflix's $82.7 billion all-cash offer for Warner Bros Discovery" or "the strategic acquisition deal")
+   2. Include a hyperlink to the source article embedded naturally within three consecutive words using: <a href="${sourceUrl}">three consecutive words</a>
+   3. Connect the source article's news to the earnings context (e.g., how the acquisition might impact earnings expectations, investor sentiment, or financial outlook)
+   
+   EXAMPLE FORMAT: "Netflix (NASDAQ:NFLX) is scheduled to <a href="https://www.benzinga.com/quote/NFLX/earnings">report earnings on</a> April 16, 2026, as the company's <a href="${sourceUrl}">$82.7 billion acquisition</a> of Warner Bros Discovery adds complexity to its financial outlook..."
+   
+   Do NOT skip this - the source article was provided specifically to add context to the earnings story.` : ''}
+   
+   **OUTPUT:** Provide only the lead paragraph text with the embedded hyperlink(s). No labels, no section headers.
 
 3. **SECTION MARKERS** (REQUIRED - use these EXACT markers):
-   - Insert "## Section: What to Expect" after the lead paragraph
+   ${sourceUrl && !sourceUrl.includes('benzinga.com') ? `   - **CRITICAL:** After the lead paragraph, add a second paragraph that cites the source URL and summarizes the key development from the source article. Format: "According to <a href="${sourceUrl}">[source name]</a>, [summarize the main topic/event from the source article - be specific with details, numbers, and company names]. [Connect this development to how it might impact earnings expectations or investor sentiment]." This citation paragraph MUST mention the main topic from the source article - do not be vague.` : ''}
+   - Insert "## Section: What to Expect" after the lead paragraph${sourceUrl && !sourceUrl.includes('benzinga.com') ? ' (and after the source citation paragraph)' : ''}
    - Insert "## Section: Historical Performance" after "What to Expect" (if historical data is available)
    - Insert "## Section: Analyst Sentiment" after the expectations/historical section
    - Insert "## Section: Technical Setup" (optional - include if relevant technical context is available)
@@ -1314,7 +1371,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Invalid JSON in request body' }, { status: 400 });
     }
     
-    const { tickers, provider, skipSEOSubheads, contextBriefs } = requestBody;
+    const { tickers, provider, skipSEOSubheads, contextBriefs, sourceUrl } = requestBody;
 
     if (!tickers || !tickers.trim()) {
       console.error('[EARNINGS PREVIEW] Missing tickers in request');
@@ -1350,7 +1407,23 @@ export async function POST(request: Request) {
             contextBrief = await fetchContextBrief(ticker, backendUrl);
           }
           
-          // Step 2: Fetch all financial data in parallel
+          // Step 2: Scrape source URL if provided
+          let sourceContent: string | null = null;
+          if (sourceUrl && sourceUrl.trim()) {
+            try {
+              console.log(`[EARNINGS PREVIEW] ${ticker}: Scraping source URL: ${sourceUrl}`);
+              sourceContent = await scrapeNewsUrl(sourceUrl.trim());
+              if (sourceContent) {
+                console.log(`[EARNINGS PREVIEW] ${ticker}: Successfully scraped source URL, content length: ${sourceContent.length}`);
+              } else {
+                console.log(`[EARNINGS PREVIEW] ${ticker}: Failed to scrape source URL`);
+              }
+            } catch (error) {
+              console.error(`[EARNINGS PREVIEW] ${ticker}: Error scraping source URL:`, error);
+            }
+          }
+          
+          // Step 3: Fetch all financial data in parallel
           const [basicStockData, nextEarnings, consensusRatings, recentAnalystActions, peRatio, historicalEarnings] = await Promise.all([
             fetchBasicStockData(ticker),
             fetchNextEarningsDate(ticker),
@@ -1387,7 +1460,7 @@ export async function POST(request: Request) {
             firstQuarter: historicalEarnings?.quarters?.[0] || null
           });
 
-          // Generate initial earnings preview article (with context brief)
+          // Generate initial earnings preview article (with context brief and source URL)
           let preview = await generateEarningsPreview(
             ticker,
             companyName,
@@ -1398,7 +1471,9 @@ export async function POST(request: Request) {
             currentPrice,
             historicalEarnings,
             contextBrief,
-            aiProviderOption
+            aiProviderOption,
+            sourceUrl,
+            sourceContent || undefined
           );
 
           // Add "Also Read" section from related articles (after first paragraph)
