@@ -2550,6 +2550,8 @@ async function fetchRecentAnalystActions(ticker: string, limit: number = 3) {
       const analystData = await analystRes.json();
       const ratingsArray = Array.isArray(analystData) ? analystData : (analystData.ratings || []);
       
+      console.log(`[RECENT ANALYST ACTIONS] ${ticker}: Raw API returned ${ratingsArray.length} ratings`);
+      
       // Sort by date (most recent first) and format recent actions
       const recentActions = ratingsArray
         .sort((a: any, b: any) => {
@@ -2564,36 +2566,60 @@ async function fetchRecentAnalystActions(ticker: string, limit: number = 3) {
           const actionCompany = rating.action_company || rating.action || rating.rating_action || '';
           const currentRating = rating.rating_current || rating.rating || rating.new_rating || '';
           const priorRating = rating.rating_prior || rating.rating_prior || '';
-          const priceTarget = rating.pt_current || rating.pt || rating.price_target || rating.target || null;
-          const priorTarget = rating.pt_prior || rating.price_target_prior || null;
+          // Use adjusted_pt_current/adjusted_pt_prior if available (already formatted), otherwise fall back to other fields
+          const priceTarget = rating.adjusted_pt_current || rating.pt_current || rating.pt || rating.price_target || rating.target || null;
+          const priorTarget = rating.adjusted_pt_prior || rating.pt_prior || rating.price_target_prior || null;
+          // Use action_pt from API (e.g., "Lowers", "Raises") instead of calculating
+          const actionPt = rating.action_pt || null;
           
-          // Format the action description based on action_company and rating changes
+          console.log(`[RECENT ANALYST ACTIONS] ${ticker}: Processing rating:`, {
+            firm,
+            actionCompany,
+            currentRating,
+            priorRating,
+            priceTarget,
+            priorTarget,
+            actionPt,
+            date: rating.date || rating.created,
+            rawRating: JSON.stringify(rating).substring(0, 200) // First 200 chars of raw data
+          });
+          
+          // Format the action description based ONLY on action_company from API - no fallbacks or inference
           let actionText = '';
           const actionLower = actionCompany.toLowerCase();
           
-          if (actionLower.includes('upgrade') || (priorRating && currentRating && currentRating !== priorRating)) {
-            actionText = `Upgraded to ${currentRating}`;
-          } else if (actionLower.includes('downgrade')) {
+          // Use ONLY the actionCompany field from the API - no inference or fallbacks
+          if (actionLower.includes('downgrade')) {
             actionText = `Downgraded to ${currentRating}`;
+          } else if (actionLower.includes('upgrade')) {
+            actionText = `Upgraded to ${currentRating}`;
           } else if (actionLower.includes('initiate') || actionLower.includes('reinstated')) {
             actionText = `Initiated with ${currentRating}`;
           } else if (currentRating) {
+            // If actionCompany is missing or unclear, just show the rating
             actionText = `${currentRating}`;
           }
           
-          // Add price target info if available
-          if (priceTarget && priorTarget && parseFloat(priceTarget.toString()) !== parseFloat(priorTarget.toString())) {
-            const direction = parseFloat(priceTarget.toString()) > parseFloat(priorTarget.toString()) ? 'Raised' : 'Lowered';
-            actionText += ` (${direction} Target to $${parseFloat(priceTarget.toString()).toFixed(2)})`;
+          // Add price target info if available - use API data directly, NO calculations or fallbacks
+          if (priceTarget && priorTarget && actionPt) {
+            // Use action_pt from API (e.g., "Lowers", "Raises") - capitalize first letter
+            const direction = actionPt.charAt(0).toUpperCase() + actionPt.slice(1).toLowerCase();
+            // Use price target as-is from API (already formatted)
+            actionText += ` (${direction} Target to $${priceTarget})`;
           } else if (priceTarget) {
-            actionText += ` (Target $${parseFloat(priceTarget.toString()).toFixed(2)})`;
+            // Use price target as-is from API (already formatted)
+            actionText += ` (Target $${priceTarget})`;
           }
           
-          return {
+          const formattedAction = {
             firm,
             action: actionText,
             date: rating.date || rating.created || null
           };
+          
+          console.log(`[RECENT ANALYST ACTIONS] ${ticker}: Formatted action: ${formattedAction.firm}: ${formattedAction.action} (${formattedAction.date})`);
+          
+          return formattedAction;
         });
       
       // Filter: If there's only one unique firm, only keep the most recent action from that firm
@@ -2819,21 +2845,40 @@ function formatEarningsDate(dateString: string | null | undefined): string {
 }
 
 // Helper function to format date in AP style (e.g., "Jan. 11" or "Jan. 11, 2023")
+// Parses date strings directly from API (YYYY-MM-DD format) - NO timezone conversions
 function formatDateAPStyle(date: Date | string | null, includeYear: boolean = false): string {
   if (!date) return '';
   try {
-    const actionDate = date instanceof Date ? date : new Date(date);
-    if (isNaN(actionDate.getTime())) return '';
+    let year: number, month: number, day: number;
+    
+    // If it's already a Date object, extract components (but this shouldn't happen for API dates)
+    if (date instanceof Date) {
+      year = date.getFullYear();
+      month = date.getMonth();
+      day = date.getDate();
+    } else {
+      // Parse date string directly from API format (YYYY-MM-DD) - NO timezone conversion
+      const dateStr = String(date);
+      const dateMatch = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if (!dateMatch) return '';
+      
+      year = parseInt(dateMatch[1], 10);
+      month = parseInt(dateMatch[2], 10) - 1; // Month is 0-indexed in JS
+      day = parseInt(dateMatch[3], 10);
+      
+      // Validate parsed values
+      if (isNaN(year) || isNaN(month) || isNaN(day) || month < 0 || month > 11 || day < 1 || day > 31) {
+        return '';
+      }
+    }
     
     const monthNames = ['Jan.', 'Feb.', 'Mar.', 'Apr.', 'May', 'Jun.', 'Jul.', 'Aug.', 'Sep.', 'Oct.', 'Nov.', 'Dec.'];
-    const month = monthNames[actionDate.getMonth()];
-    const day = actionDate.getDate();
+    const monthName = monthNames[month];
     
     if (includeYear) {
-      const year = actionDate.getFullYear();
-      return `${month} ${day}, ${year}`;
+      return `${monthName} ${day}, ${year}`;
     } else {
-      return `${month} ${day}`;
+      return `${monthName} ${day}`;
     }
   } catch (e) {
     return '';
@@ -3636,10 +3681,13 @@ ${recentAnalystActions.map((action: any) => {
   let dateStr = '';
   if (action.date) {
     try {
-      const actionDate = new Date(action.date);
+      // Use date string directly from API - no Date object conversion (avoids timezone issues)
+      const dateString = String(action.date);
+      // Extract year from date string (YYYY-MM-DD format) to determine if year should be included
+      const dateMatch = dateString.match(/^(\d{4})-/);
       const currentYear = new Date().getFullYear();
-      const actionYear = actionDate.getFullYear();
-      const formattedDate = formatDateAPStyle(actionDate, actionYear < currentYear);
+      const actionYear = dateMatch ? parseInt(dateMatch[1], 10) : currentYear;
+      const formattedDate = formatDateAPStyle(dateString, actionYear < currentYear);
       if (formattedDate) {
         dateStr = ` (${formattedDate})`;
       }
@@ -3670,32 +3718,44 @@ After the "## Section: Earnings & Analyst Outlook" section, include a section an
 CRITICAL FORMATTING: Immediately after the "## Section: Benzinga Edge Rankings" header, add this line: "Below is the <a href=\"https://www.benzinga.com/screener\">Benzinga Edge scorecard</a> for ${simplifyCompanyNameForEdge(data.companyName || data.symbol)}, highlighting its strengths and weaknesses compared to the broader market:"
 
 BENZINGA EDGE RANKINGS DATA:
-- Value Rank: ${edgeRatings.value_rank || 'N/A'}
-- Growth Rank: ${edgeRatings.growth_rank || 'N/A'}
-- Quality Rank: ${edgeRatings.quality_rank || 'N/A'}
-- Momentum Rank: ${edgeRatings.momentum_rank || 'N/A'}
+- Value Rank: ${edgeRatings.value_rank !== null && edgeRatings.value_rank !== undefined && edgeRatings.value_rank !== 0 ? edgeRatings.value_rank.toString() : 'N/A'}
+- Growth Rank: ${edgeRatings.growth_rank !== null && edgeRatings.growth_rank !== undefined && edgeRatings.growth_rank !== 0 ? edgeRatings.growth_rank.toString() : 'N/A'}
+- Quality Rank: ${edgeRatings.quality_rank !== null && edgeRatings.quality_rank !== undefined && edgeRatings.quality_rank !== 0 ? edgeRatings.quality_rank.toString() : 'N/A'}
+- Momentum Rank: ${edgeRatings.momentum_rank !== null && edgeRatings.momentum_rank !== undefined && edgeRatings.momentum_rank !== 0 ? edgeRatings.momentum_rank.toString() : 'N/A'}
 
-CRITICAL: Use the EXACT numbers from the data above. Format scores as [Number]/100 (e.g., "4/100", "83/100").
+CRITICAL: Use the EXACT numbers from the data above. Do NOT convert or multiply the values. Display them exactly as provided:
+- If the value is a decimal (e.g., 0.89), display it as "0.89" - do NOT convert to 89 or multiply by 100
+- If the value is already 0-100 (e.g., 83), display it as "83/100"
+- If a ranking is "N/A", null, undefined, OR if the value is exactly 0 (zero), OMIT IT COMPLETELY from the output - do NOT display it as "0/100" or mention it at all. A value of 0 means no data, not a score of zero.
 
 BENZINGA EDGE SECTION RULES - FORMAT AS "TRADER'S SCORECARD":
 
 1. FORMAT: Use a bulleted list with HTML <ul> and <li> tags, NOT paragraphs. This structured format helps with SEO and Featured Snippets.
 
 2. SCORING LOGIC & LABELS:
+   IMPORTANT: The normal range is 1-100. Scores below 1 are very weak and bearish.
+   
+   For scores BELOW 1 (e.g., 0.89, 0.45, 0.12):
+   - ALWAYS label as "Weak" or "Bearish" - these are very weak scores
+   - A score of 0.89 means the stock is performing poorly, not well
+   
+   For scores 1-100 (normal range):
    - Score > 70: Label as "Strong" or "Bullish"
-   - Score < 30: Label as "Weak" or "Bearish"  
+   - Score < 30: Label as "Weak" or "Bearish"
    - Score 30-70: Label as "Neutral" or "Moderate"
+   
+   CRITICAL: Any score less than 1.0 is very weak and bearish. Do NOT label scores like 0.89 as "Bullish" or "Neutral" - they should be labeled as "Weak" or "Bearish".
 
 3. INTERPRETATION: Do NOT just list the number. Add a 1-sentence interpretation after each score.
 
 4. FORMAT EXAMPLE (use HTML bullets):
-   <ul>
-   <li><strong>Momentum</strong>: Bullish (Score: 83/100) — Stock is outperforming the broader market.</li>
-   <li><strong>Quality</strong>: Solid (Score: 66/100) — Balance sheet remains healthy.</li>
-   <li><strong>Value</strong>: Risk (Score: 4/100) — Trading at a steep premium relative to peers.</li>
-   </ul>
+   - For decimal values (0-1 scale): <li><strong>Momentum</strong>: Bullish (Score: 0.89) — Stock is outperforming the broader market.</li>
+   - For 0-100 scale values: <li><strong>Quality</strong>: Solid (Score: 66/100) — Balance sheet remains healthy.</li>
+   - For low scores: <li><strong>Value</strong>: Risk (Score: 4/100) — Trading at a steep premium relative to peers.</li>
+   
+   IMPORTANT: Display the score exactly as provided in the data above. If it's 0.89, show "0.89" (NOT "0.89/1" or "89/100"). If it's 83, show "83/100". Do NOT convert decimals to whole numbers or multiply by 100.
 
-5. HANDLING N/A: If a ranking is "N/A" or missing (null/undefined), OMIT IT COMPLETELY. Do NOT write "Growth ranking N/A" or mention missing rankings at all. Only include rankings that have actual numeric values.
+5. HANDLING N/A OR ZERO: If a ranking is "N/A", null, undefined, OR if the value is exactly 0 (zero), OMIT IT COMPLETELY. Do NOT write "Quality ranking N/A" or "Quality: Weak (Score: 0/100)" - simply do not include that ranking at all. A value of 0 means no data exists, not a score of zero. Only include rankings that have actual non-zero numeric values.
 
 6. THE VERDICT: After the bullet list, add a 2-sentence summary that synthesizes the rankings and provides actionable insight. Start with "<strong>The Verdict:</strong> ${simplifyCompanyNameForEdge(data.companyName || data.symbol)}'s Benzinga Edge signal reveals..." and continue with the analysis. Example: "<strong>The Verdict:</strong> Tesla's Benzinga Edge signal reveals a classic 'High-Flyer' setup. While the Momentum (83) confirms the strong trend, the extremely low Value (4) score warns that the stock is priced for perfection—investors should ride the trend but use tight stop-losses."
 
@@ -3936,7 +3996,21 @@ Example of INCORRECT first paragraph (DO NOT DO THIS): "**Rocket Lab Corporation
 
 - TECHNICAL ANALYSIS PARAGRAPH 2 (RSI AND MACD): Write a single paragraph that combines: (1) RSI level and interpretation (e.g., "The RSI is at 44.45, which is considered neutral territory"), and (2) MACD status (e.g., "Meanwhile, MACD is below its signal line, indicating bearish pressure on the stock"). Keep this to 2 sentences maximum. STOP AFTER THIS PARAGRAPH.
 
-- TECHNICAL ANALYSIS PARAGRAPH 3 (RSI/MACD SUMMARY): Write a single sentence that summarizes the RSI and MACD signals (e.g., "The combination of neutral RSI and bearish MACD suggests mixed momentum"). Keep this to 1 sentence maximum. STOP AFTER THIS PARAGRAPH.
+- TECHNICAL ANALYSIS PARAGRAPH 3 (RSI/MACD SUMMARY): Write a single sentence that summarizes the RSI and MACD signals using this logic:
+  * RSI < 30 + bullish MACD = "bullish momentum" (oversold with bullish MACD)
+  * RSI 30-50 + bullish MACD = "momentum leaning bullish" (NOT "mixed" - this is bullish)
+  * RSI >= 50 + bullish MACD = "mixed momentum" (neutral/bullish mix)
+  * RSI > 70 + bearish MACD = "bearish momentum" (overbought with bearish MACD)
+  * RSI 50-70 + bearish MACD = "momentum leaning bearish" (NOT "mixed" - this is bearish)
+  * RSI < 50 + bearish MACD = "mixed momentum" (neutral/bearish mix)
+  
+  Examples:
+  - "The combination of oversold RSI (below 30) and bullish MACD suggests bullish momentum"
+  - "RSI in the 30-50 range with bullish MACD indicates momentum leaning bullish"
+  - "The combination of neutral RSI (around 50) and bullish MACD suggests mixed momentum"
+  - "RSI in the 50-70 range with bearish MACD indicates momentum leaning bearish, but nearing overbought territory"
+  
+  Keep this to 1 sentence maximum. STOP AFTER THIS PARAGRAPH.
 
 - KEY LEVELS (MANDATORY): After paragraph 3, you MUST extract and display the key support and resistance levels in a clear, scannable format. Format as bullet points using HTML <ul> and <li> tags:
 <ul>
@@ -4952,10 +5026,13 @@ export async function POST(request: Request) {
                   let dateStr = '';
                   if (action.date) {
                     try {
-                      const actionDate = new Date(action.date);
+                      // Use date string directly from API - no Date object conversion (avoids timezone issues)
+                      const dateString = String(action.date);
+                      // Extract year from date string (YYYY-MM-DD format) to determine if year should be included
+                      const dateMatch = dateString.match(/^(\d{4})-/);
                       const currentYear = new Date().getFullYear();
-                      const actionYear = actionDate.getFullYear();
-                      const formattedDate = formatDateAPStyle(actionDate, actionYear < currentYear);
+                      const actionYear = dateMatch ? parseInt(dateMatch[1], 10) : currentYear;
+                      const formattedDate = formatDateAPStyle(dateString, actionYear < currentYear);
                       if (formattedDate) {
                         dateStr = ` (${formattedDate})`;
                       }
