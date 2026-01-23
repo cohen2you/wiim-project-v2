@@ -1268,6 +1268,78 @@ Do NOT start with "Company X is scheduled to report earnings on [date]." Instead
     ? ' (and after the source citation paragraph)'
     : '';
   
+  // Build "What to Expect" section content to avoid nested template literal issues
+  const peRatioValuationLine = peRatio !== null 
+    ? `<li><strong>Valuation</strong>: ${useForwardPE ? 'Forward' : ''} P/E of ${peRatio.toFixed(1)}x - explain what this means for the narrative: "${peRatio > 25 ? 'Premium' : peRatio < 15 ? 'Value' : 'Fair'} valuation suggests investors are [betting on/challenging] [the central thesis]"</li>`
+    : '';
+  
+  const ivRankText = ivRank !== null ? ` (IV Rank: ${ivRank.toFixed(0)}%)` : '';
+  const ivInterpretation = impliedVolatility !== null 
+    ? (impliedVolatility > 40 ? 'suggesting high uncertainty and potential for outsized moves' : impliedVolatility > 25 ? 'indicating moderate expectations for price swings' : 'reflecting relatively calm market expectations')
+    : '';
+  
+  const impliedVolatilityLine = impliedVolatility !== null
+    ? `<li><strong>Implied Volatility</strong>: ${impliedVolatility.toFixed(1)}%${ivRankText} - Options traders are pricing in significant expected price movement, ${ivInterpretation}</li>`
+    : '';
+  
+  const peRatioValuationLineSimple = peRatio !== null
+    ? `<li><strong>Valuation</strong>: ${useForwardPE ? 'Forward' : ''} P/E of ${peRatio.toFixed(1)}x (Indicates ${peRatio > 25 ? 'premium valuation' : peRatio < 15 ? 'value opportunity' : 'fair valuation'})</li>`
+    : '';
+  
+  const ivInterpretationSimple = impliedVolatility !== null
+    ? (impliedVolatility > 40 ? 'High IV suggests options traders expect significant price movement' : impliedVolatility > 25 ? 'Moderate IV indicates expected price swings around earnings' : 'Lower IV reflects relatively calm market expectations')
+    : '';
+  
+  const impliedVolatilityLineSimple = impliedVolatility !== null
+    ? `<li><strong>Implied Volatility</strong>: ${impliedVolatility.toFixed(1)}%${ivRankText} - ${ivInterpretationSimple}</li>`
+    : '';
+  
+  const whatToExpectWithContext = `- CRITICAL: Do NOT just list numbers. Synthesize the data into the narrative established in the lead paragraph.
+   - Start with ONE sentence that connects the earnings date to the central challenge/opportunity from the Context Dossier.
+   - Format earnings data as HTML bullet points, but frame each metric in context of the narrative:
+     <ul>
+     <li><strong>EPS Estimate</strong>: $X.XX (Up/Down from $X.XX YoY) - but frame it: "EPS expectations of $X.XX represent [what this means for the challenge/opportunity]"</li>
+     <li><strong>Revenue Estimate</strong>: $X.XX billion/million (Up/Down from $X.XX billion/million YoY) - connect to the narrative: "Revenue of $X.XX would validate/invalidate [the central thesis from Context Dossier]"</li>
+     ${peRatioValuationLine}
+     ${impliedVolatilityLine}
+     </ul>
+   - Every number should answer "Why does this matter for the story?"`;
+  
+  const whatToExpectWithoutContext = `- Start with ONE introductory sentence referencing the earnings date
+   - Format earnings data as HTML bullet points with bold labels:
+     <ul>
+     <li><strong>EPS Estimate</strong>: $X.XX (Up/Down from $X.XX YoY)</li>
+     <li><strong>Revenue Estimate</strong>: $X.XX billion/million (Up/Down from $X.XX billion/million YoY)</li>
+     ${peRatioValuationLineSimple}
+     ${impliedVolatilityLineSimple}
+     </ul>`;
+  
+  const whatToExpectContent = contextBrief ? whatToExpectWithContext : whatToExpectWithoutContext;
+  
+  // Build Historical Performance section content to avoid nested template literal issues
+  const historicalPerformanceBeatMissSentence = historicalEarnings && historicalEarnings.beats + historicalEarnings.misses > 0
+    ? `- Start with a sentence using the ACTUAL beat/miss record from above: "The company has beat estimates in ${historicalEarnings.beats} of the last ${historicalEarnings.quarters.length} quarters"${historicalEarnings.avg_eps_surprise !== null && Math.abs(historicalEarnings.avg_eps_surprise) >= 0.1 ? ` with an average EPS surprise of ${historicalEarnings.avg_eps_surprise > 0 ? '+' : ''}${historicalEarnings.avg_eps_surprise.toFixed(1)}%` : ''}.`
+    : `- Start by referencing the quarterly data provided above. Mention trends in estimates over recent quarters (e.g., "EPS estimates have shown improvement from $-0.10 to $-0.09" or "Revenue estimates indicate steady growth").`;
+  
+  const historicalPerformanceDetailedAnalysis = historicalEarnings && historicalEarnings.quarters && historicalEarnings.quarters.length > 0
+    ? `- Provide detailed analysis using specific quarters from the quarterly breakdown above. Reference at least 2-3 specific quarters with actual numbers (dates, EPS estimates/actuals, revenue estimates/actuals). Analyze trends - are estimates improving or declining? Are there patterns in beats/misses? How has revenue growth trended?
+   - Add context about what the historical data suggests for the upcoming earnings (e.g., "Given the pattern of [beats/misses], investors should watch for..." or "The trend in revenue estimates suggests...")
+   - Reference the most recent quarter specifically with all relevant data points
+   `
+    : '';
+  
+  const historicalPerformanceContent = historicalEarnings && historicalEarnings.quarters && historicalEarnings.quarters.length > 0
+    ? `5. **SECTION: Historical Performance** (MANDATORY - CRITICAL: Historical data has been provided above and you MUST use it):
+   - CRITICAL INSTRUCTION: The "HISTORICAL EARNINGS PERFORMANCE" section above contains DATA with specific quarterly results (actuals and/or estimates). You MUST use this data. Do NOT write "specific historical performance data is not provided" or similar phrases - the data IS provided above.
+   - Add a new section "## Section: Historical Performance" after "What to Expect"
+   ${historicalPerformanceBeatMissSentence}
+   ${historicalPerformanceDetailedAnalysis}
+   - Provide analysis and context, not just raw numbers
+   - Keep this section to 3-4 sentences but ensure it includes specific data points and meaningful analysis
+
+`
+    : '';
+  
   if (consensusRatings && recentAnalystActions && recentAnalystActions.length > 0) {
     analystSectionNumber = '6. **SECTION: Analyst Sentiment**:';
     const analystActionsList = recentAnalystActions.map((action: any) => {
@@ -1419,36 +1491,9 @@ CRITICAL STRUCTURAL REQUIREMENTS:
    - Insert "## Section: Price Action" immediately before the automatically-generated price action line
 
 4. **SECTION: What to Expect**:
-   ${contextBrief ? `- CRITICAL: Do NOT just list numbers. Synthesize the data into the narrative established in the lead paragraph.
-   - Start with ONE sentence that connects the earnings date to the central challenge/opportunity from the Context Dossier.
-   - Format earnings data as HTML bullet points, but frame each metric in context of the narrative:
-     <ul>
-     <li><strong>EPS Estimate</strong>: $X.XX (Up/Down from $X.XX YoY) - but frame it: "EPS expectations of $X.XX represent [what this means for the challenge/opportunity]"</li>
-     <li><strong>Revenue Estimate</strong>: $X.XX billion/million (Up/Down from $X.XX billion/million YoY) - connect to the narrative: "Revenue of $X.XX would validate/invalidate [the central thesis from Context Dossier]"</li>
-     ${peRatio !== null ? `<li><strong>Valuation</strong>: ${useForwardPE ? 'Forward' : ''} P/E of ${peRatio.toFixed(1)}x - explain what this means for the narrative: "${peRatio > 25 ? 'Premium' : peRatio < 15 ? 'Value' : 'Fair'} valuation suggests investors are [betting on/challenging] [the central thesis]"</li>` : ''}
-     ${impliedVolatility !== null ? `<li><strong>Implied Volatility</strong>: ${impliedVolatility.toFixed(1)}%${ivRank !== null ? ` (IV Rank: ${ivRank.toFixed(0)}%)` : ''} - Options traders are pricing in significant expected price movement, ${impliedVolatility > 40 ? 'suggesting high uncertainty and potential for outsized moves' : impliedVolatility > 25 ? 'indicating moderate expectations for price swings' : 'reflecting relatively calm market expectations'}</li>` : ''}
-     </ul>
-   - Every number should answer "Why does this matter for the story?"` : `- Start with ONE introductory sentence referencing the earnings date
-   - Format earnings data as HTML bullet points with bold labels:
-     <ul>
-     <li><strong>EPS Estimate</strong>: $X.XX (Up/Down from $X.XX YoY)</li>
-     <li><strong>Revenue Estimate</strong>: $X.XX billion/million (Up/Down from $X.XX billion/million YoY)</li>
-     ${peRatio !== null ? `<li><strong>Valuation</strong>: ${useForwardPE ? 'Forward' : ''} P/E of ${peRatio.toFixed(1)}x (Indicates ${peRatio > 25 ? 'premium valuation' : peRatio < 15 ? 'value opportunity' : 'fair valuation'})</li>` : ''}
-     ${impliedVolatility !== null ? `<li><strong>Implied Volatility</strong>: ${impliedVolatility.toFixed(1)}%${ivRank !== null ? ` (IV Rank: ${ivRank.toFixed(0)}%)` : ''} - ${impliedVolatility > 40 ? 'High IV suggests options traders expect significant price movement' : impliedVolatility > 25 ? 'Moderate IV indicates expected price swings around earnings' : 'Lower IV reflects relatively calm market expectations'}</li>` : ''}
-     </ul>`}
+   ${whatToExpectContent}
 
-${historicalEarnings && historicalEarnings.quarters && historicalEarnings.quarters.length > 0 ? `5. **SECTION: Historical Performance** (MANDATORY - CRITICAL: Historical data has been provided above and you MUST use it):
-   - CRITICAL INSTRUCTION: The "HISTORICAL EARNINGS PERFORMANCE" section above contains DATA with specific quarterly results (actuals and/or estimates). You MUST use this data. Do NOT write "specific historical performance data is not provided" or similar phrases - the data IS provided above.
-   - Add a new section "## Section: Historical Performance" after "What to Expect"
-   ${historicalEarnings.beats + historicalEarnings.misses > 0 ? `- Start with a sentence using the ACTUAL beat/miss record from above: "The company has beat estimates in ${historicalEarnings.beats} of the last ${historicalEarnings.quarters.length} quarters"${historicalEarnings.avg_eps_surprise !== null && Math.abs(historicalEarnings.avg_eps_surprise) >= 0.1 ? ` with an average EPS surprise of ${historicalEarnings.avg_eps_surprise > 0 ? '+' : ''}${historicalEarnings.avg_eps_surprise.toFixed(1)}%` : ''}.` : `- Start by referencing the quarterly data provided above. Mention trends in estimates over recent quarters (e.g., "EPS estimates have shown improvement from $-0.10 to $-0.09" or "Revenue estimates indicate steady growth").`}
-   ${historicalEarnings.quarters && historicalEarnings.quarters.length > 0 ? `- Provide detailed analysis using specific quarters from the quarterly breakdown above. Reference at least 2-3 specific quarters with actual numbers (dates, EPS estimates/actuals, revenue estimates/actuals). Analyze trends - are estimates improving or declining? Are there patterns in beats/misses? How has revenue growth trended?
-   - Add context about what the historical data suggests for the upcoming earnings (e.g., "Given the pattern of [beats/misses], investors should watch for..." or "The trend in revenue estimates suggests...")
-   - Reference the most recent quarter specifically with all relevant data points
-   ` : ''}
-   - Provide analysis and context, not just raw numbers
-   - Keep this section to 3-4 sentences but ensure it includes specific data points and meaningful analysis
-
-${analystSectionNumber}
+${historicalPerformanceContent}${analystSectionNumber}
    ${analystSectionContent}
 
 ${historicalEarnings && historicalEarnings.quarters && historicalEarnings.quarters.length > 0 ? '7' : '6'}. **SECTION: Key Metrics to Watch**:
