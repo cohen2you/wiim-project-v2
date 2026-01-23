@@ -2642,6 +2642,100 @@ async function fetchRecentAnalystActions(ticker: string, limit: number = 3) {
   }
 }
 
+// Validate analyst data to filter out stale information
+function validateAnalystData(
+  consensusRatings: any,
+  recentAnalystActions: any[],
+  currentPrice: number
+): { isValid: boolean; shouldShowPriceTarget: boolean; reason?: string } {
+  // If no consensus ratings, nothing to validate
+  if (!consensusRatings) {
+    return { isValid: false, shouldShowPriceTarget: false };
+  }
+
+  const priceTarget = consensusRatings.consensus_price_target;
+  const hasPriceTarget = priceTarget !== null && priceTarget !== undefined && !isNaN(parseFloat(priceTarget.toString()));
+
+  // Check if we have recent analyst actions
+  let mostRecentActionDate: Date | null = null;
+  if (recentAnalystActions && recentAnalystActions.length > 0) {
+    // Find the most recent action date
+    const dates = recentAnalystActions
+      .map((action: any) => {
+        if (!action.date) return null;
+        try {
+          // Parse date string (format: YYYY-MM-DD)
+          const dateParts = action.date.split('-');
+          if (dateParts.length === 3) {
+            return new Date(parseInt(dateParts[0]), parseInt(dateParts[1]) - 1, parseInt(dateParts[2]));
+          }
+          return new Date(action.date);
+        } catch (e) {
+          return null;
+        }
+      })
+      .filter((d: Date | null) => d !== null) as Date[];
+    
+    if (dates.length > 0) {
+      mostRecentActionDate = new Date(Math.max(...dates.map(d => d.getTime())));
+    }
+  }
+
+  // Check date freshness: use 6 months as primary cutoff, 12 months for limited coverage
+  const sixMonthsAgo = new Date();
+  sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+  const twelveMonthsAgo = new Date();
+  twelveMonthsAgo.setMonth(twelveMonthsAgo.getMonth() - 12);
+  
+  // Check if coverage is limited (≤2 analysts)
+  const hasLimitedCoverage = (consensusRatings.total_analyst_count || 0) <= 2;
+  
+  // Determine cutoff: 6 months for normal coverage, 12 months for limited coverage
+  const cutoffDate = hasLimitedCoverage ? twelveMonthsAgo : sixMonthsAgo;
+  const cutoffMonths = hasLimitedCoverage ? 12 : 6;
+  
+  const isDataStale = mostRecentActionDate === null || mostRecentActionDate < cutoffDate;
+
+  // Check price target reasonableness
+  let isPriceTargetReasonable = true;
+  if (hasPriceTarget && currentPrice > 0) {
+    const targetNum = parseFloat(priceTarget.toString());
+    const ratio = targetNum / currentPrice;
+    
+    // Price target should be between 0.2x and 10x current price
+    // (10x allows for some growth stocks, but anything beyond is likely stale)
+    if (ratio < 0.2 || ratio > 10) {
+      isPriceTargetReasonable = false;
+    }
+  }
+
+  // If data is stale (no recent actions within cutoff period), omit entire section
+  if (isDataStale) {
+    return {
+      isValid: false, // Don't show any analyst data if all actions are older than cutoff
+      shouldShowPriceTarget: false,
+      reason: mostRecentActionDate 
+        ? `Most recent analyst action is from ${mostRecentActionDate.toLocaleDateString()} (older than ${cutoffMonths} months)`
+        : 'No recent analyst actions found'
+    };
+  }
+
+  // If price target is unreasonable, don't show it but still show rating
+  if (hasPriceTarget && !isPriceTargetReasonable) {
+    return {
+      isValid: true, // Still show rating if available
+      shouldShowPriceTarget: false,
+      reason: `Price target ($${priceTarget}) is ${priceTarget && currentPrice > 0 ? (parseFloat(priceTarget.toString()) / currentPrice).toFixed(1) : 'N/A'}x current price, which is outside reasonable range`
+    };
+  }
+
+  // Data is valid
+  return {
+    isValid: true,
+    shouldShowPriceTarget: hasPriceTarget && isPriceTargetReasonable
+  };
+}
+
 // Fetch consensus ratings from Benzinga
 async function fetchConsensusRatings(ticker: string) {
   try {
@@ -3176,13 +3270,112 @@ async function generateTechnicalAnalysis(data: TechnicalAnalysisData, provider?:
       fetchEdgeRatings(data.symbol)
     ]);
     
-    // Log fetched data for debugging
+    // Validate analyst data to filter out stale information
+    let validatedConsensusRatings = consensusRatings;
     if (consensusRatings) {
+      const validation = validateAnalystData(
+        consensusRatings,
+        recentAnalystActions || [],
+        data.currentPrice
+      );
+      
+      if (validation.reason) {
+        console.log(`[ANALYST VALIDATION] ${validation.reason}`);
+      }
+      
+      // If price target should not be shown, remove it from the consensus ratings object
+      if (!validation.shouldShowPriceTarget && consensusRatings) {
+        validatedConsensusRatings = {
+          ...consensusRatings,
+          consensus_price_target: null,
+          high_price_target: null,
+          low_price_target: null
+        };
+        console.log('[ANALYST VALIDATION] Removed price target due to stale or unreasonable data');
+      }
+      
+      // If data is completely invalid (no rating either), set to null
+      if (!validation.isValid) {
+        validatedConsensusRatings = null;
+        console.log('[ANALYST VALIDATION] Removed entire consensus ratings due to invalid data');
+      }
+    }
+    
+    // Filter out stale analyst actions: 6 months for normal coverage, 12 months for limited coverage (≤2 analysts)
+    let validatedRecentAnalystActions = recentAnalystActions || [];
+    if (validatedRecentAnalystActions.length > 0) {
+      const sixMonthsAgo = new Date();
+      sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+      const twelveMonthsAgo = new Date();
+      twelveMonthsAgo.setMonth(twelveMonthsAgo.getMonth() - 12);
+      
+      // Check if coverage is limited (≤2 analysts) - use original consensusRatings before validation
+      const hasLimitedCoverage = consensusRatings 
+        ? (consensusRatings.total_analyst_count || 0) <= 2
+        : false;
+      
+      // Use 6 months for normal coverage, 12 months for limited coverage
+      const cutoffDateRaw = hasLimitedCoverage ? twelveMonthsAgo : sixMonthsAgo;
+      const cutoffMonths = hasLimitedCoverage ? 12 : 6;
+      
+      // Normalize cutoff date to midnight for accurate comparison (create new date to avoid mutation)
+      const cutoffDate = new Date(cutoffDateRaw);
+      cutoffDate.setHours(0, 0, 0, 0);
+      
+      const initialCount = validatedRecentAnalystActions.length;
+      
+      validatedRecentAnalystActions = validatedRecentAnalystActions.filter((action: any) => {
+        if (!action.date) {
+          console.log(`[ANALYST VALIDATION] Filtering out action with no date:`, action);
+          return false;
+        }
+        
+        try {
+          // Parse date string (format: YYYY-MM-DD)
+          const dateParts = action.date.split('-');
+          let actionDate: Date;
+          if (dateParts.length === 3) {
+            actionDate = new Date(parseInt(dateParts[0]), parseInt(dateParts[1]) - 1, parseInt(dateParts[2]));
+          } else {
+            actionDate = new Date(action.date);
+          }
+          
+          // Normalize action date to midnight for accurate comparison
+          actionDate.setHours(0, 0, 0, 0);
+          
+          const isRecent = actionDate >= cutoffDate;
+          if (!isRecent) {
+            console.log(`[ANALYST VALIDATION] Filtering out stale action: ${action.firm} from ${action.date} (cutoff: ${cutoffDate.toISOString().split('T')[0]})`);
+          }
+          return isRecent;
+        } catch (e) {
+          // If date parsing fails, exclude the action
+          console.log(`[ANALYST VALIDATION] Filtering out action with invalid date format: ${action.date}`, e);
+          return false;
+        }
+      });
+      
+      if (validatedRecentAnalystActions.length < initialCount) {
+        const removedCount = initialCount - validatedRecentAnalystActions.length;
+        console.log(`[ANALYST VALIDATION] Filtered out ${removedCount} stale analyst action(s) older than ${cutoffMonths} months${hasLimitedCoverage ? ' (using 12-month cutoff for limited coverage)' : ''}`);
+      }
+    }
+    
+    // If no recent actions remain after filtering (or none to begin with), invalidate consensus ratings
+    if (validatedRecentAnalystActions.length === 0 && validatedConsensusRatings) {
+      validatedConsensusRatings = null;
+      const hasLimitedCoverage = consensusRatings ? (consensusRatings.total_analyst_count || 0) <= 2 : false;
+      const cutoffMonths = hasLimitedCoverage ? 12 : 6;
+      console.log(`[ANALYST VALIDATION] Removed consensus ratings - no recent analyst actions within ${cutoffMonths} months`);
+    }
+    
+    // Log fetched data for debugging
+    if (validatedConsensusRatings) {
       console.log('[WGO W/ News] Consensus ratings fetched:', {
-        rating: consensusRatings.consensus_rating,
-        priceTarget: consensusRatings.consensus_price_target,
-        buyPercentage: consensusRatings.buy_percentage,
-        totalAnalysts: consensusRatings.total_analyst_count
+        rating: validatedConsensusRatings.consensus_rating,
+        priceTarget: validatedConsensusRatings.consensus_price_target,
+        buyPercentage: validatedConsensusRatings.buy_percentage,
+        totalAnalysts: validatedConsensusRatings.total_analyst_count
       });
     } else {
       console.log('[WGO W/ News] No consensus ratings data available');
@@ -3610,7 +3803,7 @@ ${data.turningPoints?.supportBreakDate ? `- Price broke below support on ${data.
 
 ${!data.turningPoints || Object.keys(data.turningPoints).length === 0 ? '- No significant turning points identified in the past year' : ''}
 
-${consensusRatings || nextEarnings ? `
+${validatedConsensusRatings || nextEarnings ? `
 EARNINGS AND ANALYST OUTLOOK SECTION (forward-looking):
 After the technical analysis section, you MUST include a separate section with the header "## Section: Earnings & Analyst Outlook". This section should be forward-looking and help investors understand both the stock's value proposition and how analysts view it.
 
@@ -3629,7 +3822,7 @@ CRITICAL INSTRUCTIONS FOR THIS SECTION:
   </ul>
   
   <strong>Analyst Consensus & Recent Actions:</strong>
-  The stock carries a ${consensusRatings?.consensus_rating ? consensusRatings.consensus_rating.charAt(0) + consensusRatings.consensus_rating.slice(1).toLowerCase() : 'N/A'} Rating with an <a href="https://www.benzinga.com/quote/${data.symbol}/analyst-ratings">average price target</a> of $${consensusRatings?.consensus_price_target ? parseFloat(consensusRatings.consensus_price_target.toString()).toFixed(2) : 'N/A'}. ${recentAnalystActions && recentAnalystActions.length > 0 ? `Recent analyst moves include:\n${recentAnalystActions.map((action: any) => {
+  The stock carries a ${validatedConsensusRatings?.consensus_rating ? validatedConsensusRatings.consensus_rating.charAt(0) + validatedConsensusRatings.consensus_rating.slice(1).toLowerCase() : 'N/A'} Rating${validatedConsensusRatings?.consensus_price_target ? ` with an <a href="https://www.benzinga.com/quote/${data.symbol}/analyst-ratings">average price target</a> of $${parseFloat(validatedConsensusRatings.consensus_price_target.toString()).toFixed(2)}` : ''}. ${validatedRecentAnalystActions && validatedRecentAnalystActions.length > 0 ? `Recent analyst moves include:\n${validatedRecentAnalystActions.map((action: any) => {
     let dateStr = '';
     if (action.date) {
       try {
@@ -3657,16 +3850,16 @@ ${typeof nextEarnings === 'object' && nextEarnings && 'revenue_prior' in nextEar
 
 ` : ''}
 
-${consensusRatings ? `
+${validatedConsensusRatings ? `
 ANALYST OUTLOOK DATA:
-- Consensus Rating: ${consensusRatings.consensus_rating ? consensusRatings.consensus_rating.charAt(0) + consensusRatings.consensus_rating.slice(1).toLowerCase() : 'N/A'}
-- Consensus Price Target: ${consensusRatings.consensus_price_target ? '$' + parseFloat(consensusRatings.consensus_price_target.toString()).toFixed(2) : 'N/A'}
-${consensusRatings.high_price_target ? `- High Price Target: $${parseFloat(consensusRatings.high_price_target.toString()).toFixed(2)}` : ''}
-${consensusRatings.low_price_target ? `- Low Price Target: $${parseFloat(consensusRatings.low_price_target.toString()).toFixed(2)}` : ''}
-${consensusRatings.total_analyst_count ? `- Total Analysts: ${consensusRatings.total_analyst_count}` : ''}
-${consensusRatings.buy_percentage ? `- Buy Rating: ${parseFloat(consensusRatings.buy_percentage.toString()).toFixed(1)}%` : ''}
-${consensusRatings.hold_percentage ? `- Hold Rating: ${parseFloat(consensusRatings.hold_percentage.toString()).toFixed(1)}%` : ''}
-${consensusRatings.sell_percentage ? `- Sell Rating: ${parseFloat(consensusRatings.sell_percentage.toString()).toFixed(1)}%` : ''}
+- Consensus Rating: ${validatedConsensusRatings.consensus_rating ? validatedConsensusRatings.consensus_rating.charAt(0) + validatedConsensusRatings.consensus_rating.slice(1).toLowerCase() : 'N/A'}
+- Consensus Price Target: ${validatedConsensusRatings.consensus_price_target ? '$' + parseFloat(validatedConsensusRatings.consensus_price_target.toString()).toFixed(2) : 'N/A'}
+${validatedConsensusRatings.high_price_target ? `- High Price Target: $${parseFloat(validatedConsensusRatings.high_price_target.toString()).toFixed(2)}` : ''}
+${validatedConsensusRatings.low_price_target ? `- Low Price Target: $${parseFloat(validatedConsensusRatings.low_price_target.toString()).toFixed(2)}` : ''}
+${validatedConsensusRatings.total_analyst_count ? `- Total Analysts: ${validatedConsensusRatings.total_analyst_count}` : ''}
+${validatedConsensusRatings.buy_percentage ? `- Buy Rating: ${parseFloat(validatedConsensusRatings.buy_percentage.toString()).toFixed(1)}%` : ''}
+${validatedConsensusRatings.hold_percentage ? `- Hold Rating: ${parseFloat(validatedConsensusRatings.hold_percentage.toString()).toFixed(1)}%` : ''}
+${validatedConsensusRatings.sell_percentage ? `- Sell Rating: ${parseFloat(validatedConsensusRatings.sell_percentage.toString()).toFixed(1)}%` : ''}
 ` : ''}
 
 ${peRatio !== null ? `
@@ -3675,9 +3868,9 @@ P/E RATIO CONTEXT:
 - Valuation Assessment: ${peRatio > 25 ? 'Indicates premium valuation' : peRatio < 15 ? 'Indicates value opportunity' : 'Suggests fair valuation'} relative to peers
 ` : ''}
 
-${recentAnalystActions && recentAnalystActions.length > 0 ? `
+${validatedRecentAnalystActions && validatedRecentAnalystActions.length > 0 ? `
 RECENT ANALYST ACTIONS (Last 3 Major Actions):
-${recentAnalystActions.map((action: any) => {
+${validatedRecentAnalystActions.map((action: any) => {
   let dateStr = '';
   if (action.date) {
     try {
@@ -3786,16 +3979,16 @@ When earnings estimates ARE available, ALWAYS compare them to the same quarter f
 EXAMPLE APPROACH (adapt based on available data):
 ${nextEarnings && consensusRatings && peRatio !== null ? `
 "Investors are looking ahead to the company's next earnings report, scheduled for ${typeof nextEarnings === 'object' && nextEarnings.date ? formatEarningsDate(nextEarnings.date) : nextEarningsDate ? formatEarningsDate(nextEarningsDate) : 'a date to be announced'}, with analysts expecting earnings per share of $${typeof nextEarnings === 'object' && nextEarnings.eps_estimate ? parseFloat(nextEarnings.eps_estimate.toString()).toFixed(2) : 'N/A'}${typeof nextEarnings === 'object' && nextEarnings.eps_prior ? `, ${parseFloat(nextEarnings.eps_estimate?.toString() || '0') > parseFloat(nextEarnings.eps_prior.toString()) ? 'up from' : parseFloat(nextEarnings.eps_estimate?.toString() || '0') < parseFloat(nextEarnings.eps_prior.toString()) ? 'down from' : 'compared to'} $${parseFloat(nextEarnings.eps_prior.toString()).toFixed(2)} from the same quarter last year` : ''}${typeof nextEarnings === 'object' && nextEarnings && 'revenue_estimate' in nextEarnings && 'revenue_prior' in nextEarnings && nextEarnings.revenue_estimate && nextEarnings.revenue_prior ? ` and revenue of ${formatRevenue(nextEarnings.revenue_estimate as string | number | null)}${parseFloat((nextEarnings.revenue_estimate as string | number).toString()) > parseFloat((nextEarnings.revenue_prior as string | number).toString()) ? ', up from' : parseFloat((nextEarnings.revenue_estimate as string | number).toString()) < parseFloat((nextEarnings.revenue_prior as string | number).toString()) ? ', down from' : ', compared to'} ${formatRevenue(nextEarnings.revenue_prior as string | number | null)} from the same quarter last year` : ''}. ${data.companyName || data.symbol} has a consensus ${consensusRatings.consensus_rating ? consensusRatings.consensus_rating.charAt(0) + consensusRatings.consensus_rating.slice(1).toLowerCase() : 'N/A'} rating among analysts${consensusRatings.consensus_price_target ? ` with an average price target of $${parseFloat(consensusRatings.consensus_price_target.toString()).toFixed(2)}` : ''}, which ${peRatio > 25 ? 'suggests the stock may be trading at a premium' : peRatio < 15 ? 'suggests the stock may offer value' : 'aligns with current valuation levels'}. ${consensusRatings.buy_percentage && parseFloat(consensusRatings.buy_percentage.toString()) > 50 ? `The analyst community is largely bullish, with ${parseFloat(consensusRatings.buy_percentage.toString()).toFixed(0)}% buy ratings, ` : consensusRatings.hold_percentage && parseFloat(consensusRatings.hold_percentage.toString()) > 50 ? `Analysts are cautious, with ${parseFloat(consensusRatings.hold_percentage.toString()).toFixed(0)}% hold ratings, ` : ''}${consensusRatings.total_analyst_count ? `with ${consensusRatings.total_analyst_count} analysts covering the stock.` : 'as investors await the earnings results.'}"
-` : nextEarnings && consensusRatings ? `
-"Investors are looking ahead to the company's next earnings report, scheduled for ${typeof nextEarnings === 'object' && nextEarnings.date ? formatEarningsDate(nextEarnings.date) : nextEarningsDate ? formatEarningsDate(nextEarningsDate) : 'a date to be announced'}, with analysts expecting earnings per share of $${typeof nextEarnings === 'object' && nextEarnings.eps_estimate ? parseFloat(nextEarnings.eps_estimate.toString()).toFixed(2) : 'N/A'}${typeof nextEarnings === 'object' && nextEarnings.eps_prior ? `, ${parseFloat(nextEarnings.eps_estimate?.toString() || '0') > parseFloat(nextEarnings.eps_prior.toString()) ? 'up from' : parseFloat(nextEarnings.eps_estimate?.toString() || '0') < parseFloat(nextEarnings.eps_prior.toString()) ? 'down from' : 'compared to'} $${parseFloat(nextEarnings.eps_prior.toString()).toFixed(2)} from the same quarter last year` : ''}${typeof nextEarnings === 'object' && nextEarnings && 'revenue_estimate' in nextEarnings && 'revenue_prior' in nextEarnings && nextEarnings.revenue_estimate && nextEarnings.revenue_prior ? ` and revenue of ${formatRevenue(nextEarnings.revenue_estimate as string | number | null)}${parseFloat((nextEarnings.revenue_estimate as string | number).toString()) > parseFloat((nextEarnings.revenue_prior as string | number).toString()) ? ', up from' : parseFloat((nextEarnings.revenue_estimate as string | number).toString()) < parseFloat((nextEarnings.revenue_prior as string | number).toString()) ? ', down from' : ', compared to'} ${formatRevenue(nextEarnings.revenue_prior as string | number | null)} from the same quarter last year` : ''}. ${data.companyName || data.symbol} has a consensus ${consensusRatings.consensus_rating ? consensusRatings.consensus_rating.charAt(0) + consensusRatings.consensus_rating.slice(1).toLowerCase() : 'N/A'} rating among analysts${consensusRatings.consensus_price_target ? ` with an average price target of $${parseFloat(consensusRatings.consensus_price_target.toString()).toFixed(2)}` : ''}, ${consensusRatings.buy_percentage && parseFloat(consensusRatings.buy_percentage.toString()) > 50 ? `reflecting a bullish outlook from the analyst community with ${parseFloat(consensusRatings.buy_percentage.toString()).toFixed(0)}% buy ratings.` : consensusRatings.hold_percentage && parseFloat(consensusRatings.hold_percentage.toString()) > 50 ? `reflecting a cautious stance with ${parseFloat(consensusRatings.hold_percentage.toString()).toFixed(0)}% hold ratings.` : 'as investors monitor the stock ahead of the earnings release.'}"
-` : consensusRatings && peRatio !== null ? `
-"${data.companyName || data.symbol} has a consensus ${consensusRatings.consensus_rating ? consensusRatings.consensus_rating.charAt(0) + consensusRatings.consensus_rating.slice(1).toLowerCase() : 'N/A'} rating among analysts${consensusRatings.consensus_price_target ? ` with an average price target of $${parseFloat(consensusRatings.consensus_price_target.toString()).toFixed(2)}` : ''}, which ${peRatio > 25 ? 'suggests the stock may be trading at a premium relative to analyst expectations' : peRatio < 15 ? 'suggests the stock may offer value relative to analyst expectations' : 'aligns with current valuation levels'}. ${consensusRatings.buy_percentage && parseFloat(consensusRatings.buy_percentage.toString()) > 50 ? `The analyst community is largely bullish, with ${parseFloat(consensusRatings.buy_percentage.toString()).toFixed(0)}% buy ratings, ` : consensusRatings.hold_percentage && parseFloat(consensusRatings.hold_percentage.toString()) > 50 ? `Analysts are cautious, with ${parseFloat(consensusRatings.hold_percentage.toString()).toFixed(0)}% hold ratings, ` : ''}${consensusRatings.total_analyst_count ? `with ${consensusRatings.total_analyst_count} analysts covering the stock.` : 'as investors evaluate the stock\'s prospects.'}"
+` : nextEarnings && validatedConsensusRatings ? `
+"Investors are looking ahead to the company's next earnings report, scheduled for ${typeof nextEarnings === 'object' && nextEarnings.date ? formatEarningsDate(nextEarnings.date) : nextEarningsDate ? formatEarningsDate(nextEarningsDate) : 'a date to be announced'}, with analysts expecting earnings per share of $${typeof nextEarnings === 'object' && nextEarnings.eps_estimate ? parseFloat(nextEarnings.eps_estimate.toString()).toFixed(2) : 'N/A'}${typeof nextEarnings === 'object' && nextEarnings.eps_prior ? `, ${parseFloat(nextEarnings.eps_estimate?.toString() || '0') > parseFloat(nextEarnings.eps_prior.toString()) ? 'up from' : parseFloat(nextEarnings.eps_estimate?.toString() || '0') < parseFloat(nextEarnings.eps_prior.toString()) ? 'down from' : 'compared to'} $${parseFloat(nextEarnings.eps_prior.toString()).toFixed(2)} from the same quarter last year` : ''}${typeof nextEarnings === 'object' && nextEarnings && 'revenue_estimate' in nextEarnings && 'revenue_prior' in nextEarnings && nextEarnings.revenue_estimate && nextEarnings.revenue_prior ? ` and revenue of ${formatRevenue(nextEarnings.revenue_estimate as string | number | null)}${parseFloat((nextEarnings.revenue_estimate as string | number).toString()) > parseFloat((nextEarnings.revenue_prior as string | number).toString()) ? ', up from' : parseFloat((nextEarnings.revenue_estimate as string | number).toString()) < parseFloat((nextEarnings.revenue_prior as string | number).toString()) ? ', down from' : ', compared to'} ${formatRevenue(nextEarnings.revenue_prior as string | number | null)} from the same quarter last year` : ''}. ${data.companyName || data.symbol} has a consensus ${validatedConsensusRatings.consensus_rating ? validatedConsensusRatings.consensus_rating.charAt(0) + validatedConsensusRatings.consensus_rating.slice(1).toLowerCase() : 'N/A'} rating among analysts${validatedConsensusRatings.consensus_price_target ? ` with an average price target of $${parseFloat(validatedConsensusRatings.consensus_price_target.toString()).toFixed(2)}` : ''}, ${validatedConsensusRatings.buy_percentage && parseFloat(validatedConsensusRatings.buy_percentage.toString()) > 50 ? `reflecting a bullish outlook from the analyst community with ${parseFloat(validatedConsensusRatings.buy_percentage.toString()).toFixed(0)}% buy ratings.` : validatedConsensusRatings.hold_percentage && parseFloat(validatedConsensusRatings.hold_percentage.toString()) > 50 ? `reflecting a cautious stance with ${parseFloat(validatedConsensusRatings.hold_percentage.toString()).toFixed(0)}% hold ratings.` : 'as investors monitor the stock ahead of the earnings release.'}"
+` : validatedConsensusRatings && peRatio !== null ? `
+"${data.companyName || data.symbol} has a consensus ${validatedConsensusRatings.consensus_rating ? validatedConsensusRatings.consensus_rating.charAt(0) + validatedConsensusRatings.consensus_rating.slice(1).toLowerCase() : 'N/A'} rating among analysts${validatedConsensusRatings.consensus_price_target ? ` with an average price target of $${parseFloat(validatedConsensusRatings.consensus_price_target.toString()).toFixed(2)}` : ''}, which ${peRatio > 25 ? 'suggests the stock may be trading at a premium relative to analyst expectations' : peRatio < 15 ? 'suggests the stock may offer value relative to analyst expectations' : 'aligns with current valuation levels'}. ${validatedConsensusRatings.buy_percentage && parseFloat(validatedConsensusRatings.buy_percentage.toString()) > 50 ? `The analyst community is largely bullish, with ${parseFloat(validatedConsensusRatings.buy_percentage.toString()).toFixed(0)}% buy ratings, ` : validatedConsensusRatings.hold_percentage && parseFloat(validatedConsensusRatings.hold_percentage.toString()) > 50 ? `Analysts are cautious, with ${parseFloat(validatedConsensusRatings.hold_percentage.toString()).toFixed(0)}% hold ratings, ` : ''}${validatedConsensusRatings.total_analyst_count ? `with ${validatedConsensusRatings.total_analyst_count} analysts covering the stock.` : 'as investors evaluate the stock\'s prospects.'}"
 ` : nextEarnings && peRatio !== null ? `
 "Investors are looking ahead to the company's next earnings report, scheduled for ${typeof nextEarnings === 'object' && nextEarnings.date ? formatEarningsDate(nextEarnings.date) : nextEarningsDate ? formatEarningsDate(nextEarningsDate) : 'a date to be announced'}, with analysts expecting earnings per share of $${typeof nextEarnings === 'object' && nextEarnings.eps_estimate ? parseFloat(nextEarnings.eps_estimate.toString()).toFixed(2) : 'N/A'}${typeof nextEarnings === 'object' && nextEarnings.eps_prior ? `, ${parseFloat(nextEarnings.eps_estimate?.toString() || '0') > parseFloat(nextEarnings.eps_prior.toString()) ? 'up from' : parseFloat(nextEarnings.eps_estimate?.toString() || '0') < parseFloat(nextEarnings.eps_prior.toString()) ? 'down from' : 'compared to'} $${parseFloat(nextEarnings.eps_prior.toString()).toFixed(2)} from the same quarter last year` : ''}${typeof nextEarnings === 'object' && nextEarnings && 'revenue_estimate' in nextEarnings && 'revenue_prior' in nextEarnings && nextEarnings.revenue_estimate && nextEarnings.revenue_prior ? ` and revenue of ${formatRevenue(nextEarnings.revenue_estimate as string | number | null)}${parseFloat((nextEarnings.revenue_estimate as string | number).toString()) > parseFloat((nextEarnings.revenue_prior as string | number).toString()) ? ', up from' : parseFloat((nextEarnings.revenue_estimate as string | number).toString()) < parseFloat((nextEarnings.revenue_prior as string | number).toString()) ? ', down from' : ', compared to'} ${formatRevenue(nextEarnings.revenue_prior as string | number | null)} from the same quarter last year` : ''}. At current levels, the P/E ratio of ${peRatio.toFixed(1)} ${peRatio > 25 ? 'suggests the stock may be overvalued relative to peers' : peRatio < 15 ? 'suggests the stock may offer value relative to peers' : 'suggests the stock is fairly valued relative to peers'}, which investors will be watching closely as earnings approach."
 ` : nextEarnings ? `
 "Investors are looking ahead to the company's next earnings report, scheduled for ${typeof nextEarnings === 'object' && nextEarnings.date ? formatEarningsDate(nextEarnings.date) : nextEarningsDate ? formatEarningsDate(nextEarningsDate) : 'a date to be announced'}, ${typeof nextEarnings === 'object' && nextEarnings.eps_estimate ? `with analysts expecting earnings per share of $${parseFloat(nextEarnings.eps_estimate.toString()).toFixed(2)}${typeof nextEarnings === 'object' && nextEarnings.eps_prior ? `, ${parseFloat(nextEarnings.eps_estimate.toString()) > parseFloat(nextEarnings.eps_prior.toString()) ? 'up from' : parseFloat(nextEarnings.eps_estimate.toString()) < parseFloat(nextEarnings.eps_prior.toString()) ? 'down from' : 'compared to'} $${parseFloat(nextEarnings.eps_prior.toString()).toFixed(2)} from the same quarter last year` : ''}${typeof nextEarnings === 'object' && nextEarnings && 'revenue_estimate' in nextEarnings && 'revenue_prior' in nextEarnings && nextEarnings.revenue_estimate && nextEarnings.revenue_prior ? ` and revenue of ${formatRevenue(nextEarnings.revenue_estimate as string | number | null)}${parseFloat((nextEarnings.revenue_estimate as string | number).toString()) > parseFloat((nextEarnings.revenue_prior as string | number).toString()) ? ', up from' : parseFloat((nextEarnings.revenue_estimate as string | number).toString()) < parseFloat((nextEarnings.revenue_prior as string | number).toString()) ? ', down from' : ', compared to'} ${formatRevenue(nextEarnings.revenue_prior as string | number | null)} from the same quarter last year` : ''}.` : 'which will provide key insights into the company\'s financial performance and outlook.'}"
-` : consensusRatings ? `
-"${data.companyName || data.symbol} has a consensus ${consensusRatings.consensus_rating ? consensusRatings.consensus_rating.charAt(0) + consensusRatings.consensus_rating.slice(1).toLowerCase() : 'N/A'} rating among analysts${consensusRatings.consensus_price_target ? ` with an average price target of $${parseFloat(consensusRatings.consensus_price_target.toString()).toFixed(2)}` : ''}, ${consensusRatings.buy_percentage && parseFloat(consensusRatings.buy_percentage.toString()) > 50 ? `reflecting a bullish outlook from the analyst community with ${parseFloat(consensusRatings.buy_percentage.toString()).toFixed(0)}% buy ratings.` : consensusRatings.hold_percentage && parseFloat(consensusRatings.hold_percentage.toString()) > 50 ? `reflecting a cautious stance with ${parseFloat(consensusRatings.hold_percentage.toString()).toFixed(0)}% hold ratings.` : 'as analysts monitor the stock\'s performance.'} ${consensusRatings.total_analyst_count ? `${consensusRatings.total_analyst_count} analysts are currently covering the stock.` : ''}"
+` : validatedConsensusRatings ? `
+"${data.companyName || data.symbol} has a consensus ${validatedConsensusRatings.consensus_rating ? validatedConsensusRatings.consensus_rating.charAt(0) + validatedConsensusRatings.consensus_rating.slice(1).toLowerCase() : 'N/A'} rating among analysts${validatedConsensusRatings.consensus_price_target ? ` with an average price target of $${parseFloat(validatedConsensusRatings.consensus_price_target.toString()).toFixed(2)}` : ''}, ${validatedConsensusRatings.buy_percentage && parseFloat(validatedConsensusRatings.buy_percentage.toString()) > 50 ? `reflecting a bullish outlook from the analyst community with ${parseFloat(validatedConsensusRatings.buy_percentage.toString()).toFixed(0)}% buy ratings.` : validatedConsensusRatings.hold_percentage && parseFloat(validatedConsensusRatings.hold_percentage.toString()) > 50 ? `reflecting a cautious stance with ${parseFloat(validatedConsensusRatings.hold_percentage.toString()).toFixed(0)}% hold ratings.` : 'as analysts monitor the stock\'s performance.'} ${validatedConsensusRatings.total_analyst_count ? `${validatedConsensusRatings.total_analyst_count} analysts are currently covering the stock.` : ''}"
 ` : ''}
 ` : ''}
 
@@ -4785,6 +4978,7 @@ export async function POST(request: Request) {
           let peRatioForPost: number | null = null;
           let useForwardPEForPost = false;
           let recentAnalystActionsForPost: any[] = [];
+          let consensusRatingsForPost: any = null;
           
           try {
             const BENZINGA_API_KEY = process.env.BENZINGA_API_KEY;
@@ -4801,6 +4995,67 @@ export async function POST(request: Request) {
               
               // Fetch recent analyst actions
               recentAnalystActionsForPost = await fetchRecentAnalystActions(ticker, 3);
+              
+              // Fetch consensus ratings for validation (to check for limited coverage)
+              consensusRatingsForPost = await fetchConsensusRatings(ticker);
+              
+              // Apply validation to filter out stale analyst actions
+              if (recentAnalystActionsForPost.length > 0 && technicalData) {
+                const sixMonthsAgo = new Date();
+                sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+                const twelveMonthsAgo = new Date();
+                twelveMonthsAgo.setMonth(twelveMonthsAgo.getMonth() - 12);
+                
+                // Check if coverage is limited (≤2 analysts)
+                const hasLimitedCoverage = consensusRatingsForPost 
+                  ? (consensusRatingsForPost.total_analyst_count || 0) <= 2
+                  : false;
+                
+                // Use 6 months for normal coverage, 12 months for limited coverage
+                const cutoffDateRaw = hasLimitedCoverage ? twelveMonthsAgo : sixMonthsAgo;
+                const cutoffMonths = hasLimitedCoverage ? 12 : 6;
+                
+                // Normalize cutoff date to midnight for accurate comparison
+                const cutoffDate = new Date(cutoffDateRaw);
+                cutoffDate.setHours(0, 0, 0, 0);
+                
+                const initialCount = recentAnalystActionsForPost.length;
+                recentAnalystActionsForPost = recentAnalystActionsForPost.filter((action: any) => {
+                  if (!action.date) {
+                    console.log(`[EARNINGS FORMAT] [ANALYST VALIDATION] ${ticker}: Filtering out action with no date:`, action);
+                    return false;
+                  }
+                  
+                  try {
+                    // Parse date string (format: YYYY-MM-DD)
+                    const dateParts = action.date.split('-');
+                    let actionDate: Date;
+                    if (dateParts.length === 3) {
+                      actionDate = new Date(parseInt(dateParts[0]), parseInt(dateParts[1]) - 1, parseInt(dateParts[2]));
+                    } else {
+                      actionDate = new Date(action.date);
+                    }
+                    
+                    // Normalize action date to midnight for accurate comparison
+                    actionDate.setHours(0, 0, 0, 0);
+                    
+                    const isRecent = actionDate >= cutoffDate;
+                    if (!isRecent) {
+                      console.log(`[EARNINGS FORMAT] [ANALYST VALIDATION] ${ticker}: Filtering out stale action: ${action.firm} from ${action.date} (cutoff: ${cutoffDate.toISOString().split('T')[0]})`);
+                    }
+                    return isRecent;
+                  } catch (e) {
+                    // If date parsing fails, exclude the action
+                    console.log(`[EARNINGS FORMAT] [ANALYST VALIDATION] ${ticker}: Filtering out action with invalid date format: ${action.date}`, e);
+                    return false;
+                  }
+                });
+                
+                if (recentAnalystActionsForPost.length < initialCount) {
+                  const removedCount = initialCount - recentAnalystActionsForPost.length;
+                  console.log(`[EARNINGS FORMAT] [ANALYST VALIDATION] ${ticker}: Filtered out ${removedCount} stale analyst action(s) older than ${cutoffMonths} months${hasLimitedCoverage ? ' (using 12-month cutoff for limited coverage)' : ''}`);
+                }
+              }
               
               // Fetch earnings data for post-processing (we'll use this for revenue formatting too)
               const nextEarningsCheck = await fetchNextEarningsDate(ticker);
@@ -5026,10 +5281,31 @@ export async function POST(request: Request) {
               }
               
               // Extract consensus data for "Analyst Consensus & Recent Actions" subsection
-              const ratingValue = extractedRating || (consensusRatingMatch ? consensusRatingMatch[1] : null);
-              const targetValue = extractedPriceTarget || (priceTargetMatch ? priceTargetMatch[1] : null);
+              // But only use it if we have validated data from API
+              let ratingValue: string | null = null;
+              let targetValue: string | null = null;
               
-              // Extract recent analyst actions from content or use fetched data
+              // Only use consensus data if we have validated data from API (not just extracted from stale content)
+              if (consensusRatingsForPost) {
+                const validation = validateAnalystData(
+                  consensusRatingsForPost,
+                  recentAnalystActionsForPost || [],
+                  technicalData.currentPrice
+                );
+                
+                // Only use rating/target if validation passes
+                if (validation.isValid) {
+                  ratingValue = consensusRatingsForPost.consensus_rating 
+                    ? consensusRatingsForPost.consensus_rating.charAt(0) + consensusRatingsForPost.consensus_rating.slice(1).toLowerCase()
+                    : null;
+                  
+                  if (validation.shouldShowPriceTarget && consensusRatingsForPost.consensus_price_target) {
+                    targetValue = consensusRatingsForPost.consensus_price_target.toString();
+                  }
+                }
+              }
+              
+              // Extract recent analyst actions - ONLY use validated data from API, never extract from stale content
               let analystActionsHTML = '';
               if (recentAnalystActionsForPost && recentAnalystActionsForPost.length > 0) {
                 // Format as HTML bullet points with bold firm names and dates
@@ -5054,28 +5330,8 @@ export async function POST(request: Request) {
                   return `  <li><strong>${action.firm}</strong>: ${action.action}${dateStr}</li>`;
                 }).join('\n');
                 analystActionsHTML = `<ul>\n${analystBullets}\n</ul>`;
-              } else {
-                // Try to extract from content
-                const analystActionsMatch = earningsContent.match(/Recent analyst moves include:([\s\S]*?)(?:\n\n|$)/i);
-                if (analystActionsMatch) {
-                  // If already formatted, use as-is, otherwise format
-                  const extractedText = analystActionsMatch[1].trim();
-                  if (extractedText.includes('<ul>')) {
-                    analystActionsHTML = extractedText;
-                  } else {
-                    // Parse and reformat plain text lines
-                    const lines = extractedText.split('\n').filter(line => line.trim());
-                    const analystBullets = lines.map((line: string) => {
-                      const match = line.match(/^([^:]+):\s*(.+)$/);
-                      if (match) {
-                        return `  <li><strong>${match[1].trim()}</strong>: ${match[2].trim()}</li>`;
-                      }
-                      return `  <li>${line.trim()}</li>`;
-                    }).join('\n');
-                    analystActionsHTML = `<ul>\n${analystBullets}\n</ul>`;
-                  }
-                }
               }
+              // DO NOT extract from content - only use validated API data
               
               // Generate Valuation Insight with analysis
               if (peRatioForPost && ratingValue && targetValue && technicalData.currentPrice) {
@@ -5129,8 +5385,12 @@ export async function POST(request: Request) {
                   formattedSection += `<ul>\n${hardNumbers.map(l => `  <li>${l}</li>`).join('\n')}\n</ul>`;
                 }
                 
-                // Add "Analyst Consensus & Recent Actions" subsection if we have consensus data or actions
-                if (ratingValue || targetValue || analystActionsHTML) {
+                // Add "Analyst Consensus & Recent Actions" subsection ONLY if we have valid, recent data
+                // Skip entirely if no valid consensus rating/target AND no recent actions
+                const hasValidRatingOrTarget = ratingValue || targetValue;
+                const hasRecentActions = recentAnalystActionsForPost && recentAnalystActionsForPost.length > 0;
+                
+                if (hasValidRatingOrTarget || hasRecentActions) {
                   formattedSection += `\n\n<strong>Analyst Consensus & Recent Actions:</strong>\n`;
                   
                   if (ratingValue && targetValue) {
@@ -5146,11 +5406,11 @@ export async function POST(request: Request) {
                     formattedSection += `The stock has an average price target of <strong>$${target.toFixed(2)}</strong>.`;
                   }
                   
-                  if (analystActionsHTML) {
+                  if (hasRecentActions && analystActionsHTML) {
                     formattedSection += ` Recent analyst moves include:\n${analystActionsHTML}`;
-                  } else if (!recentAnalystActionsForPost || recentAnalystActionsForPost.length === 0) {
-                    formattedSection += ` No recent analyst actions available.`;
                   }
+                } else {
+                  console.log(`[EARNINGS FORMAT] [ANALYST VALIDATION] ${ticker}: Skipping "Analyst Consensus & Recent Actions" subsection - no valid recent data`);
                 }
                 
                 formattedSection += priceTargetNote;

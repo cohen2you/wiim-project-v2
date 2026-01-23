@@ -628,6 +628,100 @@ async function fetchRecentAnalystActions(ticker: string, limit: number = 3) {
   }
 }
 
+// Validate analyst data to filter out stale information
+function validateAnalystData(
+  consensusRatings: any,
+  recentAnalystActions: any[],
+  currentPrice: number
+): { isValid: boolean; shouldShowPriceTarget: boolean; reason?: string } {
+  // If no consensus ratings, nothing to validate
+  if (!consensusRatings) {
+    return { isValid: false, shouldShowPriceTarget: false };
+  }
+
+  const priceTarget = consensusRatings.consensus_price_target;
+  const hasPriceTarget = priceTarget !== null && priceTarget !== undefined && !isNaN(parseFloat(priceTarget.toString()));
+
+  // Check if we have recent analyst actions
+  let mostRecentActionDate: Date | null = null;
+  if (recentAnalystActions && recentAnalystActions.length > 0) {
+    // Find the most recent action date
+    const dates = recentAnalystActions
+      .map((action: any) => {
+        if (!action.date) return null;
+        try {
+          // Parse date string (format: YYYY-MM-DD)
+          const dateParts = action.date.split('-');
+          if (dateParts.length === 3) {
+            return new Date(parseInt(dateParts[0]), parseInt(dateParts[1]) - 1, parseInt(dateParts[2]));
+          }
+          return new Date(action.date);
+        } catch (e) {
+          return null;
+        }
+      })
+      .filter((d: Date | null) => d !== null) as Date[];
+    
+    if (dates.length > 0) {
+      mostRecentActionDate = new Date(Math.max(...dates.map(d => d.getTime())));
+    }
+  }
+
+  // Check date freshness: use 6 months as primary cutoff, 12 months for limited coverage
+  const sixMonthsAgo = new Date();
+  sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+  const twelveMonthsAgo = new Date();
+  twelveMonthsAgo.setMonth(twelveMonthsAgo.getMonth() - 12);
+  
+  // Check if coverage is limited (≤2 analysts)
+  const hasLimitedCoverage = (consensusRatings.total_analyst_count || 0) <= 2;
+  
+  // Determine cutoff: 6 months for normal coverage, 12 months for limited coverage
+  const cutoffDate = hasLimitedCoverage ? twelveMonthsAgo : sixMonthsAgo;
+  const cutoffMonths = hasLimitedCoverage ? 12 : 6;
+  
+  const isDataStale = mostRecentActionDate === null || mostRecentActionDate < cutoffDate;
+
+  // Check price target reasonableness
+  let isPriceTargetReasonable = true;
+  if (hasPriceTarget && currentPrice > 0) {
+    const targetNum = parseFloat(priceTarget.toString());
+    const ratio = targetNum / currentPrice;
+    
+    // Price target should be between 0.2x and 10x current price
+    // (10x allows for some growth stocks, but anything beyond is likely stale)
+    if (ratio < 0.2 || ratio > 10) {
+      isPriceTargetReasonable = false;
+    }
+  }
+
+  // If data is stale (no recent actions within cutoff period), omit entire section
+  if (isDataStale) {
+    return {
+      isValid: false, // Don't show any analyst data if all actions are older than cutoff
+      shouldShowPriceTarget: false,
+      reason: mostRecentActionDate 
+        ? `Most recent analyst action is from ${mostRecentActionDate.toLocaleDateString()} (older than ${cutoffMonths} months)`
+        : 'No recent analyst actions found'
+    };
+  }
+
+  // If price target is unreasonable, don't show it but still show rating
+  if (hasPriceTarget && !isPriceTargetReasonable) {
+    return {
+      isValid: true, // Still show rating if available
+      shouldShowPriceTarget: false,
+      reason: `Price target ($${priceTarget}) is ${priceTarget && currentPrice > 0 ? (parseFloat(priceTarget.toString()) / currentPrice).toFixed(1) : 'N/A'}x current price, which is outside reasonable range`
+    };
+  }
+
+  // Data is valid
+  return {
+    isValid: true,
+    shouldShowPriceTarget: hasPriceTarget && isPriceTargetReasonable
+  };
+}
+
 // Fetch basic stock data for company name and current price
 async function fetchBasicStockData(ticker: string) {
   try {
@@ -1176,13 +1270,13 @@ ${revenueEstimate ? `- Revenue Estimate: ${formatRevenue(revenueEstimate)}${reve
 ${peRatio !== null ? `- ${useForwardPE ? 'Forward' : ''} P/E Ratio: ${peRatio.toFixed(1)}x (${peRatio > 25 ? 'Indicates premium valuation' : peRatio < 15 ? 'Indicates value opportunity' : 'Suggests fair valuation'})` : ''}
 ${impliedVolatility !== null ? `- Implied Volatility: ${impliedVolatility.toFixed(1)}%${ivRank !== null ? ` (IV Rank: ${ivRank.toFixed(0)}%)` : ''} - Higher IV indicates options traders expect significant price movement around earnings` : ''}
 
-ANALYST SENTIMENT:
-${consensusRatings ? `- Consensus Rating: ${consensusRatings.consensus_rating ? consensusRatings.consensus_rating.charAt(0) + consensusRatings.consensus_rating.slice(1).toLowerCase() : 'N/A'}
-- Average Price Target: $${consensusRatings.consensus_price_target ? parseFloat(consensusRatings.consensus_price_target.toString()).toFixed(2) : 'N/A'}
+${consensusRatings && recentAnalystActions && recentAnalystActions.length > 0 ? `ANALYST SENTIMENT:
+- Consensus Rating: ${consensusRatings.consensus_rating ? consensusRatings.consensus_rating.charAt(0) + consensusRatings.consensus_rating.slice(1).toLowerCase() : 'N/A'}
+- Average Price Target: ${consensusRatings.consensus_price_target ? '$' + parseFloat(consensusRatings.consensus_price_target.toString()).toFixed(2) : 'N/A'}
 - Buy/Hold/Sell: ${consensusRatings.buy_percentage ? parseFloat(consensusRatings.buy_percentage.toString()).toFixed(1) : '0'}% Buy, ${consensusRatings.hold_percentage ? parseFloat(consensusRatings.hold_percentage.toString()).toFixed(1) : '0'}% Hold, ${consensusRatings.sell_percentage ? parseFloat(consensusRatings.sell_percentage.toString()).toFixed(1) : '0'}% Sell
-- Total Analysts: ${consensusRatings.total_analyst_count || 'N/A'}` : '- No consensus data available'}
+- Total Analysts: ${consensusRatings.total_analyst_count || 'N/A'}
 
-${recentAnalystActions && recentAnalystActions.length > 0 ? `NOTABLE RECENT ANALYST MOVES (Last 5-7 Actions):
+NOTABLE RECENT ANALYST MOVES (Last 5-7 Actions):
 ${recentAnalystActions.map((action: any) => {
   let dateStr = '';
   if (action.date) {
@@ -1263,7 +1357,7 @@ CRITICAL STRUCTURAL REQUIREMENTS:
    ${sourceUrl && !sourceUrl.includes('benzinga.com') ? `   - **CRITICAL:** After the lead paragraph, add a second paragraph that cites the source URL and summarizes the key development from the source article. Format: "According to <a href="${sourceUrl}">[source name]</a>, [summarize the main topic/event from the source article - be specific with details, numbers, and company names]. [Connect this development to how it might impact earnings expectations or investor sentiment]." This citation paragraph MUST mention the main topic from the source article - do not be vague.` : ''}
    - Insert "## Section: What to Expect" after the lead paragraph${sourceUrl && !sourceUrl.includes('benzinga.com') ? ' (and after the source citation paragraph)' : ''}
    - Insert "## Section: Historical Performance" after "What to Expect" (if historical data is available)
-   - Insert "## Section: Analyst Sentiment" after the expectations/historical section
+   ${consensusRatings && recentAnalystActions && recentAnalystActions.length > 0 ? '- Insert "## Section: Analyst Sentiment" after the expectations/historical section (ONLY if valid, recent analyst data is available)' : '- CRITICAL: Do NOT insert "## Section: Analyst Sentiment" if there is no valid, recent analyst data. Skip this section entirely.'}
    - Insert "## Section: Technical Setup" (optional - include if relevant technical context is available)
    - Insert "## Section: Key Metrics to Watch" before the final sections
    - Insert "## Section: Price Action" immediately before the automatically-generated price action line
@@ -1298,12 +1392,13 @@ ${historicalEarnings && historicalEarnings.quarters && historicalEarnings.quarte
    - Provide analysis and context, not just raw numbers
    - Keep this section to 3-4 sentences but ensure it includes specific data points and meaningful analysis
 
-6. **SECTION: Analyst Sentiment**:` : '5. **SECTION: Analyst Sentiment**:'}
-   - Consensus rating and average price target
-   - Recent analyst moves if available, formatted as:
+${consensusRatings && recentAnalystActions && recentAnalystActions.length > 0 ? `6. **SECTION: Analyst Sentiment**:` : historicalEarnings && historicalEarnings.quarters && historicalEarnings.quarters.length > 0 ? '6. **SECTION: Analyst Sentiment**:' : '5. **SECTION: Analyst Sentiment**:'}
+   ${consensusRatings && recentAnalystActions && recentAnalystActions.length > 0 ? `- Consensus rating and average price target
+   - Recent analyst moves formatted as:
      <strong>Analyst Consensus & Recent Actions:</strong>
-     The stock carries a [Rating] Rating with an average price target of $[Target]. Notable recent moves include:
-     ${recentAnalystActions && recentAnalystActions.length > 0 ? `\n<ul>\n${recentAnalystActions.map((action: any) => {
+     The stock carries a [Rating] Rating${consensusRatings.consensus_price_target ? ' with an average price target of $[Target]' : ''}. Notable recent moves include:
+     <ul>
+     ${recentAnalystActions.map((action: any) => {
        let dateStr = '';
        if (action.date) {
          try {
@@ -1314,8 +1409,10 @@ ${historicalEarnings && historicalEarnings.quarters && historicalEarnings.quarte
          }
        }
        return `<li><strong>${action.firm}</strong>: ${action.action}${dateStr}</li>`;
-     }).join('\n')}\n</ul>\nFull analyst coverage indicates ${consensusRatings?.total_analyst_count ? `a wide divergence in price targets from ${consensusRatings.total_analyst_count} analysts` : 'a wide divergence in price targets'}, reflecting the market's split view on ${companyName}'s valuation.` : ''}
-   - Valuation Insight (if P/E and consensus available): Bold "Valuation Insight:" and italicize the rest
+     }).join('\n')}
+     </ul>
+     Full analyst coverage indicates ${consensusRatings?.total_analyst_count ? `a wide divergence in price targets from ${consensusRatings.total_analyst_count} analysts` : 'a wide divergence in price targets'}, reflecting the market's split view on ${companyName}'s valuation.
+   - Valuation Insight (if P/E and consensus available): Bold "Valuation Insight:" and italicize the rest` : `CRITICAL: If there is no valid, recent analyst data (consensus ratings or recent analyst actions within the past 6-12 months), you MUST completely omit the "## Section: Analyst Sentiment" section. Do NOT include it with "N/A" or "No data available" - simply skip the entire section.`}
 
 ${historicalEarnings && historicalEarnings.quarters && historicalEarnings.quarters.length > 0 ? '7' : '6'}. **SECTION: Key Metrics to Watch**:
    - This section should be SPECIFIC and DATA-DRIVEN, not generic
@@ -1450,6 +1547,104 @@ export async function POST(request: Request) {
           const companyName = basicStockData.companyName;
           const currentPrice = basicStockData.currentPrice;
 
+          // Validate analyst data to filter out stale information
+          let validatedConsensusRatings = consensusRatings;
+          if (consensusRatings) {
+            const validation = validateAnalystData(
+              consensusRatings,
+              recentAnalystActions || [],
+              currentPrice
+            );
+            
+            if (validation.reason) {
+              console.log(`[EARNINGS PREVIEW] [ANALYST VALIDATION] ${ticker}: ${validation.reason}`);
+            }
+            
+            // If price target should not be shown, remove it from the consensus ratings object
+            if (!validation.shouldShowPriceTarget && consensusRatings) {
+              validatedConsensusRatings = {
+                ...consensusRatings,
+                consensus_price_target: null,
+                high_price_target: null,
+                low_price_target: null
+              };
+              console.log(`[EARNINGS PREVIEW] [ANALYST VALIDATION] ${ticker}: Removed price target due to stale or unreasonable data`);
+            }
+            
+            // If data is completely invalid (no rating either), set to null
+            if (!validation.isValid) {
+              validatedConsensusRatings = null;
+              console.log(`[EARNINGS PREVIEW] [ANALYST VALIDATION] ${ticker}: Removed entire consensus ratings due to invalid data`);
+            }
+          }
+          
+          // Filter out stale analyst actions: 6 months for normal coverage, 12 months for limited coverage (≤2 analysts)
+          let validatedRecentAnalystActions = recentAnalystActions || [];
+          if (validatedRecentAnalystActions.length > 0) {
+            const sixMonthsAgo = new Date();
+            sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+            const twelveMonthsAgo = new Date();
+            twelveMonthsAgo.setMonth(twelveMonthsAgo.getMonth() - 12);
+            
+            // Check if coverage is limited (≤2 analysts) - use original consensusRatings before validation
+            const hasLimitedCoverage = consensusRatings 
+              ? (consensusRatings.total_analyst_count || 0) <= 2
+              : false;
+            
+            // Use 6 months for normal coverage, 12 months for limited coverage
+            const cutoffDateRaw = hasLimitedCoverage ? twelveMonthsAgo : sixMonthsAgo;
+            const cutoffMonths = hasLimitedCoverage ? 12 : 6;
+            
+            // Normalize cutoff date to midnight for accurate comparison (create new date to avoid mutation)
+            const cutoffDate = new Date(cutoffDateRaw);
+            cutoffDate.setHours(0, 0, 0, 0);
+            
+            const initialCount = validatedRecentAnalystActions.length;
+            validatedRecentAnalystActions = validatedRecentAnalystActions.filter((action: any) => {
+              if (!action.date) {
+                console.log(`[EARNINGS PREVIEW] [ANALYST VALIDATION] ${ticker}: Filtering out action with no date:`, action);
+                return false;
+              }
+              
+              try {
+                // Parse date string (format: YYYY-MM-DD)
+                const dateParts = action.date.split('-');
+                let actionDate: Date;
+                if (dateParts.length === 3) {
+                  actionDate = new Date(parseInt(dateParts[0]), parseInt(dateParts[1]) - 1, parseInt(dateParts[2]));
+                } else {
+                  actionDate = new Date(action.date);
+                }
+                
+                // Normalize action date to midnight for accurate comparison
+                actionDate.setHours(0, 0, 0, 0);
+                
+                const isRecent = actionDate >= cutoffDate;
+                if (!isRecent) {
+                  console.log(`[EARNINGS PREVIEW] [ANALYST VALIDATION] ${ticker}: Filtering out stale action: ${action.firm} from ${action.date} (cutoff: ${cutoffDate.toISOString().split('T')[0]})`);
+                }
+                return isRecent;
+              } catch (e) {
+                // If date parsing fails, exclude the action
+                console.log(`[EARNINGS PREVIEW] [ANALYST VALIDATION] ${ticker}: Filtering out action with invalid date format: ${action.date}`, e);
+                return false;
+              }
+            });
+            
+            if (validatedRecentAnalystActions.length < initialCount) {
+              const removedCount = initialCount - validatedRecentAnalystActions.length;
+              console.log(`[EARNINGS PREVIEW] [ANALYST VALIDATION] ${ticker}: Filtered out ${removedCount} stale analyst action(s) older than ${cutoffMonths} months${hasLimitedCoverage ? ' (using 12-month cutoff for limited coverage)' : ''}`);
+            }
+          }
+          
+          // If no recent actions remain after filtering (or none to begin with), invalidate consensus ratings
+          if (validatedRecentAnalystActions.length === 0 && validatedConsensusRatings) {
+            validatedConsensusRatings = null;
+            const hasLimitedCoverage = consensusRatings ? (consensusRatings.total_analyst_count || 0) <= 2 : false;
+            const cutoffMonths = hasLimitedCoverage ? 12 : 6;
+            console.log(`[EARNINGS PREVIEW] [ANALYST VALIDATION] ${ticker}: Removed consensus ratings - no recent analyst actions within ${cutoffMonths} months`);
+          }
+
           // Log historical earnings data for debugging
           console.log(`[EARNINGS PREVIEW] ${ticker}: Historical earnings data:`, {
             hasData: !!historicalEarnings,
@@ -1465,8 +1660,8 @@ export async function POST(request: Request) {
             ticker,
             companyName,
             nextEarnings,
-            consensusRatings,
-            recentAnalystActions,
+            validatedConsensusRatings,
+            validatedRecentAnalystActions,
             peRatio,
             currentPrice,
             historicalEarnings,
