@@ -1241,6 +1241,16 @@ Do NOT start with "Company X is scheduled to report earnings on [date]." Instead
   let analystSectionNumber = '';
   let analystSectionContent = '';
   
+  // Build source URL citation instruction to avoid nested template literal issues
+  const sourceCitationInstruction = sourceUrl && !sourceUrl.includes('benzinga.com') 
+    ? `   - **CRITICAL:** After the lead paragraph, add a second paragraph that cites the source URL and summarizes the key development from the source article. Format: "According to <a href="${sourceUrl}">[source name]</a>, [summarize the main topic/event from the source article - be specific with details, numbers, and company names]. [Connect this development to how it might impact earnings expectations or investor sentiment]." This citation paragraph MUST mention the main topic from the source article - do not be vague.`
+    : '';
+  
+  // Build analyst section marker instruction to avoid nested template literal issues
+  const analystSectionMarkerInstruction = consensusRatings && recentAnalystActions && recentAnalystActions.length > 0
+    ? '- Insert "## Section: Analyst Sentiment" after the expectations/historical section (ONLY if valid, recent analyst data is available)'
+    : '- CRITICAL: Do NOT insert "## Section: Analyst Sentiment" if there is no valid, recent analyst data. Skip this section entirely.';
+  
   if (consensusRatings && recentAnalystActions && recentAnalystActions.length > 0) {
     analystSectionNumber = '6. **SECTION: Analyst Sentiment**:';
     const analystActionsList = recentAnalystActions.map((action: any) => {
@@ -1390,10 +1400,10 @@ CRITICAL STRUCTURAL REQUIREMENTS:
    **OUTPUT:** Provide only the lead paragraph text with the embedded hyperlink(s). No labels, no section headers.
 
 3. **SECTION MARKERS** (REQUIRED - use these EXACT markers):
-   ${sourceUrl && !sourceUrl.includes('benzinga.com') ? `   - **CRITICAL:** After the lead paragraph, add a second paragraph that cites the source URL and summarizes the key development from the source article. Format: "According to <a href="${sourceUrl}">[source name]</a>, [summarize the main topic/event from the source article - be specific with details, numbers, and company names]. [Connect this development to how it might impact earnings expectations or investor sentiment]." This citation paragraph MUST mention the main topic from the source article - do not be vague.` : ''}
+   ${sourceCitationInstruction}
    - Insert "## Section: What to Expect" after the lead paragraph${sourceUrl && !sourceUrl.includes('benzinga.com') ? ' (and after the source citation paragraph)' : ''}
    - Insert "## Section: Historical Performance" after "What to Expect" (if historical data is available)
-   ${consensusRatings && recentAnalystActions && recentAnalystActions.length > 0 ? '- Insert "## Section: Analyst Sentiment" after the expectations/historical section (ONLY if valid, recent analyst data is available)' : '- CRITICAL: Do NOT insert "## Section: Analyst Sentiment" if there is no valid, recent analyst data. Skip this section entirely.'}
+   ${analystSectionMarkerInstruction}
    - Insert "## Section: Technical Setup" (optional - include if relevant technical context is available)
    - Insert "## Section: Key Metrics to Watch" before the final sections
    - Insert "## Section: Price Action" immediately before the automatically-generated price action line
