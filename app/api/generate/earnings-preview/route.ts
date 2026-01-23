@@ -1251,6 +1251,23 @@ Do NOT start with "Company X is scheduled to report earnings on [date]." Instead
     ? '- Insert "## Section: Analyst Sentiment" after the expectations/historical section (ONLY if valid, recent analyst data is available)'
     : '- CRITICAL: Do NOT insert "## Section: Analyst Sentiment" if there is no valid, recent analyst data. Skip this section entirely.';
   
+  // Build Benzinga source article instruction to avoid nested template literal issues
+  const benzingaSourceInstruction = sourceUrl && sourceUrl.includes('benzinga.com')
+    ? `**MANDATORY SOURCE ARTICLE REFERENCE:** The source article provided above contains critical information that MUST be mentioned in the lead paragraph. You MUST:
+   1. Reference the main topic/event from the source article (e.g., "Netflix's $82.7 billion all-cash offer for Warner Bros Discovery" or "the strategic acquisition deal")
+   2. Include a hyperlink to the source article embedded naturally within three consecutive words using: <a href="${sourceUrl}">three consecutive words</a>
+   3. Connect the source article's news to the earnings context (e.g., how the acquisition might impact earnings expectations, investor sentiment, or financial outlook)
+   
+   EXAMPLE FORMAT: "Netflix (NASDAQ:NFLX) is scheduled to <a href="https://www.benzinga.com/quote/NFLX/earnings">report earnings on</a> April 16, 2026, as the company's <a href="${sourceUrl}">$82.7 billion acquisition</a> of Warner Bros Discovery adds complexity to its financial outlook..."
+   
+   Do NOT skip this - the source article was provided specifically to add context to the earnings story.`
+    : '';
+  
+  // Build "What to Expect" section marker instruction to avoid nested template literal issues
+  const whatToExpectMarkerInstruction = sourceUrl && !sourceUrl.includes('benzinga.com')
+    ? ' (and after the source citation paragraph)'
+    : '';
+  
   if (consensusRatings && recentAnalystActions && recentAnalystActions.length > 0) {
     analystSectionNumber = '6. **SECTION: Analyst Sentiment**:';
     const analystActionsList = recentAnalystActions.map((action: any) => {
@@ -1388,20 +1405,13 @@ CRITICAL STRUCTURAL REQUIREMENTS:
    
    **CRITICAL:** Include a THREE-WORD hyperlink to the Benzinga earnings page in the first sentence. Format: <a href="https://www.benzinga.com/quote/${ticker}/earnings">[three consecutive words]</a>. Embed it naturally (e.g., "is scheduled to <a href="https://www.benzinga.com/quote/${ticker}/earnings">report earnings on</a> February 26").
    
-   ${sourceUrl && sourceUrl.includes('benzinga.com') ? `**MANDATORY SOURCE ARTICLE REFERENCE:** The source article provided above contains critical information that MUST be mentioned in the lead paragraph. You MUST:
-   1. Reference the main topic/event from the source article (e.g., "Netflix's $82.7 billion all-cash offer for Warner Bros Discovery" or "the strategic acquisition deal")
-   2. Include a hyperlink to the source article embedded naturally within three consecutive words using: <a href="${sourceUrl}">three consecutive words</a>
-   3. Connect the source article's news to the earnings context (e.g., how the acquisition might impact earnings expectations, investor sentiment, or financial outlook)
-   
-   EXAMPLE FORMAT: "Netflix (NASDAQ:NFLX) is scheduled to <a href="https://www.benzinga.com/quote/NFLX/earnings">report earnings on</a> April 16, 2026, as the company's <a href="${sourceUrl}">$82.7 billion acquisition</a> of Warner Bros Discovery adds complexity to its financial outlook..."
-   
-   Do NOT skip this - the source article was provided specifically to add context to the earnings story.` : ''}
+   ${benzingaSourceInstruction}
    
    **OUTPUT:** Provide only the lead paragraph text with the embedded hyperlink(s). No labels, no section headers.
 
 3. **SECTION MARKERS** (REQUIRED - use these EXACT markers):
    ${sourceCitationInstruction}
-   - Insert "## Section: What to Expect" after the lead paragraph${sourceUrl && !sourceUrl.includes('benzinga.com') ? ' (and after the source citation paragraph)' : ''}
+   - Insert "## Section: What to Expect" after the lead paragraph${whatToExpectMarkerInstruction}
    - Insert "## Section: Historical Performance" after "What to Expect" (if historical data is available)
    ${analystSectionMarkerInstruction}
    - Insert "## Section: Technical Setup" (optional - include if relevant technical context is available)
