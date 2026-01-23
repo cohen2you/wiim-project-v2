@@ -3739,12 +3739,17 @@ BENZINGA EDGE SECTION RULES - FORMAT AS "TRADER'S SCORECARD":
    - ALWAYS label as "Weak" or "Bearish" - these are very weak scores
    - A score of 0.89 means the stock is performing poorly, not well
    
-   For scores 1-100 (normal range):
+   For scores 1-5 (very low, barely above threshold):
+   - ALWAYS label as "Weak" or "Bearish" - these scores are extremely low and indicate poor performance
+   - A score of 1.47 means the stock is performing very poorly, similar to sub-1 scores
+   - Do NOT label scores in the 1-5 range as "Bullish" - they are bearish indicators
+   
+   For scores 5-100 (normal range):
    - Score > 70: Label as "Strong" or "Bullish"
    - Score < 30: Label as "Weak" or "Bearish"
    - Score 30-70: Label as "Neutral" or "Moderate"
    
-   CRITICAL: Any score less than 1.0 is very weak and bearish. Do NOT label scores like 0.89 as "Bullish" or "Neutral" - they should be labeled as "Weak" or "Bearish".
+   CRITICAL: Any score less than 1.0 OR between 1.0 and 5.0 is very weak and bearish. Do NOT label scores like 0.89 or 1.47 as "Bullish" or "Neutral" - they should be labeled as "Weak" or "Bearish".
 
 3. INTERPRETATION: Do NOT just list the number. Add a 1-sentence interpretation after each score.
 
