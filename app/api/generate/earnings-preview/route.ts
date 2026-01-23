@@ -1237,6 +1237,42 @@ Do NOT start with "Company X is scheduled to report earnings on [date]." Instead
 **TONE:** Write in a journalistic, editorial style. Use strong, engaging language (e.g., "banking on", "faces pressure", "validate", "deliver a clean beat"). Avoid generic phrases like "investors are watching" or "analysts expect".`;
   }
   
+  // Build analyst section content to avoid nested template literal issues
+  let analystSectionNumber = '';
+  let analystSectionContent = '';
+  
+  if (consensusRatings && recentAnalystActions && recentAnalystActions.length > 0) {
+    analystSectionNumber = '6. **SECTION: Analyst Sentiment**:';
+    const analystActionsList = recentAnalystActions.map((action: any) => {
+      let dateStr = '';
+      if (action.date) {
+        try {
+          const date = new Date(action.date);
+          dateStr = ` (${date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })})`;
+        } catch (e) {
+          // If date parsing fails, skip date
+        }
+      }
+      return `<li><strong>${action.firm}</strong>: ${action.action}${dateStr}</li>`;
+    }).join('\n');
+    
+    analystSectionContent = `- Consensus rating and average price target
+   - Recent analyst moves formatted as:
+     <strong>Analyst Consensus & Recent Actions:</strong>
+     The stock carries a [Rating] Rating${consensusRatings.consensus_price_target ? ' with an average price target of $[Target]' : ''}. Notable recent moves include:
+     <ul>
+     ${analystActionsList}
+     </ul>
+     Full analyst coverage indicates ${consensusRatings?.total_analyst_count ? `a wide divergence in price targets from ${consensusRatings.total_analyst_count} analysts` : 'a wide divergence in price targets'}, reflecting the market's split view on ${companyName}'s valuation.
+   - Valuation Insight (if P/E and consensus available): Bold "Valuation Insight:" and italicize the rest`;
+  } else if (historicalEarnings && historicalEarnings.quarters && historicalEarnings.quarters.length > 0) {
+    analystSectionNumber = '6. **SECTION: Analyst Sentiment**:';
+    analystSectionContent = 'CRITICAL: If there is no valid, recent analyst data (consensus ratings or recent analyst actions within the past 6-12 months), you MUST completely omit the "## Section: Analyst Sentiment" section. Do NOT include it with "N/A" or "No data available" - simply skip the entire section.';
+  } else {
+    analystSectionNumber = '5. **SECTION: Analyst Sentiment**:';
+    analystSectionContent = 'CRITICAL: If there is no valid, recent analyst data (consensus ratings or recent analyst actions within the past 6-12 months), you MUST completely omit the "## Section: Analyst Sentiment" section. Do NOT include it with "N/A" or "No data available" - simply skip the entire section.';
+  }
+  
   const prompt = `You are a professional financial journalist writing an earnings preview article for ${companyName} (${ticker}). Today is ${dayOfWeek}.
 
 ${contextBrief ? `CONTEXT BRIEF (Recent News & Events):
@@ -1392,27 +1428,8 @@ ${historicalEarnings && historicalEarnings.quarters && historicalEarnings.quarte
    - Provide analysis and context, not just raw numbers
    - Keep this section to 3-4 sentences but ensure it includes specific data points and meaningful analysis
 
-${consensusRatings && recentAnalystActions && recentAnalystActions.length > 0 ? `6. **SECTION: Analyst Sentiment**:` : historicalEarnings && historicalEarnings.quarters && historicalEarnings.quarters.length > 0 ? '6. **SECTION: Analyst Sentiment**:' : '5. **SECTION: Analyst Sentiment**:'}
-   ${consensusRatings && recentAnalystActions && recentAnalystActions.length > 0 ? `- Consensus rating and average price target
-   - Recent analyst moves formatted as:
-     <strong>Analyst Consensus & Recent Actions:</strong>
-     The stock carries a [Rating] Rating${consensusRatings.consensus_price_target ? ' with an average price target of $[Target]' : ''}. Notable recent moves include:
-     <ul>
-     ${recentAnalystActions.map((action: any) => {
-       let dateStr = '';
-       if (action.date) {
-         try {
-           const date = new Date(action.date);
-           dateStr = ` (${date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })})`;
-         } catch (e) {
-           // If date parsing fails, skip date
-         }
-       }
-       return `<li><strong>${action.firm}</strong>: ${action.action}${dateStr}</li>`;
-     }).join('\n')}
-     </ul>
-     Full analyst coverage indicates ${consensusRatings?.total_analyst_count ? `a wide divergence in price targets from ${consensusRatings.total_analyst_count} analysts` : 'a wide divergence in price targets'}, reflecting the market's split view on ${companyName}'s valuation.
-   - Valuation Insight (if P/E and consensus available): Bold "Valuation Insight:" and italicize the rest` : `CRITICAL: If there is no valid, recent analyst data (consensus ratings or recent analyst actions within the past 6-12 months), you MUST completely omit the "## Section: Analyst Sentiment" section. Do NOT include it with "N/A" or "No data available" - simply skip the entire section.`}
+${analystSectionNumber}
+   ${analystSectionContent}
 
 ${historicalEarnings && historicalEarnings.quarters && historicalEarnings.quarters.length > 0 ? '7' : '6'}. **SECTION: Key Metrics to Watch**:
    - This section should be SPECIFIC and DATA-DRIVEN, not generic
