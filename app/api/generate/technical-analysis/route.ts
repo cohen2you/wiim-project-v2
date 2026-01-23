@@ -3744,19 +3744,25 @@ BENZINGA EDGE SECTION RULES - FORMAT AS "TRADER'S SCORECARD":
    - A score of 1.47 means the stock is performing very poorly, similar to sub-1 scores
    - Do NOT label scores in the 1-5 range as "Bullish" - they are bearish indicators
    
-   For scores 5-100 (normal range):
-   - Score > 70: Label as "Strong" or "Bullish"
-   - Score < 30: Label as "Weak" or "Bearish"
-   - Score 30-70: Label as "Neutral" or "Moderate"
+   For scores 5-30:
+   - Label as "Weak" or "Bearish" - still indicating poor performance
+   
+   For scores 30-70:
+   - Label as "Neutral" or "Moderate"
+   
+   For scores > 70:
+   - Label as "Strong" or "Bullish"
    
    CRITICAL: Any score less than 1.0 OR between 1.0 and 5.0 is very weak and bearish. Do NOT label scores like 0.89 or 1.47 as "Bullish" or "Neutral" - they should be labeled as "Weak" or "Bearish".
 
 3. INTERPRETATION: Do NOT just list the number. Add a 1-sentence interpretation after each score.
 
 4. FORMAT EXAMPLE (use HTML bullets):
-   - For decimal values (0-1 scale): <li><strong>Momentum</strong>: Bullish (Score: 0.89) — Stock is outperforming the broader market.</li>
-   - For 0-100 scale values: <li><strong>Quality</strong>: Solid (Score: 66/100) — Balance sheet remains healthy.</li>
-   - For low scores: <li><strong>Value</strong>: Risk (Score: 4/100) — Trading at a steep premium relative to peers.</li>
+   - For decimal values below 1 (very weak): <li><strong>Momentum</strong>: Weak (Score: 0.89) — Stock is underperforming the broader market.</li>
+   - For very low scores (1-5 range): <li><strong>Momentum</strong>: Bearish (Score: 1.47) — Stock is showing very weak performance indicators.</li>
+   - For low scores (5-30 range): <li><strong>Value</strong>: Weak (Score: 15/100) — Trading at a steep premium relative to peers.</li>
+   - For moderate scores (30-70 range): <li><strong>Quality</strong>: Neutral (Score: 66/100) — Balance sheet remains healthy.</li>
+   - For high scores (>70): <li><strong>Momentum</strong>: Bullish (Score: 83/100) — Stock is outperforming the broader market.</li>
    
    IMPORTANT: Display the score exactly as provided in the data above. If it's 0.89, show "0.89" (NOT "0.89/1" or "89/100"). If it's 83, show "83/100". Do NOT convert decimals to whole numbers or multiply by 100.
 
