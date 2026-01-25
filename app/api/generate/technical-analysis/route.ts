@@ -466,6 +466,9 @@ interface TechnicalAnalysisData {
 
   marketCap?: number;
 
+  // Company description from Polygon
+  description?: string | null;
+
   
 
   // Analysis output
@@ -1960,17 +1963,47 @@ async function fetchTechnicalData(symbol: string): Promise<TechnicalAnalysisData
 
     
 
-    const [snapshot, overview, ratios, benzingaData] = await Promise.all([
+    // Check overview API response status BEFORE parsing
+    console.log(`[POLYGON OVERVIEW] ${symbol}: Overview API response status:`, overviewRes.status, overviewRes.ok ? 'OK' : 'FAILED');
+    
+    // Parse overview response with error handling
+    let overview = null;
+    if (overviewRes.ok) {
+      try {
+        overview = await overviewRes.json();
+      } catch (e) {
+        console.log(`[POLYGON OVERVIEW] ${symbol}: Failed to parse overview JSON:`, e);
+      }
+    } else {
+      const errorText = await overviewRes.text().catch(() => 'Unable to read error');
+      console.log(`[POLYGON OVERVIEW] ${symbol}: Overview API error response:`, errorText.substring(0, 200));
+    }
+    
+    const [snapshot, ratios, benzingaData] = await Promise.all([
 
       snapshotRes.json(),
-
-      overviewRes.json(),
 
       ratiosRes.ok ? ratiosRes.json() : null,
 
       benzingaRes.ok ? benzingaRes.json() : null
 
     ]);
+    
+    // Log overview response structure IMMEDIATELY after parsing
+    console.log(`[POLYGON OVERVIEW] ${symbol}: Overview parsed - is null?`, overview === null);
+    if (overview) {
+      console.log(`[POLYGON OVERVIEW] ${symbol}: Overview response keys:`, Object.keys(overview));
+      console.log(`[POLYGON OVERVIEW] ${symbol}: Overview.results exists?`, !!overview.results);
+      if (overview.results) {
+        console.log(`[POLYGON OVERVIEW] ${symbol}: Overview.results keys:`, Object.keys(overview.results));
+        console.log(`[POLYGON OVERVIEW] ${symbol}: Overview.results.description exists?`, !!overview.results.description);
+        if (overview.results.description) {
+          console.log(`[POLYGON OVERVIEW] ${symbol}: Description found! Length:`, overview.results.description.length);
+        }
+      }
+    } else {
+      console.log(`[POLYGON OVERVIEW] ${symbol}: Overview API call failed or returned null`);
+    }
 
     
 
@@ -2057,13 +2090,40 @@ async function fetchTechnicalData(symbol: string): Promise<TechnicalAnalysisData
 
     
 
-    const overviewData = overview.results;
+    // Polygon v3/reference/tickers returns data in results object
+    // Structure: { results: { description: "...", name: "...", market_cap: ..., ... } }
+    const overviewData = overview?.results || null;
+
+    // Log overview data structure for debugging
+    if (overview) {
+      console.log(`[POLYGON OVERVIEW] ${symbol}: Overview response structure:`, {
+        hasResults: !!overview.results,
+        resultsKeys: overview.results ? Object.keys(overview.results) : 'none'
+      });
+    } else {
+      console.log(`[POLYGON OVERVIEW] ${symbol}: Overview is null - API call may have failed`);
+    }
+
+    if (overviewData) {
+      console.log(`[POLYGON OVERVIEW] ${symbol}: Overview data keys:`, Object.keys(overviewData));
+      console.log(`[POLYGON OVERVIEW] ${symbol}: Has description field?`, overviewData.description ? 'YES' : 'NO');
+      if (overviewData.description) {
+        console.log(`[POLYGON OVERVIEW] ${symbol}: Description length:`, overviewData.description.length);
+        console.log(`[POLYGON OVERVIEW] ${symbol}: Description preview:`, overviewData.description.substring(0, 100));
+      } else {
+        console.log(`[POLYGON OVERVIEW] ${symbol}: Description field missing. Available fields:`, Object.keys(overviewData).join(', '));
+      }
+    }
 
     const companyName = overviewData?.name || symbol;
     const exchangeCode = overviewData?.primary_exchange || overviewData?.market || null;
     const companyNameWithExchange = formatCompanyNameWithExchange(companyName, symbol, exchangeCode);
 
     const marketCap = overviewData?.market_cap || 0;
+    // Access description directly from overview.results.description (v3/reference/tickers structure)
+    const description = overview?.results?.description || null;
+    
+    console.log(`[POLYGON OVERVIEW] ${symbol}: Extracted description:`, description ? `YES (${description.length} chars)` : 'NO');
 
     
 
@@ -2225,6 +2285,8 @@ async function fetchTechnicalData(symbol: string): Promise<TechnicalAnalysisData
       averageVolume,
 
       marketCap,
+
+      description: description && description !== 'N/A' ? description : null,
 
       turningPoints
 
@@ -3534,6 +3596,11 @@ async function generateTechnicalAnalysis(data: TechnicalAnalysisData, provider?:
       console.warn(`[PRICE ACTION SYNC] ⚠️ Failed to fetch fresh price data for ${data.symbol}`);
     }
 
+    // Log description availability before building prompt
+    console.log(`[PROMPT BUILD] ${data.symbol}: data.description exists?`, !!data.description);
+    console.log(`[PROMPT BUILD] ${data.symbol}: data.description value:`, data.description ? `${data.description.substring(0, 100)}...` : 'null');
+    console.log(`[PROMPT BUILD] ${data.symbol}: Will include Company Context section?`, data.description && data.description !== 'N/A' ? 'YES' : 'NO');
+
     const prompt = `You are a professional technical analyst writing a comprehensive stock analysis focused on longer-term trends and technical indicators. Today is ${dayOfWeek}.
 
 CURRENT MARKET STATUS: ${marketStatus === 'open' ? 'Markets are currently OPEN' : marketStatus === 'premarket' ? 'Markets are in PREMARKET trading' : marketStatus === 'afterhours' ? 'Markets are CLOSED (after-hours session ended)' : 'Markets are CLOSED'}
@@ -4061,8 +4128,9 @@ CRITICAL INSTRUCTIONS FOR NEWS INTEGRATION:
 6. Maximum 2 sentences per paragraph throughout the story.
 
 7. SECTION MARKERS (MANDATORY): You MUST insert section markers between major logical blocks. Format: "## Section: [Label]" on its own line. Required markers:
-   - "## Section: The Catalyst" - after the "Also Read" section (which appears after the first paragraph), before the detailed news paragraphs (Paragraph 2 with specific details)
-   - "## Section: Technical Analysis" - after news paragraphs, before technical data
+   ${newsContext && (newsContext.scrapedContent || (newsContext.selectedArticles && newsContext.selectedArticles.length > 0)) ? '- "## Section: The Catalyst" - after the "Also Read" section (which appears after the first paragraph), before the detailed news paragraphs (Paragraph 2 with specific details)' : ''}
+   - "## Section: Technical Analysis" - after news paragraphs${!newsContext || (!newsContext.scrapedContent && (!newsContext.selectedArticles || newsContext.selectedArticles.length === 0)) ? ' (or after lead paragraph if no news)' : ''}, before technical data
+   ${data.description && data.description !== 'N/A' ? '- "## Section: Company Context" - after "## Section: Technical Analysis", before "## Section: Earnings & Analyst Outlook" (or before "## Section: Benzinga Edge Rankings" or "## Section: Price Action" if those come next). Use this section to explain why this company matters and provide context about its business model and market position.' : ''}
    - "## Section: Analyst Ratings" - only if Analyst Overview is included
    - "## Section: Price Action" immediately before the automatically-generated price action line (do NOT write any content in this section - just place the marker)
    Use these EXACT labels - do not skip them.` : ''}
@@ -4076,9 +4144,42 @@ CRITICAL INSTRUCTIONS FOR NEWS INTEGRATION:
    - If you're unsure of a company's ticker, try to infer it from the article content or use the most common ticker for that company
    - Common examples: Alphabet/Google (NASDAQ:GOOGL), Microsoft (NASDAQ:MSFT), Apple (NASDAQ:AAPL), Amazon (NASDAQ:AMZN), Meta (NASDAQ:META), Tesla (NASDAQ:TSLA), Nvidia (NASDAQ:NVDA), Snowflake (NYSE:SNOW), Oracle (NYSE:ORCL), IBM (NYSE:IBM), Salesforce (NYSE:CRM)
 
+${data.description && data.description !== 'N/A' ? `
+*** MANDATORY COMPANY CONTEXT SECTION ***
+
+COMPANY DESCRIPTION (You MUST use this in the "## Section: Company Context" section):
+${data.description}
+
+CRITICAL REQUIREMENT: You MUST include a "## Section: Company Context" section in your output. This is NOT optional. Place it AFTER "## Section: Technical Analysis" and BEFORE "## Section: Earnings & Analyst Outlook" (or before "## Section: Benzinga Edge Rankings" if that section exists, or before "## Section: Price Action" if no earnings/analyst section exists).
+
+This section MUST:
+- Start with the exact section marker: "## Section: Company Context"
+- Use the company description provided above to explain what ${data.companyName || data.symbol} does and why it matters
+- Explain why this company matters${newsContext && (newsContext.scrapedContent || (newsContext.selectedArticles && newsContext.selectedArticles.length > 0)) ? ' in the context of the news/article' : ' and provide context about its business'}
+- Be written in plain text (NO HTML tags like <p> or </p>)
+- Be written in a conversational, accessible style
+- Help readers understand the company's significance and business context after reviewing the technical analysis
+- If the description is long (4+ sentences), split it into 2-3 paragraphs for better readability, with each paragraph containing 2-3 sentences
+
+REQUIRED FORMAT (plain text, no HTML):
+## Section: Company Context
+
+[Use the description above to explain what ${data.companyName || data.symbol} does]. ${newsContext && (newsContext.scrapedContent || (newsContext.selectedArticles && newsContext.selectedArticles.length > 0)) ? '[Connect to why this matters for the current news/price action].' : '[Explain why this company is relevant in the current market context].'} [Additional context about market position or relevance].
+
+If the description is long, format as multiple paragraphs:
+## Section: Company Context
+
+[First paragraph: 2-3 sentences about what the company does and its core business model.]
+
+[Second paragraph: 2-3 sentences about market position, licensing model, or other relevant context.]
+
+DO NOT SKIP THIS SECTION. It is mandatory when company description is provided.
+
+` : ''}
+
 TASK: ${newsContext && (newsContext.scrapedContent || (newsContext.selectedArticles && newsContext.selectedArticles.length > 0)) ? `Write a conversational WGO article that helps readers understand "What's Going On" with the stock. LEAD with the current price move (direction and day of week, e.g., "shares are tumbling on Monday" or "shares are surging on Tuesday"). Use ONLY the day name (e.g., "on Thursday", "on Monday") - DO NOT include the date (e.g., do NOT use "on Thursday, December 18, 2025" or any date format). DO NOT include the percentage in the first paragraph. Then reference the news article provided above AND broader market context to explain what's going on - either the news is contributing to the move, OR the stock is moving despite positive/negative news (suggesting larger market elements may be at play). ${marketContext ? 'Use the broader market context (indices, sectors, market breadth) to provide additional context - is the stock moving with or against broader market trends? Reference specific sector performance when relevant (e.g., "Technology stocks are broadly lower today, contributing to the decline" or "Despite a strong market day, the stock is down, suggesting company-specific concerns").' : ''} Include the appropriate hyperlink in the first paragraph (three-word for Benzinga, one-word with outlet credit for others). When mentioning other companies in the article, always include their ticker symbol with exchange (e.g., "Snowflake Inc. (NYSE:SNOW)").
 
-MANDATORY: You MUST include section markers in your output. Insert "## Section: The Catalyst" AFTER the "Also Read" section (which comes after the FIRST paragraph), "## Section: Technical Analysis" after news paragraphs, "## Section: Earnings & Analyst Outlook" if earnings or analyst data is available (MANDATORY if consensus ratings or earnings date data is provided)${edgeRatings ? ', "## Section: Benzinga Edge Rankings" after the Earnings & Analyst Outlook section' : ''}, and "## Section: Price Action" immediately before the automatically-generated price action line at the end. CRITICAL: Do NOT write any paragraph or content in the "## Section: Price Action" section - the price action line is automatically generated and added after your article. Just place the section marker "## Section: Price Action" and end your article there. These section markers are REQUIRED - do not skip them.
+MANDATORY: You MUST include section markers in your output. ${newsContext && (newsContext.scrapedContent || (newsContext.selectedArticles && newsContext.selectedArticles.length > 0)) ? 'Insert "## Section: The Catalyst" AFTER the "Also Read" section (which comes after the FIRST paragraph)' : ''}, "## Section: Technical Analysis" after news paragraphs${!newsContext || (!newsContext.scrapedContent && (!newsContext.selectedArticles || newsContext.selectedArticles.length === 0)) ? ' (or after lead paragraph if no news)' : ''}${data.description && data.description !== 'N/A' ? ', "## Section: Company Context" after "## Section: Technical Analysis"' : ''}, "## Section: Earnings & Analyst Outlook" if earnings or analyst data is available (MANDATORY if consensus ratings or earnings date data is provided)${edgeRatings ? ', "## Section: Benzinga Edge Rankings" after the Earnings & Analyst Outlook section' : ''}, and "## Section: Price Action" immediately before the automatically-generated price action line at the end. CRITICAL: Do NOT write any paragraph or content in the "## Section: Price Action" section - the price action line is automatically generated and added after your article. Just place the section marker "## Section: Price Action" and end your article there. These section markers are REQUIRED - do not skip them.
 
 CRITICAL: The second paragraph (which appears AFTER "## Section: The Catalyst") and optionally third paragraph MUST include detailed, specific information from the news source article. Do NOT just summarize or use vague language. Extract and include:
 - Specific numbers, figures, percentages, dates, or metrics from the article
@@ -4905,6 +5006,138 @@ export async function POST(request: Request) {
                 }
               }
             }
+          }
+          
+          // Check if "## Section: Company Context" should exist and is missing
+          const companyContextSectionMarker = /##\s*Section:\s*Company\s*Context/i;
+          const hasCompanyContextMarker = !!analysisWithPriceAction.match(companyContextSectionMarker);
+          
+          // Check if description exists in technicalData (should match what was in the prompt)
+          const shouldHaveCompanyContext = technicalData.description && technicalData.description !== 'N/A' && technicalData.description.trim().length > 0;
+          
+          if (shouldHaveCompanyContext && !hasCompanyContextMarker && technicalData.description) {
+            console.log(`[COMPANY CONTEXT] Description exists but section marker is missing. Description length: ${technicalData.description.length}`);
+            console.log(`[COMPANY CONTEXT] Attempting to inject "## Section: Company Context" section`);
+            
+            // Determine where to insert: after "Technical Analysis" section
+            const technicalAnalysisMarker = /##\s*Section:\s*Technical\s*Analysis/i;
+            const technicalAnalysisMatch = analysisWithPriceAction.match(technicalAnalysisMarker);
+            
+            let insertPosition = -1;
+            
+            if (technicalAnalysisMatch && technicalAnalysisMatch.index !== undefined) {
+              // Find the end of the "Technical Analysis" section (look for next section marker)
+              const afterTechnicalMarker = analysisWithPriceAction.substring(technicalAnalysisMatch.index + technicalAnalysisMatch[0].length);
+              const nextSectionMatch = afterTechnicalMarker.match(/(##\s*Section:|Price Action:)/);
+              
+              if (nextSectionMatch && nextSectionMatch.index !== undefined) {
+                // Insert after Technical Analysis, before the next section
+                insertPosition = technicalAnalysisMatch.index + technicalAnalysisMatch[0].length + nextSectionMatch.index;
+              } else {
+                // No next section found, insert at the end of Technical Analysis content
+                // Look for the end of the technical analysis content (before price action or end of text)
+                const priceActionMarker = /##\s*Section:\s*Price Action/i;
+                const priceActionMatch = analysisWithPriceAction.match(priceActionMarker);
+                
+                if (priceActionMatch && priceActionMatch.index !== undefined) {
+                  insertPosition = priceActionMatch.index;
+                } else {
+                  // Insert near the end of the content
+                  insertPosition = analysisWithPriceAction.length;
+                }
+              }
+            } else {
+              // Technical Analysis section marker not found - try to find where technical content ends
+              // Look for common patterns that indicate end of technical analysis:
+              // 1. "Key Resistance" / "Key Support" (usually at end of technical analysis)
+              // 2. "## Section: Earnings" (comes after technical analysis)
+              // 3. "## Section: Benzinga Edge" (comes after technical analysis)
+              
+              const keyResistanceSupportPattern = /Key (Resistance|Support):\s*\$[\d.]+/i;
+              const keyResistanceMatch = analysisWithPriceAction.match(keyResistanceSupportPattern);
+              
+              if (keyResistanceMatch && keyResistanceMatch.index !== undefined) {
+                // Find the end of the Key Resistance/Support lines
+                const afterKeyResistance = analysisWithPriceAction.substring(keyResistanceMatch.index);
+                const nextLineMatch = afterKeyResistance.match(/\n\n/);
+                const earningsSectionMatch = afterKeyResistance.match(/##\s*Section:\s*Earnings/i);
+                const edgeSectionMatch = afterKeyResistance.match(/##\s*Section:\s*Benzinga\s*Edge/i);
+                
+                if (earningsSectionMatch && earningsSectionMatch.index !== undefined) {
+                  insertPosition = keyResistanceMatch.index + earningsSectionMatch.index;
+                } else if (edgeSectionMatch && edgeSectionMatch.index !== undefined) {
+                  insertPosition = keyResistanceMatch.index + edgeSectionMatch.index;
+                } else if (nextLineMatch && nextLineMatch.index !== undefined) {
+                  // Insert after the Key Resistance/Support block
+                  insertPosition = keyResistanceMatch.index + nextLineMatch.index + 2;
+                } else {
+                  // Fallback: insert after Key Resistance/Support
+                  insertPosition = keyResistanceMatch.index + keyResistanceMatch[0].length;
+                }
+              } else {
+                // Try to find "## Section: Earnings" directly
+                const earningsSectionMarker = /##\s*Section:\s*Earnings/i;
+                const earningsMatch = analysisWithPriceAction.match(earningsSectionMarker);
+                
+                if (earningsMatch && earningsMatch.index !== undefined) {
+                  insertPosition = earningsMatch.index;
+                } else {
+                  // Last resort: look for "## Section: Benzinga Edge"
+                  const edgeSectionMarker = /##\s*Section:\s*Benzinga\s*Edge/i;
+                  const edgeMatch = analysisWithPriceAction.match(edgeSectionMarker);
+                  
+                  if (edgeMatch && edgeMatch.index !== undefined) {
+                    insertPosition = edgeMatch.index;
+                  } else {
+                    // Final fallback: insert before "## Section: Price Action"
+                    const priceActionMarker = /##\s*Section:\s*Price Action/i;
+                    const priceActionMatch = analysisWithPriceAction.match(priceActionMarker);
+                    
+                    if (priceActionMatch && priceActionMatch.index !== undefined) {
+                      insertPosition = priceActionMatch.index;
+                    }
+                  }
+                }
+              }
+            }
+            
+            if (insertPosition !== -1 && technicalData.description) {
+              const beforeInsert = analysisWithPriceAction.substring(0, insertPosition).trim();
+              const afterInsert = analysisWithPriceAction.substring(insertPosition);
+              
+              // Split long descriptions into multiple paragraphs
+              // Split by sentences (period followed by space and capital letter, or end of string)
+              const sentences = technicalData.description.match(/[^.!?]+[.!?]+(?:\s+|$)/g) || [technicalData.description];
+              
+              let formattedDescription = '';
+              if (sentences.length <= 3) {
+                // Short description: keep as single paragraph
+                formattedDescription = technicalData.description;
+              } else {
+                // Long description: split into 2-3 sentences per paragraph
+                const sentencesPerParagraph = Math.ceil(sentences.length / 2); // Aim for 2 paragraphs
+                const paragraphs: string[] = [];
+                
+                for (let i = 0; i < sentences.length; i += sentencesPerParagraph) {
+                  const paragraphSentences = sentences.slice(i, i + sentencesPerParagraph);
+                  paragraphs.push(paragraphSentences.join(' ').trim());
+                }
+                
+                formattedDescription = paragraphs.join('\n\n');
+              }
+              
+              // Use the formatted description (plain text, no HTML tags)
+              const companyContextContent = `## Section: Company Context\n\n${formattedDescription}\n\n`;
+              
+              analysisWithPriceAction = `${beforeInsert}\n\n${companyContextContent}${afterInsert}`;
+              console.log(`[COMPANY CONTEXT] ✅ Injected "## Section: Company Context" section with full description (${technicalData.description.length} chars, split into ${formattedDescription.split('\n\n').length} paragraph(s))`);
+            } else {
+              console.log(`[COMPANY CONTEXT] ⚠️ Could not determine insertion position for Company Context section`);
+            }
+          } else if (shouldHaveCompanyContext && hasCompanyContextMarker) {
+            console.log(`[COMPANY CONTEXT] ✅ Section marker found in output`);
+          } else if (!shouldHaveCompanyContext) {
+            console.log(`[COMPANY CONTEXT] Description not available, skipping check`);
           }
           
           // Fetch consensus ratings and earnings to check if section marker should exist
