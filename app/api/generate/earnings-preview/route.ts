@@ -1753,30 +1753,10 @@ export async function POST(request: Request) {
             sourceContent || undefined
           );
 
-          // Add "Also Read" section from related articles (after first paragraph)
-          const relatedArticles = await fetchRelatedArticles(ticker);
-          if (relatedArticles && relatedArticles.length > 0) {
-            const alsoReadArticle = relatedArticles[0];
-            
-            // Insert "Also Read" after first paragraph (before "## Section: What to Expect")
-            // Find the first section marker
-            const sectionMarkerMatch = preview.match(/##\s*Section:/);
-            if (sectionMarkerMatch && sectionMarkerMatch.index !== undefined) {
-              const beforeSection = preview.substring(0, sectionMarkerMatch.index).trim();
-              const afterSection = preview.substring(sectionMarkerMatch.index);
-              // Check if "Also Read" already exists
-              if (!beforeSection.includes('Also Read:')) {
-                preview = `${beforeSection}\n\nAlso Read: <a href="${alsoReadArticle.url}">${alsoReadArticle.headline}</a>\n\n${afterSection}`;
-              }
-            } else {
-              // Fallback: insert after first paragraph
-              const paragraphs = preview.split(/\n\n+/);
-              if (paragraphs.length > 1 && !preview.includes('Also Read:')) {
-                paragraphs.splice(1, 0, `Also Read: <a href="${alsoReadArticle.url}">${alsoReadArticle.headline}</a>`);
-                preview = paragraphs.join('\n\n');
-              }
-            }
-          }
+          // Note: "Also Read" and "Read Next" sections have been removed per user request
+          // Remove any existing "Also Read" sections that might have been added by AI
+          const alsoReadPattern = /Also Read:.*?(?=\n\n|$)/gi;
+          preview = preview.replace(alsoReadPattern, '').trim();
 
           // If contextBriefs were provided (Enrich First mode), automatically add news section
           if (contextBriefs && contextBriefs[ticker]) {
@@ -1849,16 +1829,10 @@ export async function POST(request: Request) {
             preview += `\n\n## Section: Price Action\n\n${priceAction}`;
           }
 
-          // Insert "Read Next" at the VERY END (after ETF and Price Action sections)
-          if (relatedArticles && relatedArticles.length > 0) {
-            // Remove any existing "Read Next" section first
-            const readNextPattern = /Read Next:.*?(?=\n\n|$)/gi;
-            preview = preview.replace(readNextPattern, '').trim();
-            
-            const readNextArticle = relatedArticles.length > 1 ? relatedArticles[1] : relatedArticles[0];
-            // Always add at the very end
-            preview = `${preview.trim()}\n\nRead Next: <a href="${readNextArticle.url}">${readNextArticle.headline}</a>`;
-          }
+          // Note: "Read Next" section has been removed per user request
+          // Remove any existing "Read Next" sections that might have been added by AI
+          const readNextPattern = /Read Next:.*?(?=\n\n|$)/gi;
+          preview = preview.replace(readNextPattern, '').trim();
 
           // Inject SEO subheads (FINAL STEP, if enabled)
           // Automatically enabled for Enrich First mode, or if not skipped for regular mode

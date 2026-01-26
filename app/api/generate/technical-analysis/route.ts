@@ -4123,12 +4123,12 @@ CRITICAL INSTRUCTIONS FOR NEWS INTEGRATION:
    
    This paragraph should also be 2 sentences and contain substantive details that complement the second paragraph. Together, paragraphs 2 and 3 should provide comprehensive coverage of the article's key details.
 
-6. After the lead paragraph (teaser), "Also Read" section, section marker, and two news content paragraphs (paragraphs 2 and 3, where paragraph 2 contains the specific details like analyst names and price targets), and the broader market/sector paragraph (paragraph 4, if applicable), naturally transition to the technical analysis data provided above.
+6. After the lead paragraph (teaser), section marker, and two news content paragraphs (paragraphs 2 and 3, where paragraph 2 contains the specific details like analyst names and price targets), and the broader market/sector paragraph (paragraph 4, if applicable), naturally transition to the technical analysis data provided above.
 
 6. Maximum 2 sentences per paragraph throughout the story.
 
 7. SECTION MARKERS (MANDATORY): You MUST insert section markers between major logical blocks. Format: "## Section: [Label]" on its own line. Required markers:
-   ${newsContext && (newsContext.scrapedContent || (newsContext.selectedArticles && newsContext.selectedArticles.length > 0)) ? '- "## Section: The Catalyst" - after the "Also Read" section (which appears after the first paragraph), before the detailed news paragraphs (Paragraph 2 with specific details)' : ''}
+   ${newsContext && (newsContext.scrapedContent || (newsContext.selectedArticles && newsContext.selectedArticles.length > 0)) ? '- "## Section: The Catalyst" - after the first paragraph, before the detailed news paragraphs (Paragraph 2 with specific details)' : ''}
    - "## Section: Technical Analysis" - after news paragraphs${!newsContext || (!newsContext.scrapedContent && (!newsContext.selectedArticles || newsContext.selectedArticles.length === 0)) ? ' (or after lead paragraph if no news)' : ''}, before technical data
    ${data.description && data.description !== 'N/A' ? '- "## Section: Company Context" - after "## Section: Technical Analysis", before "## Section: Earnings & Analyst Outlook" (or before "## Section: Benzinga Edge Rankings" or "## Section: Price Action" if those come next). Use this section to explain why this company matters and provide context about its business model and market position.' : ''}
    - "## Section: Analyst Ratings" - only if Analyst Overview is included
@@ -4179,7 +4179,7 @@ DO NOT SKIP THIS SECTION. It is mandatory when company description is provided.
 
 TASK: ${newsContext && (newsContext.scrapedContent || (newsContext.selectedArticles && newsContext.selectedArticles.length > 0)) ? `Write a conversational WGO article that helps readers understand "What's Going On" with the stock. LEAD with the current price move (direction and day of week, e.g., "shares are tumbling on Monday" or "shares are surging on Tuesday"). Use ONLY the day name (e.g., "on Thursday", "on Monday") - DO NOT include the date (e.g., do NOT use "on Thursday, December 18, 2025" or any date format). DO NOT include the percentage in the first paragraph. Then reference the news article provided above AND broader market context to explain what's going on - either the news is contributing to the move, OR the stock is moving despite positive/negative news (suggesting larger market elements may be at play). ${marketContext ? 'Use the broader market context (indices, sectors, market breadth) to provide additional context - is the stock moving with or against broader market trends? Reference specific sector performance when relevant (e.g., "Technology stocks are broadly lower today, contributing to the decline" or "Despite a strong market day, the stock is down, suggesting company-specific concerns").' : ''} Include the appropriate hyperlink in the first paragraph (three-word for Benzinga, one-word with outlet credit for others). When mentioning other companies in the article, always include their ticker symbol with exchange (e.g., "Snowflake Inc. (NYSE:SNOW)").
 
-MANDATORY: You MUST include section markers in your output. ${newsContext && (newsContext.scrapedContent || (newsContext.selectedArticles && newsContext.selectedArticles.length > 0)) ? 'Insert "## Section: The Catalyst" AFTER the "Also Read" section (which comes after the FIRST paragraph)' : ''}, "## Section: Technical Analysis" after news paragraphs${!newsContext || (!newsContext.scrapedContent && (!newsContext.selectedArticles || newsContext.selectedArticles.length === 0)) ? ' (or after lead paragraph if no news)' : ''}${data.description && data.description !== 'N/A' ? ', "## Section: Company Context" after "## Section: Technical Analysis"' : ''}, "## Section: Earnings & Analyst Outlook" if earnings or analyst data is available (MANDATORY if consensus ratings or earnings date data is provided)${edgeRatings ? ', "## Section: Benzinga Edge Rankings" after the Earnings & Analyst Outlook section' : ''}, and "## Section: Price Action" immediately before the automatically-generated price action line at the end. CRITICAL: Do NOT write any paragraph or content in the "## Section: Price Action" section - the price action line is automatically generated and added after your article. Just place the section marker "## Section: Price Action" and end your article there. These section markers are REQUIRED - do not skip them.
+MANDATORY: You MUST include section markers in your output. ${newsContext && (newsContext.scrapedContent || (newsContext.selectedArticles && newsContext.selectedArticles.length > 0)) ? 'Insert "## Section: The Catalyst" AFTER the FIRST paragraph' : ''}, "## Section: Technical Analysis" after news paragraphs${!newsContext || (!newsContext.scrapedContent && (!newsContext.selectedArticles || newsContext.selectedArticles.length === 0)) ? ' (or after lead paragraph if no news)' : ''}${data.description && data.description !== 'N/A' ? ', "## Section: Company Context" after "## Section: Technical Analysis"' : ''}, "## Section: Earnings & Analyst Outlook" if earnings or analyst data is available (MANDATORY if consensus ratings or earnings date data is provided)${edgeRatings ? ', "## Section: Benzinga Edge Rankings" after the Earnings & Analyst Outlook section' : ''}, and "## Section: Price Action" immediately before the automatically-generated price action line at the end. CRITICAL: Do NOT write any paragraph or content in the "## Section: Price Action" section - the price action line is automatically generated and added after your article. Just place the section marker "## Section: Price Action" and end your article there. These section markers are REQUIRED - do not skip them.
 
 CRITICAL: The second paragraph (which appears AFTER "## Section: The Catalyst") and optionally third paragraph MUST include detailed, specific information from the news source article. Do NOT just summarize or use vague language. Extract and include:
 - Specific numbers, figures, percentages, dates, or metrics from the article
@@ -4191,7 +4191,7 @@ CRITICAL: The second paragraph (which appears AFTER "## Section: The Catalyst") 
 
 Use concrete facts and data points from the source article. For example, instead of "delivery times have increased", use "delivery lead times now run around five days, up from three days a year ago" or "In the U.S., lead times reached eight days for the iPhone 17 and four days for the Air." Include as much specific detail as possible while keeping paragraphs concise (2-3 sentences each).
 
-After the lead paragraph (teaser), "Also Read" section, section marker, and two news content paragraphs (paragraphs 2 and 3, where paragraph 2 contains the specific details like analyst names and price targets), and the broader market/sector paragraph (paragraph 4, if applicable), transition to technical analysis focusing on longer-term trends (12-month). Then include the analyst overview section (if consensus data is available) and P/E ratio section (if P/E data is available) after the technical analysis.` : `Write a conversational WGO article that helps readers understand "What's Going On" with the stock. LEAD with the current price move and note that there's no company-specific news driving the move. ${marketContext ? 'Then use broader market context (indices, sectors, market breadth) to explain the move - is the stock moving with or against broader market trends? Reference specific sector performance when relevant. For example, if the stock is down but the broader market/sector is up, note that the stock is underperforming despite positive market conditions. If the stock is down and the broader market/sector is also down, note that the stock is caught in a broader sell-off (e.g., "Technology stocks are broadly lower today, contributing to the decline").' : ''} Then use technical indicators (moving averages, RSI, MACD, support/resistance) to create a narrative that explains what's happening and why traders are seeing this price action. Focus on using technical data to tell the story - what do the charts reveal about the stock's current situation? After the technical analysis section, include the analyst overview section (if consensus data is available) and P/E ratio section (if P/E data is available).`}
+After the lead paragraph (teaser), section marker, and two news content paragraphs (paragraphs 2 and 3, where paragraph 2 contains the specific details like analyst names and price targets), and the broader market/sector paragraph (paragraph 4, if applicable), transition to technical analysis focusing on longer-term trends (12-month). Then include the analyst overview section (if consensus data is available) and P/E ratio section (if P/E data is available) after the technical analysis.` : `Write a conversational WGO article that helps readers understand "What's Going On" with the stock. LEAD with the current price move and note that there's no company-specific news driving the move. ${marketContext ? 'Then use broader market context (indices, sectors, market breadth) to explain the move - is the stock moving with or against broader market trends? Reference specific sector performance when relevant. For example, if the stock is down but the broader market/sector is up, note that the stock is underperforming despite positive market conditions. If the stock is down and the broader market/sector is also down, note that the stock is caught in a broader sell-off (e.g., "Technology stocks are broadly lower today, contributing to the decline").' : ''} Then use technical indicators (moving averages, RSI, MACD, support/resistance) to create a narrative that explains what's happening and why traders are seeing this price action. Focus on using technical data to tell the story - what do the charts reveal about the stock's current situation? After the technical analysis section, include the analyst overview section (if consensus data is available) and P/E ratio section (if P/E data is available).`}
 
 *** CRITICAL STRUCTURAL UPDATE: THE "SPLIT LEDE" ***
 
@@ -4199,7 +4199,7 @@ You must strictly follow this paragraph order to ensure SEO headers capture the 
 
 1. **Paragraph 1 (The Teaser):** State that the stock is moving and briefly mention the *general* reason (e.g., "following a bullish analyst report" or "after Q3 earnings"). Do NOT give the specific numbers (Price Targets, EPS) here. Do NOT mention analyst names or firm names here. Include the Market Context (indices/sector) here if applicable.
 
-2. **The "Also Read" Link:** Insert the provided "Also Read" hyperlink immediately after Paragraph 1.
+2. **Paragraph Structure:** Continue with detailed news paragraphs after the lead.
 
 3. **HEADER MARKER:** Insert ## Section: The Catalyst right here.
 
@@ -4213,7 +4213,7 @@ You MUST insert GENERIC SECTION HEADERS between the major logical blocks of the 
 Rules for Headers:
 1. Format: Use "## Section: [Label]" (markdown H2 format)
 2. Placement (MANDATORY):
-   - Insert "## Section: The Catalyst" AFTER the "Also Read" section (which appears after the first paragraph) and BEFORE the detailed news paragraphs (Paragraph 2 with the specific details).
+   - Insert "## Section: The Catalyst" AFTER the first paragraph and BEFORE the detailed news paragraphs (Paragraph 2 with the specific details).
    - Insert "## Section: Technical Analysis" immediately after the news paragraphs and BEFORE the transition to technical data.
    - Insert "## Section: Earnings & Analyst Outlook" AFTER "## Section: Technical Analysis" if earnings data or analyst consensus ratings are available (this is MANDATORY when earnings/analyst data is provided).
    ${edgeRatings ? '- Insert "## Section: Benzinga Edge Rankings" AFTER "## Section: Earnings & Analyst Outlook" and BEFORE "## Section: Price Action".' : ''}
@@ -4222,7 +4222,7 @@ Rules for Headers:
 CRITICAL: 
 - Do not try to write creative headers. Use these EXACT generic labels.
 - These section markers are REQUIRED - do not skip them.
-- The logic of your paragraph flow (Lead Teaser -> Also Read -> Section Marker -> Detailed News -> Technicals) remains unchanged; you are simply placing these markers between the blocks.
+- The logic of your paragraph flow (Lead Teaser -> Section Marker -> Detailed News -> Technicals) remains unchanged; you are simply placing these markers between the blocks.
 - Each section marker should be on its own line with proper spacing before and after.
 
 Weave data points naturally into your analysis rather than listing them. Write like you're explaining the stock's technical picture to a colleague - clear, direct, and engaging. When relevant, mention key turning points and when they occurred to provide context for the current technical setup. Think like a trader: prioritize actionable insights and key technical signals over routine price updates.
@@ -4268,9 +4268,7 @@ Example of CORRECT first paragraph (strong verbs, accurate context): "**Tesla, I
 
 Example of INCORRECT first paragraph (DO NOT DO THIS): "**Rocket Lab Corporation** (NASDAQ:RKLB) shares are up on Tuesday as Needham analyst Ryan Koontz reiterated a Buy rating and raised the price target from $63 to $90." This is WRONG because it includes specific analyst name, firm name, and price targets in the first paragraph.` : `Start with the company name in bold (**Company Name**), followed by the ticker with exchange in parentheses (not bold) - e.g., **Apple Inc.** (NASDAQ:AAPL) or **Applied Digital Corp.** (NASDAQ:APLD). The format should be **Company Name** (EXCHANGE:TICKER) - always include the exchange prefix (NASDAQ, NYSE, etc.). Use proper company name formatting with periods (Inc., Corp., etc.). CRITICAL: This is the ONLY place where the company name should be bolded. All subsequent references to the company throughout the article should be in regular text (not bolded) - e.g., "the company", "Apple's", "Apple is", etc. LEAD with the current price move direction using the Daily Change data provided - note ONLY the direction and day of week (e.g., "shares are tumbling on Monday" if down, "shares are surging on Tuesday" if up). Use ONLY the day name (e.g., "on Thursday", "on Monday") - DO NOT include the date. DO NOT include the percentage in the first paragraph - it's already in the price action section. ${marketContext ? 'Then IMMEDIATELY reference broader market context to explain the move - is the stock moving with or against broader market trends? Reference specific sector performance when relevant (e.g., "The move comes as Technology stocks are broadly lower today, contributing to the decline" or "Despite a strong market day with the S&P 500 up 0.5%, the stock is down, suggesting company-specific concerns" or "The stock is caught in a broader sell-off, with the Nasdaq down 1.2% and Technology sector declining 1.5%").' : 'Then immediately pivot to the technical analysis context - use moving average positioning, support/resistance levels, or key technical signals to explain what traders are seeing on the charts (e.g., "Traders are focused on the technical picture, which shows the stock is currently testing key support levels while facing mixed signals from moving averages" or "The move comes as the stock flashes a \'mixed\' signal—breaking down in the short term while testing a crucial long-term floor").'} Focus on using market context and technical indicators to add context to the move rather than declaring there's no news. STOP AFTER 2 SENTENCES.`}
 
-- THE "ALSO READ" SECTION: After the first paragraph, insert the "Also Read" hyperlink section if provided. This comes BEFORE the section marker.
-
-- SECTION MARKER: Immediately after the "Also Read" section, insert ## Section: The Catalyst on its own line.
+- SECTION MARKER: After the first paragraph, insert ## Section: The Catalyst on its own line.
 
 - SECOND PARAGRAPH (2 sentences, THE MEAT - SPECIFIC DETAILS): ${newsContext && (newsContext.scrapedContent || (newsContext.selectedArticles && newsContext.selectedArticles.length > 0)) ? `CRITICAL - THIS IS WHERE THE SPECIFIC DETAILS GO: This paragraph appears AFTER "## Section: The Catalyst" and contains the high-value, specific information. MANDATORY: Provide detailed, specific information from the news source article. This is where you include:
   * Analyst names, firm names, price targets (e.g., "Needham analyst Ryan Koontz reiterated a Buy rating and raised the price target from $63 to $90")
@@ -4415,7 +4413,7 @@ ${newsContext && (newsContext.scrapedContent || (newsContext.selectedArticles &&
 FINAL CRITICAL REMINDER - HYPERLINK REQUIREMENT (THIS IS NOT OPTIONAL): Your first paragraph MUST include an HTML hyperlink tag in your output. ${isBenzinga ? `Use this EXACT format: <a href="${primaryUrl}">[three consecutive words]</a>. The URL is: ${primaryUrl}. Embed it naturally within your first paragraph - do NOT use phrases like "as detailed in" or "according to reports". Example of what your output should look like: "**Apple Inc.** (NASDAQ:AAPL) shares closed up on Thursday as the company is <a href="${primaryUrl}">reportedly deepening its</a> India strategy".` : `Use this EXACT format: <a href="${primaryUrl}">${outletName || 'Source'}</a> reports. The URL is: ${primaryUrl}. Example: "<a href="${primaryUrl}">CNBC</a> reports".`} IF YOU DO NOT INCLUDE THE <a href> TAG IN YOUR FIRST PARAGRAPH OUTPUT, YOUR RESPONSE IS INCOMPLETE AND INCORRECT.` : ''}
 
 FINAL CRITICAL REMINDER - SECTION MARKERS (THIS IS NOT OPTIONAL): Your article output MUST include section markers in markdown H2 format. You MUST include:
-- "## Section: The Catalyst" AFTER the "Also Read" section (which appears after the first paragraph)
+- "## Section: The Catalyst" AFTER the first paragraph
 - "## Section: Technical Analysis" after the news paragraphs  
 - "## Section: Analyst Ratings" if analyst overview is included
 - "## Section: Price Action" immediately before the automatically-generated price action line (do NOT write any content in this section - just place the marker)
@@ -4775,247 +4773,16 @@ export async function POST(request: Request) {
         // Build the final content: start with clean analysis (ETF and Price Action will be added later)
         let analysisWithPriceAction = cleanAnalysis;
 
-        // Fetch related articles and add "Also Read" and "Read Next" sections
-        const excludeUrl = newsContext?.newsUrl || (newsContext?.selectedArticles && newsContext.selectedArticles[0]?.url) || undefined;
-        const relatedArticles = await fetchRelatedArticles(ticker, excludeUrl);
+        // Note: "Also Read" and "Read Next" sections have been removed per user request
         
-        // Ensure "Also Read" and "Read Next" sections are included if related articles are available
-        if (relatedArticles && relatedArticles.length > 0) {
-          // Check if "Also Read" section exists
-          const alsoReadPattern = /(?:<p>)?Also Read:.*?(?:<\/p>)?/i;
-          const alsoReadMatch = analysisWithPriceAction.match(alsoReadPattern);
-          const alsoReadExists = !!alsoReadMatch;
-          
-          // Check if it has an HTML link tag - if not, we need to replace it
-          const alsoReadSectionText = alsoReadMatch ? alsoReadMatch[0] : '';
-          const hasHTMLLink = alsoReadExists && alsoReadSectionText.includes('<a href=');
-          
-          if (!alsoReadExists || !hasHTMLLink) {
-            // If it exists but doesn't have HTML link, remove it first
-            if (alsoReadExists && !hasHTMLLink) {
-              console.log('Removing incorrectly formatted "Also Read" section (no HTML link)');
-              if (alsoReadMatch && alsoReadMatch.index !== undefined) {
-                const beforeAlsoRead = analysisWithPriceAction.substring(0, alsoReadMatch.index);
-                const afterAlsoRead = analysisWithPriceAction.substring(alsoReadMatch.index + alsoReadMatch[0].length);
-                analysisWithPriceAction = (beforeAlsoRead + afterAlsoRead).replace(/\n\n\n+/g, '\n\n');
-              }
-            }
-            console.log('Adding "Also Read" section');
-            // Split content by double newlines (paragraph breaks) or </p> tags
-            // Handle both HTML and plain text formats
-            const hasHTMLTags = analysisWithPriceAction.includes('</p>');
-            let paragraphs: string[];
-            
-            if (hasHTMLTags) {
-              // HTML format: split by </p> tags
-              paragraphs = analysisWithPriceAction.split('</p>').filter(p => p.trim().length > 0);
-            } else {
-              // Plain text format: split by double newlines
-              paragraphs = analysisWithPriceAction.split(/\n\s*\n/).filter(p => p.trim().length > 0);
-            }
-            
-            // Remove any existing "Also Read" text from the AI output first
-            paragraphs = paragraphs.filter(p => {
-              const trimmed = p.trim();
-              // Remove standalone "Also Read" lines (without links or not properly formatted)
-              if (trimmed === 'Also Read' || trimmed === 'Also Read:' || 
-                  (trimmed.includes('Also Read') && !trimmed.includes('<a href'))) {
-                console.log(`[CLEANUP] Removing standalone "Also Read" text: "${trimmed}"`);
-                return false;
-              }
-              return true;
-            });
-            
-            // Insert "Also Read" after the first paragraph (index 1)
-            if (paragraphs.length >= 1) {
-              // Always use HTML link format even if content is plain text (for clickable links)
-              const alsoReadSection = `Also Read: <a href="${relatedArticles[0].url}">${relatedArticles[0].headline}</a>`;
-              
-              // Insert at index 1 (after first paragraph)
-              paragraphs.splice(1, 0, alsoReadSection);
-              
-              // Rejoin content
-              if (hasHTMLTags) {
-                analysisWithPriceAction = paragraphs.map(p => {
-                  // If it already ends with </p>, return as-is
-                  if (p.trim().endsWith('</p>')) return p;
-                  // If it's the alsoReadSection, wrap in <p> tags
-                  if (p.includes('Also Read:')) return `<p>${p}</p>`;
-                  // Otherwise, add </p> back
-                  return p + '</p>';
-                }).join('');
-              } else {
-                analysisWithPriceAction = paragraphs.join('\n\n');
-              }
-              
-              console.log('✅ "Also Read" section placed after first paragraph');
-              
-              // Clean up: Remove any standalone headline-like lines that appear after "Also Read"
-              // These are often AI-generated summaries that shouldn't be there
-              const alsoReadIndex = analysisWithPriceAction.indexOf('Also Read:');
-              if (alsoReadIndex !== -1) {
-                const afterAlsoRead = analysisWithPriceAction.substring(alsoReadIndex);
-                // Look for standalone lines (not in paragraphs) that look like headlines
-                const lines = afterAlsoRead.split('\n');
-                let cleanedLines: string[] = [];
-                let foundSectionMarker = false;
-                
-                for (let i = 0; i < lines.length; i++) {
-                  const line = lines[i].trim();
-                  
-                  // Skip empty lines
-                  if (!line) {
-                    cleanedLines.push(lines[i]);
-                    continue;
-                  }
-                  
-                  // Keep "Also Read" section (only the properly formatted one with link)
-                  if (line.includes('Also Read')) {
-                    // Check if this is a properly formatted "Also Read" (has link)
-                    const hasLink = line.includes('<a href');
-                    // Check if we already have a properly formatted "Also Read" section
-                    const hasExistingAlsoRead = cleanedLines.some(l => l.includes('Also Read') && l.includes('<a href'));
-                    
-                    if (hasLink && !hasExistingAlsoRead) {
-                      // This is the first properly formatted "Also Read" with link - keep it
-                      cleanedLines.push(lines[i]);
-                    } else {
-                      // This is a duplicate or standalone "Also Read" without link - remove it
-                      console.log(`[CLEANUP] Removing duplicate or standalone "Also Read" line: "${line}"`);
-                    }
-                    continue;
-                  }
-                  
-                  // Keep section markers
-                  if (line.startsWith('## Section:')) {
-                    foundSectionMarker = true;
-                    cleanedLines.push(lines[i]);
-                    continue;
-                  }
-                  
-                  // Remove standalone hyperlinks or headline-like text between "Also Read" and section marker
-                  // This catches things like "Latest Market Insights" with links or other standalone headlines
-                  if (!foundSectionMarker) {
-                    // Check if line is a standalone hyperlink (has <a href> but not wrapped in <p> tags)
-                    const hasHTMLLink = line.includes('<a href');
-                    const isInParagraph = line.startsWith('<p>') || line.match(/<p[^>]*>.*<a href/);
-                    
-                    if (hasHTMLLink && !isInParagraph) {
-                      console.log(`[CLEANUP] Removing standalone HTML hyperlink between "Also Read" and section marker: "${line}"`);
-                      continue;
-                    }
-                    
-                    // Check if line is a standalone markdown link (format: [text](url))
-                    const isMarkdownLink = line.match(/^\[.+\]\(https?:\/\/.+\)\s*$/);
-                    if (isMarkdownLink) {
-                      console.log(`[CLEANUP] Removing standalone markdown link between "Also Read" and section marker: "${line}"`);
-                      continue;
-                    }
-                  }
-                  
-                  // Keep HTML paragraphs
-                  if (line.startsWith('<p>') || line.includes('</p>')) {
-                    cleanedLines.push(lines[i]);
-                    continue;
-                  }
-                  
-                  // Remove standalone lines that look like headlines or fragments
-                  // These are often AI-generated summaries or fragments that appear after "Also Read"
-                  const trimmedLine = line.trim();
-                  const isStandaloneHeadline = 
-                    !foundSectionMarker && // Only before section marker
-                    trimmedLine.length > 0 && // Not empty
-                    trimmedLine.length < 150 && // Short line
-                    !trimmedLine.startsWith('**') && // Not bolded company name
-                    !trimmedLine.startsWith('##') && // Not a section marker
-                    !trimmedLine.startsWith('<') && // Not HTML
-                    (
-                      // Fragment that starts with lowercase and ends with punctuation (e.g., "crashed 71% since the election.")
-                      (trimmedLine.match(/^[a-z].*[.!?]\s*$/) && trimmedLine.length < 100) ||
-                      // Short fragment that doesn't look like a proper paragraph (no capital start or no punctuation)
-                      (trimmedLine.length < 50 && !trimmedLine.match(/^[A-Z][^.!?]*[.!?]\s*$/)) ||
-                      // Looks like a headline with quotes
-                      (trimmedLine.includes("'") && trimmedLine.match(/^[A-Z][a-z]+/))
-                    );
-                  
-                  if (isStandaloneHeadline) {
-                    console.log(`[CLEANUP] Removing standalone headline-like line or fragment after "Also Read": "${trimmedLine}"`);
-                    continue; // Skip this line
-                  }
-                  
-                  cleanedLines.push(lines[i]);
-                }
-                
-                const beforeAlsoRead = analysisWithPriceAction.substring(0, alsoReadIndex);
-                analysisWithPriceAction = beforeAlsoRead + cleanedLines.join('\n');
-              }
-              
-              // Ensure "## Section: The Catalyst" comes AFTER "Also Read"
-              // Check if section marker exists and is before "Also Read"
-              const sectionMarkerPattern = /## Section: The Catalyst/i;
-              const sectionMarkerMatch = analysisWithPriceAction.match(sectionMarkerPattern);
-              if (sectionMarkerMatch) {
-                const markerIndex = analysisWithPriceAction.indexOf(sectionMarkerMatch[0]);
-                const alsoReadIndex = analysisWithPriceAction.indexOf('Also Read:');
-                
-                // If section marker is before "Also Read", move it after
-                if (markerIndex !== -1 && alsoReadIndex !== -1 && markerIndex < alsoReadIndex) {
-                  console.log('Moving "## Section: The Catalyst" to after "Also Read"');
-                  // Remove the section marker from its current location
-                  const beforeMarker = analysisWithPriceAction.substring(0, markerIndex);
-                  const afterMarker = analysisWithPriceAction.substring(markerIndex + sectionMarkerMatch[0].length);
-                  const withoutMarker = (beforeMarker + afterMarker).replace(/\n\n\n+/g, '\n\n');
-                  
-                  // Find "Also Read" and insert section marker after it
-                  const alsoReadEndIndex = analysisWithPriceAction.indexOf('</a>', alsoReadIndex);
-                  if (alsoReadEndIndex !== -1) {
-                    const beforeAlsoRead = withoutMarker.substring(0, alsoReadEndIndex + 4);
-                    const afterAlsoRead = withoutMarker.substring(alsoReadEndIndex + 4);
-                    // Insert section marker after "Also Read" with proper spacing
-                    analysisWithPriceAction = `${beforeAlsoRead}\n\n## Section: The Catalyst\n\n${afterAlsoRead.trim()}`;
-                    console.log('✅ Moved "## Section: The Catalyst" to after "Also Read"');
-                  }
-                }
-              }
-            } else {
-              console.log('⚠️ Not enough paragraphs to insert "Also Read" (need at least 1)');
-            }
-          } else {
-            console.log('"Also Read" section already exists');
-            
-            // Even if "Also Read" already exists, ensure section marker is after it
-            const sectionMarkerPattern = /## Section: The Catalyst/i;
-            const sectionMarkerMatch = analysisWithPriceAction.match(sectionMarkerPattern);
-            if (sectionMarkerMatch) {
-              const markerIndex = analysisWithPriceAction.indexOf(sectionMarkerMatch[0]);
-              const alsoReadIndex = analysisWithPriceAction.indexOf('Also Read:');
-              
-              // If section marker is before "Also Read", move it after
-              if (markerIndex !== -1 && alsoReadIndex !== -1 && markerIndex < alsoReadIndex) {
-                console.log('Moving "## Section: The Catalyst" to after "Also Read"');
-                const beforeMarker = analysisWithPriceAction.substring(0, markerIndex);
-                const afterMarker = analysisWithPriceAction.substring(markerIndex + sectionMarkerMatch[0].length);
-                const withoutMarker = (beforeMarker + afterMarker).replace(/\n\n\n+/g, '\n\n');
-                
-                const alsoReadEndIndex = analysisWithPriceAction.indexOf('</a>', alsoReadIndex);
-                if (alsoReadEndIndex !== -1) {
-                  const beforeAlsoRead = withoutMarker.substring(0, alsoReadEndIndex + 4);
-                  const afterAlsoRead = withoutMarker.substring(alsoReadEndIndex + 4);
-                  analysisWithPriceAction = `${beforeAlsoRead}\n\n## Section: The Catalyst\n\n${afterAlsoRead.trim()}`;
-                  console.log('✅ Moved "## Section: The Catalyst" to after "Also Read"');
-                }
-              }
-            }
-          }
-          
-          // Check if "## Section: Company Context" should exist and is missing
-          const companyContextSectionMarker = /##\s*Section:\s*Company\s*Context/i;
-          const hasCompanyContextMarker = !!analysisWithPriceAction.match(companyContextSectionMarker);
-          
-          // Check if description exists in technicalData (should match what was in the prompt)
-          const shouldHaveCompanyContext = technicalData.description && technicalData.description !== 'N/A' && technicalData.description.trim().length > 0;
-          
-          if (shouldHaveCompanyContext && !hasCompanyContextMarker && technicalData.description) {
+        // Check if "## Section: Company Context" should exist and is missing
+        const companyContextSectionMarker = /##\s*Section:\s*Company\s*Context/i;
+        const hasCompanyContextMarker = !!analysisWithPriceAction.match(companyContextSectionMarker);
+        
+        // Check if description exists in technicalData (should match what was in the prompt)
+        const shouldHaveCompanyContext = technicalData.description && technicalData.description !== 'N/A' && technicalData.description.trim().length > 0;
+        
+        if (shouldHaveCompanyContext && !hasCompanyContextMarker && technicalData.description) {
             console.log(`[COMPANY CONTEXT] Description exists but section marker is missing. Description length: ${technicalData.description.length}`);
             console.log(`[COMPANY CONTEXT] Attempting to inject "## Section: Company Context" section`);
             
@@ -5134,33 +4901,33 @@ export async function POST(request: Request) {
             } else {
               console.log(`[COMPANY CONTEXT] ⚠️ Could not determine insertion position for Company Context section`);
             }
-          } else if (shouldHaveCompanyContext && hasCompanyContextMarker) {
-            console.log(`[COMPANY CONTEXT] ✅ Section marker found in output`);
-          } else if (!shouldHaveCompanyContext) {
-            console.log(`[COMPANY CONTEXT] Description not available, skipping check`);
-          }
+        } else if (shouldHaveCompanyContext && hasCompanyContextMarker) {
+          console.log(`[COMPANY CONTEXT] ✅ Section marker found in output`);
+        } else if (!shouldHaveCompanyContext) {
+          console.log(`[COMPANY CONTEXT] Description not available, skipping check`);
+        }
+        
+        // Fetch consensus ratings and earnings to check if section marker should exist
+        const [consensusRatingsCheck, nextEarningsCheck] = await Promise.all([
+          fetchConsensusRatings(ticker),
+          fetchNextEarningsDate(ticker)
+        ]);
+        
+        // Check if "## Section: Earnings & Analyst Outlook" marker exists
+        const earningsAnalystSectionMarker = /##\s*Section:\s*Earnings\s*&\s*Analyst\s*Outlook/i;
+        const hasEarningsAnalystMarker = !!analysisWithPriceAction.match(earningsAnalystSectionMarker);
           
-          // Fetch consensus ratings and earnings to check if section marker should exist
-          const [consensusRatingsCheck, nextEarningsCheck] = await Promise.all([
-            fetchConsensusRatings(ticker),
-            fetchNextEarningsDate(ticker)
-          ]);
-          
-          // Check if "## Section: Earnings & Analyst Outlook" marker exists
-          const earningsAnalystSectionMarker = /##\s*Section:\s*Earnings\s*&\s*Analyst\s*Outlook/i;
-          const hasEarningsAnalystMarker = !!analysisWithPriceAction.match(earningsAnalystSectionMarker);
-          
-          // Find the "## Section: Technical Analysis" marker position
-          const technicalAnalysisMarker = /##\s*Section:\s*Technical\s*Analysis/i;
-          const technicalAnalysisMatch = analysisWithPriceAction.match(technicalAnalysisMarker);
-          
-          // Find the "## Section: Price Action" marker position
-          const priceActionSectionMarker = /##\s*Section:\s*Price Action/i;
-          const priceActionMarkerMatch = analysisWithPriceAction.match(priceActionSectionMarker);
-          const hasPriceActionMarker = !!priceActionMarkerMatch;
-          
-          // If earnings/analyst data exists but marker is missing, inject it
-          if ((consensusRatingsCheck || nextEarningsCheck) && !hasEarningsAnalystMarker) {
+        // Find the "## Section: Technical Analysis" marker position
+        const technicalAnalysisMarker = /##\s*Section:\s*Technical\s*Analysis/i;
+        const technicalAnalysisMatch = analysisWithPriceAction.match(technicalAnalysisMarker);
+        
+        // Find the "## Section: Price Action" marker position
+        const priceActionSectionMarker = /##\s*Section:\s*Price Action/i;
+        const priceActionMarkerMatch = analysisWithPriceAction.match(priceActionSectionMarker);
+        const hasPriceActionMarker = !!priceActionMarkerMatch;
+        
+        // If earnings/analyst data exists but marker is missing, inject it
+        if ((consensusRatingsCheck || nextEarningsCheck) && !hasEarningsAnalystMarker) {
             console.log('Adding "## Section: Earnings & Analyst Outlook" marker');
             let insertPosition = -1;
             
@@ -5202,18 +4969,18 @@ export async function POST(request: Request) {
               console.log('✅ Added "## Section: Earnings & Analyst Outlook" marker');
             }
           }
-          
-          // Note: ETF section and Price Action section are now added earlier in the code
-          // We no longer need to insert the section marker here since it's handled above
-          
-          // Post-process Earnings & Analyst Outlook section to format with bold labels
-          // Re-fetch P/E ratio and recent analyst actions for post-processing
-          let peRatioForPost: number | null = null;
-          let useForwardPEForPost = false;
-          let recentAnalystActionsForPost: any[] = [];
-          let consensusRatingsForPost: any = null;
-          
-          try {
+        
+        // Note: ETF section and Price Action section are now added earlier in the code
+        // We no longer need to insert the section marker here since it's handled above
+        
+        // Post-process Earnings & Analyst Outlook section to format with bold labels
+        // Re-fetch P/E ratio and recent analyst actions for post-processing
+        let peRatioForPost: number | null = null;
+        let useForwardPEForPost = false;
+        let recentAnalystActionsForPost: any[] = [];
+        let consensusRatingsForPost: any = null;
+        
+        try {
             const BENZINGA_API_KEY = process.env.BENZINGA_API_KEY;
             if (BENZINGA_API_KEY) {
               // Fetch P/E ratio
@@ -5300,14 +5067,14 @@ export async function POST(request: Request) {
                 }
               }
             }
-          } catch (error) {
-            console.error('Error fetching P/E or analyst actions for post-processing:', error);
-          }
-          
-          const earningsSectionMarker = /##\s*Section:\s*Earnings\s*&\s*Analyst\s*Outlook/i;
-          const earningsSectionMatch = analysisWithPriceAction.match(earningsSectionMarker);
-          console.log('[EARNINGS FORMAT] Checking for Earnings section marker:', !!earningsSectionMatch);
-          if (earningsSectionMatch && earningsSectionMatch.index !== undefined) {
+        } catch (error) {
+          console.error('Error fetching P/E or analyst actions for post-processing:', error);
+        }
+        
+        const earningsSectionMarker = /##\s*Section:\s*Earnings\s*&\s*Analyst\s*Outlook/i;
+        const earningsSectionMatch = analysisWithPriceAction.match(earningsSectionMarker);
+        console.log('[EARNINGS FORMAT] Checking for Earnings section marker:', !!earningsSectionMatch);
+        if (earningsSectionMatch && earningsSectionMatch.index !== undefined) {
             const afterEarningsMarker = analysisWithPriceAction.substring(earningsSectionMatch.index + earningsSectionMatch[0].length);
             const nextSectionMatch = afterEarningsMarker.match(/(##\s*Section:|##\s*Top\s*ETF|Price Action:)/i);
             const earningsSectionEnd = nextSectionMatch ? nextSectionMatch.index! : afterEarningsMarker.length;
@@ -5726,14 +5493,10 @@ export async function POST(request: Request) {
               }
             }
           }
-        } else {
-          console.log('No related articles available');
-        }
         
         // Add ETF section and Price Action section AFTER all section ordering is complete
         // Find where to insert ETF section (before "## Section: Price Action" or before price action line)
-        const priceActionSectionMarker = /##\s*Section:\s*Price Action/i;
-        const priceActionMarkerMatch = analysisWithPriceAction.match(priceActionSectionMarker);
+        // Reuse priceActionSectionMarker and priceActionMarkerMatch from above
         const priceActionTextMatch = analysisWithPriceAction.match(/(?:<strong>.*?)?Price Action:(?:<\/strong>)?/i);
         
         if (etfInfo) {
@@ -5778,27 +5541,13 @@ export async function POST(request: Request) {
           // If both marker and text exist, do nothing (already present)
         }
         
-        // Now insert "Read Next" at the VERY END, after ETF and Price Action sections
-        // Only add "Read Next" if we have a different article (at least 2 articles) to avoid duplicate links
-        if (relatedArticles && relatedArticles.length > 1) {
-          // Remove any existing "Read Next" section first (it might have been added earlier by AI or other logic)
-          const readNextPattern = /<p>Read Next:.*?<\/p>/gi;
-          analysisWithPriceAction = analysisWithPriceAction.replace(readNextPattern, '').trim();
-          // Also handle plain text format (no <p> tags)
-          const readNextPlainPattern = /Read Next:.*?(?=\n\n|$)/gi;
-          analysisWithPriceAction = analysisWithPriceAction.replace(readNextPlainPattern, '').trim();
-          
-          // Use the second article (index 1) for "Read Next" to ensure it's different from "Also Read" (index 0)
-          const readNextArticle = relatedArticles[1];
-          // Always use HTML link format (for clickable links)
-          const readNextSection = `<p>Read Next: <a href="${readNextArticle.url}">${readNextArticle.headline}</a></p>`;
-          
-          // Append to the very end of the content
-          analysisWithPriceAction = `${analysisWithPriceAction.trim()}\n\n${readNextSection}`;
-          console.log('✅ Added "Read Next" section at the very end (after ETF and Price Action)');
-        } else if (relatedArticles && relatedArticles.length === 1) {
-          console.log('⚠️ Only one related article available, skipping "Read Next" to avoid duplicate link');
-        }
+        // Note: "Read Next" section has been removed per user request
+        // Remove any existing "Read Next" sections that might have been added by AI
+        const readNextPattern = /<p>Read Next:.*?<\/p>/gi;
+        analysisWithPriceAction = analysisWithPriceAction.replace(readNextPattern, '').trim();
+        // Also handle plain text format (no <p> tags)
+        const readNextPlainPattern = /Read Next:.*?(?=\n\n|$)/gi;
+        analysisWithPriceAction = analysisWithPriceAction.replace(readNextPlainPattern, '').trim();
 
         return {
 
