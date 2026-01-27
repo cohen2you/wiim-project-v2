@@ -1318,13 +1318,14 @@ Do NOT start with "Company X is scheduled to report earnings on [date]." Instead
   
   // Build Historical Performance section content to avoid nested template literal issues
   const historicalPerformanceBeatMissSentence = historicalEarnings && historicalEarnings.beats + historicalEarnings.misses > 0
-    ? `- Start with a sentence using the ACTUAL beat/miss record from above: "The company has beat estimates in ${historicalEarnings.beats} of the last ${historicalEarnings.quarters.length} quarters"${historicalEarnings.avg_eps_surprise !== null && Math.abs(historicalEarnings.avg_eps_surprise) >= 0.1 ? ` with an average EPS surprise of ${historicalEarnings.avg_eps_surprise > 0 ? '+' : ''}${historicalEarnings.avg_eps_surprise.toFixed(1)}%` : ''}.`
+    ? `- Start with a sentence using the ACTUAL beat/miss record from above: ${historicalEarnings.beats === 4 && historicalEarnings.quarters.length === 4 ? `"The company has beat estimates in four consecutive quarters"` : `"The company has beat estimates in ${historicalEarnings.beats} of the last ${historicalEarnings.quarters.length} quarters"`}${historicalEarnings.avg_eps_surprise !== null && Math.abs(historicalEarnings.avg_eps_surprise) >= 0.1 ? ` with an average EPS surprise of ${historicalEarnings.avg_eps_surprise > 0 ? '+' : ''}${historicalEarnings.avg_eps_surprise.toFixed(1)}%` : ''}.`
     : `- Start by referencing the quarterly data provided above. Mention trends in estimates over recent quarters (e.g., "EPS estimates have shown improvement from $-0.10 to $-0.09" or "Revenue estimates indicate steady growth").`;
   
   const historicalPerformanceDetailedAnalysis = historicalEarnings && historicalEarnings.quarters && historicalEarnings.quarters.length > 0
     ? `- Provide detailed analysis using specific quarters from the quarterly breakdown above. Reference at least 2-3 specific quarters with actual numbers (dates, EPS estimates/actuals, revenue estimates/actuals). Analyze trends - are estimates improving or declining? Are there patterns in beats/misses? How has revenue growth trended?
    - Add context about what the historical data suggests for the upcoming earnings (e.g., "Given the pattern of [beats/misses], investors should watch for..." or "The trend in revenue estimates suggests...")
    - Reference the most recent quarter specifically with all relevant data points
+   - CRITICAL: When mentioning EPS, use "EPS of" NOT "an EPS of" (e.g., "delivered EPS of $0.96" not "delivered an EPS of $0.96")
    `
     : '';
   
