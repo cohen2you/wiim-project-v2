@@ -4129,7 +4129,7 @@ CRITICAL INSTRUCTIONS FOR NEWS INTEGRATION:
 
 7. SECTION MARKERS (MANDATORY): You MUST insert section markers between major logical blocks. Format: "## Section: [Label]" on its own line. Required markers:
    ${newsContext && (newsContext.scrapedContent || (newsContext.selectedArticles && newsContext.selectedArticles.length > 0)) ? '- "## Section: The Catalyst" - after the first paragraph, before the detailed news paragraphs (Paragraph 2 with specific details)' : ''}
-   - "## Section: Technical Analysis" - after news paragraphs${!newsContext || (!newsContext.scrapedContent && (!newsContext.selectedArticles || newsContext.selectedArticles.length === 0)) ? ' (or after lead paragraph if no news)' : ''}, before technical data
+   - "## Section: Technical Analysis" - ${!newsContext || (!newsContext.scrapedContent && (!newsContext.selectedArticles || newsContext.selectedArticles.length === 0)) ? 'CRITICAL FOR NO-NEWS ARTICLES: This marker MUST appear after the lead paragraph and market context paragraphs. It is MANDATORY.' : 'after news paragraphs'}, before technical data
    ${data.description && data.description !== 'N/A' ? '- "## Section: Company Context" - after "## Section: Technical Analysis", before "## Section: Earnings & Analyst Outlook" (or before "## Section: Benzinga Edge Rankings" or "## Section: Price Action" if those come next). Use this section to explain why this company matters and provide context about its business model and market position.' : ''}
    - "## Section: Analyst Ratings" - only if Analyst Overview is included
    - "## Section: Price Action" immediately before the automatically-generated price action line (do NOT write any content in this section - just place the marker)
@@ -4179,7 +4179,7 @@ DO NOT SKIP THIS SECTION. It is mandatory when company description is provided.
 
 TASK: ${newsContext && (newsContext.scrapedContent || (newsContext.selectedArticles && newsContext.selectedArticles.length > 0)) ? `Write a conversational WGO article that helps readers understand "What's Going On" with the stock. LEAD with the current price move (direction and day of week, e.g., "shares are tumbling on Monday" or "shares are surging on Tuesday"). Use ONLY the day name (e.g., "on Thursday", "on Monday") - DO NOT include the date (e.g., do NOT use "on Thursday, December 18, 2025" or any date format). DO NOT include the percentage in the first paragraph. Then reference the news article provided above AND broader market context to explain what's going on - either the news is contributing to the move, OR the stock is moving despite positive/negative news (suggesting larger market elements may be at play). ${marketContext ? 'Use the broader market context (indices, sectors, market breadth) to provide additional context - is the stock moving with or against broader market trends? Reference specific sector performance when relevant (e.g., "Technology stocks are broadly lower today, contributing to the decline" or "Despite a strong market day, the stock is down, suggesting company-specific concerns").' : ''} Include the appropriate hyperlink in the first paragraph (three-word for Benzinga, one-word with outlet credit for others). When mentioning other companies in the article, always include their ticker symbol with exchange (e.g., "Snowflake Inc. (NYSE:SNOW)").
 
-MANDATORY: You MUST include section markers in your output. ${newsContext && (newsContext.scrapedContent || (newsContext.selectedArticles && newsContext.selectedArticles.length > 0)) ? 'Insert "## Section: The Catalyst" AFTER the FIRST paragraph' : ''}, "## Section: Technical Analysis" after news paragraphs${!newsContext || (!newsContext.scrapedContent && (!newsContext.selectedArticles || newsContext.selectedArticles.length === 0)) ? ' (or after lead paragraph if no news)' : ''}${data.description && data.description !== 'N/A' ? ', "## Section: Company Context" after "## Section: Technical Analysis"' : ''}, "## Section: Earnings & Analyst Outlook" if earnings or analyst data is available (MANDATORY if consensus ratings or earnings date data is provided)${edgeRatings ? ', "## Section: Benzinga Edge Rankings" after the Earnings & Analyst Outlook section' : ''}, and "## Section: Price Action" immediately before the automatically-generated price action line at the end. CRITICAL: Do NOT write any paragraph or content in the "## Section: Price Action" section - the price action line is automatically generated and added after your article. Just place the section marker "## Section: Price Action" and end your article there. These section markers are REQUIRED - do not skip them.
+MANDATORY: You MUST include section markers in your output. ${newsContext && (newsContext.scrapedContent || (newsContext.selectedArticles && newsContext.selectedArticles.length > 0)) ? 'Insert "## Section: The Catalyst" AFTER the FIRST paragraph' : ''}, ${!newsContext || (!newsContext.scrapedContent && (!newsContext.selectedArticles || newsContext.selectedArticles.length === 0)) ? 'CRITICAL FOR NO-NEWS ARTICLES: You MUST include "## Section: Technical Analysis" as a section marker AFTER the lead paragraph and market context paragraphs. This section marker is MANDATORY and must appear before any technical analysis content.' : '"## Section: Technical Analysis" after news paragraphs'}${data.description && data.description !== 'N/A' ? ', "## Section: Company Context" after "## Section: Technical Analysis"' : ''}, "## Section: Earnings & Analyst Outlook" if earnings or analyst data is available (MANDATORY if consensus ratings or earnings date data is provided)${edgeRatings ? ', "## Section: Benzinga Edge Rankings" after the Earnings & Analyst Outlook section' : ''}, and "## Section: Price Action" immediately before the automatically-generated price action line at the end. CRITICAL: Do NOT write any paragraph or content in the "## Section: Price Action" section - the price action line is automatically generated and added after your article. Just place the section marker "## Section: Price Action" and end your article there. These section markers are REQUIRED - do not skip them.
 
 CRITICAL: The second paragraph (which appears AFTER "## Section: The Catalyst") and optionally third paragraph MUST include detailed, specific information from the news source article. Do NOT just summarize or use vague language. Extract and include:
 - Specific numbers, figures, percentages, dates, or metrics from the article
@@ -4913,13 +4913,104 @@ export async function POST(request: Request) {
           fetchNextEarningsDate(ticker)
         ]);
         
-        // Check if "## Section: Earnings & Analyst Outlook" marker exists
-        const earningsAnalystSectionMarker = /##\s*Section:\s*Earnings\s*&\s*Analyst\s*Outlook/i;
-        const hasEarningsAnalystMarker = !!analysisWithPriceAction.match(earningsAnalystSectionMarker);
-          
         // Find the "## Section: Technical Analysis" marker position
         const technicalAnalysisMarker = /##\s*Section:\s*Technical\s*Analysis/i;
         const technicalAnalysisMatch = analysisWithPriceAction.match(technicalAnalysisMarker);
+        const hasTechnicalAnalysisMarker = !!technicalAnalysisMatch;
+        
+        // If Technical Analysis marker is missing, inject it before technical content
+        if (!hasTechnicalAnalysisMarker) {
+          console.log(`[TECHNICAL ANALYSIS] Section marker missing, attempting to inject`);
+          
+          // Look for patterns that indicate technical analysis content
+          // Check for technical indicators: RSI, MACD, SMA, moving average, Key Resistance, Key Support
+          const technicalContentPatterns = [
+            /(?:RSI|MACD|SMA|moving average|simple moving average|technical indicators?|Key Resistance|Key Support|overbought|oversold|momentum|signal line)/i,
+            /(?:trading\s+(?:at|above|below)|positioned\s+(?:closer|near)|12-month|52-week)/i
+          ];
+          
+          let insertPosition = -1;
+          
+          // First, try to find where technical content starts
+          for (const pattern of technicalContentPatterns) {
+            const match = analysisWithPriceAction.match(pattern);
+            if (match && match.index !== undefined) {
+              // Look backwards to find the start of the paragraph/sentence containing this technical content
+              const beforeMatch = analysisWithPriceAction.substring(0, match.index);
+              // Find the last double newline (paragraph break) before this content
+              const lastParagraphBreak = beforeMatch.lastIndexOf('\n\n');
+              if (lastParagraphBreak !== -1) {
+                insertPosition = lastParagraphBreak + 2; // After the \n\n
+                break;
+              } else {
+                // If no paragraph break, insert at the start of the line
+                const lastNewline = beforeMatch.lastIndexOf('\n');
+                insertPosition = lastNewline !== -1 ? lastNewline + 1 : match.index;
+                break;
+              }
+            }
+          }
+          
+          // If we found a position, inject the marker
+          if (insertPosition !== -1) {
+            const beforeInsert = analysisWithPriceAction.substring(0, insertPosition).trim();
+            const afterInsert = analysisWithPriceAction.substring(insertPosition);
+            analysisWithPriceAction = `${beforeInsert}\n\n## Section: Technical Analysis\n\n${afterInsert}`;
+            console.log(`[TECHNICAL ANALYSIS] ✅ Injected "## Section: Technical Analysis" section marker`);
+          } else {
+            // Fallback: try to find after "The Catalyst" section or after lead paragraph
+            const catalystMarker = /##\s*Section:\s*The\s*Catalyst/i;
+            const catalystMatch = analysisWithPriceAction.match(catalystMarker);
+            
+            if (catalystMatch && catalystMatch.index !== undefined) {
+              // Find the end of The Catalyst section (look for next section or end of content)
+              const afterCatalyst = analysisWithPriceAction.substring(catalystMatch.index + catalystMatch[0].length);
+              const nextSectionMatch = afterCatalyst.match(/(##\s*Section:|Price Action:)/);
+              
+              if (nextSectionMatch && nextSectionMatch.index !== undefined) {
+                insertPosition = catalystMatch.index + catalystMatch[0].length + nextSectionMatch.index;
+              } else {
+                // No next section, insert after a reasonable amount of content (2-3 paragraphs)
+                const paragraphs = afterCatalyst.split(/\n\n+/);
+                if (paragraphs.length >= 2) {
+                  // Insert after 2 paragraphs
+                  let charCount = 0;
+                  for (let i = 0; i < 2 && i < paragraphs.length; i++) {
+                    charCount += paragraphs[i].length + 2; // +2 for \n\n
+                  }
+                  insertPosition = catalystMatch.index + catalystMatch[0].length + charCount;
+                } else {
+                  insertPosition = catalystMatch.index + catalystMatch[0].length + afterCatalyst.length;
+                }
+              }
+              
+              if (insertPosition !== -1) {
+                const beforeInsert = analysisWithPriceAction.substring(0, insertPosition).trim();
+                const afterInsert = analysisWithPriceAction.substring(insertPosition);
+                analysisWithPriceAction = `${beforeInsert}\n\n## Section: Technical Analysis\n\n${afterInsert}`;
+                console.log(`[TECHNICAL ANALYSIS] ✅ Injected "## Section: Technical Analysis" section marker after Catalyst section`);
+              }
+            } else {
+              // No Catalyst section - try to find after lead paragraph (first 2-3 paragraphs)
+              const paragraphs = analysisWithPriceAction.split(/\n\n+/);
+              if (paragraphs.length >= 2) {
+                // Insert after 2 paragraphs
+                let charCount = 0;
+                for (let i = 0; i < 2 && i < paragraphs.length; i++) {
+                  charCount += paragraphs[i].length + 2; // +2 for \n\n
+                }
+                const beforeInsert = analysisWithPriceAction.substring(0, charCount).trim();
+                const afterInsert = analysisWithPriceAction.substring(charCount);
+                analysisWithPriceAction = `${beforeInsert}\n\n## Section: Technical Analysis\n\n${afterInsert}`;
+                console.log(`[TECHNICAL ANALYSIS] ✅ Injected "## Section: Technical Analysis" section marker after lead paragraphs`);
+              }
+            }
+          }
+        }
+        
+        // Check if "## Section: Earnings & Analyst Outlook" marker exists
+        const earningsAnalystSectionMarker = /##\s*Section:\s*Earnings\s*&\s*Analyst\s*Outlook/i;
+        const hasEarningsAnalystMarker = !!analysisWithPriceAction.match(earningsAnalystSectionMarker);
         
         // Find the "## Section: Price Action" marker position
         const priceActionSectionMarker = /##\s*Section:\s*Price Action/i;

@@ -1438,10 +1438,10 @@ ${historicalEarnings.quarters.filter((q: any) => {
   return hasEpsData || hasRevenueData;
 }).map((q: any) => {
   const date = q.date ? formatEarningsDate(q.date) : 'N/A';
-  const epsActual = (q.eps !== null && q.eps !== undefined) ? `$${typeof q.eps === 'string' ? parseFloat(q.eps).toFixed(2) : q.eps.toFixed(2)}` : null;
+  const epsActual = (q.eps_actual !== null && q.eps_actual !== undefined) ? `$${typeof q.eps_actual === 'string' ? parseFloat(q.eps_actual).toFixed(2) : q.eps_actual.toFixed(2)}` : null;
   const epsEst = (q.eps_estimate !== null && q.eps_estimate !== undefined) ? `$${typeof q.eps_estimate === 'string' ? parseFloat(q.eps_estimate).toFixed(2) : q.eps_estimate.toFixed(2)}` : null;
   const epsSurprise = q.eps_surprise !== null && q.eps_surprise !== undefined ? `${q.eps_surprise > 0 ? '+' : ''}${q.eps_surprise.toFixed(1)}%` : null;
-  const revenueActual = (q.revenue !== null && q.revenue !== undefined) ? formatRevenue(q.revenue) : null;
+  const revenueActual = (q.revenue_actual !== null && q.revenue_actual !== undefined) ? formatRevenue(q.revenue_actual) : null;
   const revenueEst = (q.revenue_estimate !== null && q.revenue_estimate !== undefined) ? formatRevenue(q.revenue_estimate) : null;
   const revenueSurprise = q.revenue_surprise !== null && q.revenue_surprise !== undefined ? `${q.revenue_surprise > 0 ? '+' : ''}${q.revenue_surprise.toFixed(1)}%` : null;
   const beatMiss = q.beat_miss || null;
