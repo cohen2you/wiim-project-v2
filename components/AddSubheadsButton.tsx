@@ -128,7 +128,9 @@ export default function AddSubheadsButton({
               cleanedText = cleanedText.replace(/(##\s*Section:\s*Price Action\s*)/i, `$1\n\n${originalPriceActionMatch[1]}`);
             } else {
               // If we can't find it in original, try to reconstruct from ticker
-              const tickerMatch = articleText.match(/\((?:NASDAQ|NYSE|ARCA):([A-Z]+)\)/);
+              // Use RegExp constructor to avoid potential parsing issues
+              const tickerPattern = new RegExp('\\((?:NASDAQ|NYSE|ARCA):([A-Z]+)\\)');
+              const tickerMatch = articleText.match(tickerPattern);
               if (tickerMatch) {
                 const ticker = tickerMatch[1];
                 // This is a fallback - ideally we'd have the actual price action
