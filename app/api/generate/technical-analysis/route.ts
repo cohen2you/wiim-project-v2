@@ -4030,9 +4030,7 @@ BENZINGA EDGE SECTION RULES - FORMAT AS "TRADER'S SCORECARD":
 
 6. THE VERDICT: After the bullet list, add a 2-sentence summary that synthesizes the rankings and provides actionable insight. Start with "<strong>The Verdict:</strong> ${simplifyCompanyNameForEdge(data.companyName || data.symbol)}'s Benzinga Edge signal reveals..." and continue with the analysis. Example: "<strong>The Verdict:</strong> Tesla's Benzinga Edge signal reveals a classic 'High-Flyer' setup. While the Momentum (83) confirms the strong trend, the extremely low Value (4) score warns that the stock is priced for perfection—investors should ride the trend but use tight stop-losses."
 
-7. IMAGE: After "The Verdict" summary, add this image HTML: <p><img src="https://www.benzinga.com/edge/${data.symbol.toUpperCase()}.png" alt="Benzinga Edge Rankings for ${simplifyCompanyNameForEdge(data.companyName || data.symbol)}" style="max-width: 100%; height: auto;" /></p>
-
-8. ORDER: Present rankings in order of importance: Momentum first, then Quality, then Value, then Growth (if available).
+7. ORDER: Present rankings in order of importance: Momentum first, then Quality, then Value, then Growth (if available).
 ` : ''}
 
 IMPORTANT: CRITICAL RULE - Only mention "analysts expecting earnings per share" if eps_estimate is actually available. Do NOT use eps_prior (same quarter from prior year) as an expectation. eps_prior is only for comparison purposes when eps_estimate exists. If eps_estimate is null/not available, do NOT write "analysts expecting earnings per share" - instead, just mention the earnings date without specific estimates.
@@ -5585,6 +5583,35 @@ export async function POST(request: Request) {
             }
           }
         
+        // Post-process Benzinga Edge section to fix broken HTML links and incomplete sentences
+        const benzingaEdgeSectionMarker = /##\s*Section:\s*Benzinga\s*Edge\s*Rankings/i;
+        const edgeSectionMatch = analysisWithPriceAction.match(benzingaEdgeSectionMarker);
+        if (edgeSectionMatch && edgeSectionMatch.index !== undefined) {
+          const afterEdgeMarker = analysisWithPriceAction.substring(edgeSectionMatch.index + edgeSectionMatch[0].length);
+          const nextSectionMatch = afterEdgeMarker.match(/(##\s*Section:|##\s*Top\s*ETF|Price Action:)/i);
+          const edgeSectionEnd = nextSectionMatch ? nextSectionMatch.index! : afterEdgeMarker.length;
+          const edgeContent = afterEdgeMarker.substring(0, edgeSectionEnd);
+          
+          // Fix broken HTML links (e.g., f="url">text</a> to <a href="url">text</a>)
+          let fixedEdgeContent = edgeContent.replace(/f="([^"]+)">([^<]+)<\/a>/gi, '<a href="$1">$2</a>');
+          
+          // Complete incomplete "Below is the" sentences
+          if (fixedEdgeContent.includes('Below is the') && !fixedEdgeContent.includes('Below is the <a href')) {
+            fixedEdgeContent = fixedEdgeContent.replace(
+              /Below is the\s*(?!<a href)/gi,
+              `Below is the <a href="https://www.benzinga.com/screener">Benzinga Edge scorecard</a> for `
+            );
+          }
+          
+          // If content was fixed, replace it
+          if (fixedEdgeContent !== edgeContent) {
+            const beforeEdge = analysisWithPriceAction.substring(0, edgeSectionMatch.index + edgeSectionMatch[0].length);
+            const afterEdge = analysisWithPriceAction.substring(edgeSectionMatch.index + edgeSectionMatch[0].length + edgeSectionEnd);
+            analysisWithPriceAction = `${beforeEdge}\n\n${fixedEdgeContent}${afterEdge}`;
+            console.log('✅ Fixed Benzinga Edge section (broken links, incomplete sentences)');
+          }
+        }
+        
         // Add ETF section and Price Action section AFTER all section ordering is complete
         // Find where to insert ETF section (before "## Section: Price Action" or before price action line)
         // Reuse priceActionSectionMarker and priceActionMarkerMatch from above
@@ -5639,6 +5666,34 @@ export async function POST(request: Request) {
         // Also handle plain text format (no <p> tags)
         const readNextPlainPattern = /Read Next:.*?(?=\n\n|$)/gi;
         analysisWithPriceAction = analysisWithPriceAction.replace(readNextPlainPattern, '').trim();
+        
+        // Remove Benzinga Edge images (should not be included in output)
+        const benzingaEdgeImagePattern = /<p><img\s+src="https:\/\/www\.benzinga\.com\/edge\/[^"]+\.png"[^>]*><\/p>/gi;
+        analysisWithPriceAction = analysisWithPriceAction.replace(benzingaEdgeImagePattern, '').trim();
+        
+        // Clean up orphaned </p> tags that appear immediately after section markers or at the end
+        // Pattern: section marker followed by </p> with optional whitespace
+        analysisWithPriceAction = analysisWithPriceAction.replace(/(##\s*Section:[^\n]+)\s*<\/p>/gi, '$1');
+        // Also remove </p> at the very end of the article (before price action)
+        analysisWithPriceAction = analysisWithPriceAction.replace(/<\/p>\s*$/, '').trim();
+        // Remove </p> that appears right before "## Section: Price Action"
+        analysisWithPriceAction = analysisWithPriceAction.replace(/<\/p>\s*\n\s*##\s*Section:\s*Price Action/gi, '\n\n## Section: Price Action');
+        
+        // Ensure price action line is properly appended if section marker exists but no price action text
+        if (priceAction) {
+          const priceActionSectionMarker = /##\s*Section:\s*Price Action/i;
+          const priceActionMarkerMatch = analysisWithPriceAction.match(priceActionSectionMarker);
+          const priceActionTextMatch = analysisWithPriceAction.match(/(?:<strong>.*?)?Price Action:(?:<\/strong>)?/i);
+          
+          if (priceActionMarkerMatch && !priceActionTextMatch) {
+            // Section marker exists but no price action text - append it
+            const markerIndex = priceActionMarkerMatch.index! + priceActionMarkerMatch[0].length;
+            const beforeMarker = analysisWithPriceAction.substring(0, markerIndex).trim();
+            const afterMarker = analysisWithPriceAction.substring(markerIndex).trim();
+            analysisWithPriceAction = `${beforeMarker}\n\n${priceAction}${afterMarker ? '\n\n' + afterMarker : ''}`;
+            console.log('✅ Added price action line after section marker');
+          }
+        }
 
         return {
 

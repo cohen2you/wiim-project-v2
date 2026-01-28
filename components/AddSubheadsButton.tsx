@@ -81,6 +81,88 @@ export default function AddSubheadsButton({
           // Remove trailing "..." if it exists at the very end
           cleanedText = cleanedText.replace(/\s*\.{3,}\s*$/, '').trim();
           
+          // Post-processing: Fix issues introduced by news-agent-project
+          
+          // 1. Fix broken Benzinga Edge sections where company name was split (e.g., "Vi" and "sa")
+          // The pattern: "for Vi" ... (possibly with H2 in between) ... "sa, highlighting"
+          // First, try to find and fix the most common pattern: split company name with content/H2s in between
+          
+          // Pattern 1: "for Vi" followed by content, then H2, then "sa, highlighting"
+          cleanedText = cleanedText.replace(/for\s+([A-Z][a-z])\s*([^<]*?)<h2>.*?<\/h2>\s*([a-z]{2}),\s*highlighting/gi, (match, p1, p2, p3) => {
+            const companyName = p1 + (p2.trim() ? p2.trim() : '') + p3;
+            return `for ${companyName}, highlighting`;
+          });
+          
+          // Pattern 2: "Below is the Benzinga Edge scorecard for Vi" ... H2 ... "sa, highlighting"
+          cleanedText = cleanedText.replace(/Below is the.*?Benzinga Edge scorecard for\s+([A-Z][a-z])\s*([^<]*?)<h2>.*?<\/h2>\s*([a-z]{2}),\s*highlighting/gi, (match, p1, p2, p3) => {
+            const companyName = p1 + (p2.trim() ? p2.trim() : '') + p3;
+            return `Below is the <a href="https://www.benzinga.com/screener">Benzinga Edge scorecard</a> for ${companyName}, highlighting`;
+          });
+          
+          // Pattern 3: More general - look for "for [single letter]" followed by content and then "[two letters], highlighting"
+          // This catches cases where the company name was split
+          cleanedText = cleanedText.replace(/for\s+([A-Z][a-z])\s+([^,]*?)\s+([a-z]{2}),\s*highlighting/gi, (match, p1, p2, p3) => {
+            // Check if p2 contains an H2 tag (indicating it was split)
+            if (p2.includes('<h2>')) {
+              const companyName = p1 + p3;
+              return `for ${companyName}, highlighting`;
+            }
+            return match; // Don't replace if it's not actually broken
+          });
+          
+          // Pattern 4: Look for "Below is the Benzinga Edge scorecard for Vi" (incomplete) followed by H2, then "sa, highlighting"
+          cleanedText = cleanedText.replace(/Below is the.*?Benzinga Edge scorecard for\s+([A-Z][a-z])\s+([^,]*?)<h2>.*?<\/h2>\s*([a-z]{2}),\s*highlighting/gi, (match, p1, p2, p3) => {
+            const companyName = p1 + p3;
+            return `Below is the <a href="https://www.benzinga.com/screener">Benzinga Edge scorecard</a> for ${companyName}, highlighting`;
+          });
+          
+          // 3. Ensure price action line is present if section marker exists
+          const hasPriceActionMarker = /##\s*Section:\s*Price Action/i.test(cleanedText);
+          const hasPriceActionText = /(?:<strong>.*?)?Price Action:(?:<\/strong>)?/i.test(cleanedText);
+          
+          if (hasPriceActionMarker && !hasPriceActionText) {
+            // Try to extract price action from original article
+            const originalPriceActionMatch = articleText.match(/(<strong>.*?Price Action:.*?<\/strong>.*?Benzinga Pro data.*?<\/a>\.)/is);
+            if (originalPriceActionMatch) {
+              // Find the price action section marker and add the text after it
+              cleanedText = cleanedText.replace(/(##\s*Section:\s*Price Action\s*)/i, `$1\n\n${originalPriceActionMatch[1]}`);
+            } else {
+              // If we can't find it in original, try to reconstruct from ticker
+              const tickerMatch = articleText.match(/\(NASDAQ:|NYSE:|ARCA:)([A-Z]+)\)/);
+              if (tickerMatch) {
+                const ticker = tickerMatch[2];
+                // This is a fallback - ideally we'd have the actual price action
+                console.warn('⚠️ Could not extract price action from original article');
+              }
+            }
+          }
+          
+          // 4. Fix orphaned closing tags and ensure proper HTML structure
+          // Remove </p> tags that appear immediately after section markers
+          cleanedText = cleanedText.replace(/(##\s*Section:[^\n]+)\s*<\/p>/gi, '$1');
+          // Remove </p> at the very end
+          cleanedText = cleanedText.replace(/<\/p>\s*$/, '').trim();
+          // Remove </p> that appears right before "## Section: Price Action"
+          cleanedText = cleanedText.replace(/<\/p>\s*\n\s*##\s*Section:\s*Price Action/gi, '\n\n## Section: Price Action');
+          
+          // 5. Ensure proper spacing around H2 tags
+          cleanedText = cleanedText.replace(/([^\n])\n<h2>/g, '$1\n\n<h2>');
+          cleanedText = cleanedText.replace(/<\/h2>\n([^\n])/g, '</h2>\n\n$1');
+          
+          // 6. Fix broken Benzinga Edge intro sentences (complete incomplete ones)
+          if (cleanedText.includes('Below is the') && !cleanedText.includes('Below is the <a href')) {
+            cleanedText = cleanedText.replace(
+              /Below is the\s*(?!<a href)([^<]*?)(Benzinga Edge|scorecard)/gi,
+              'Below is the <a href="https://www.benzinga.com/screener">Benzinga Edge scorecard</a> for $1'
+            );
+          }
+          
+          // 7. Remove Benzinga Edge images if they appear
+          cleanedText = cleanedText.replace(/<p><img\s+src="https:\/\/www\.benzinga\.com\/edge\/[^"]+\.png"[^>]*><\/p>/gi, '');
+          
+          // 8. Fix broken HTML links in Benzinga Edge section (e.g., f="url">text</a>)
+          cleanedText = cleanedText.replace(/f="([^"]+)">([^<]+)<\/a>/gi, '<a href="$1">$2</a>');
+          
           console.log('✅ Cleaned text length:', cleanedText.length);
           onArticleUpdate(cleanedText);
           setError(null); // Clear any previous errors
