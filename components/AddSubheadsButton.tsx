@@ -88,20 +88,20 @@ export default function AddSubheadsButton({
           // First, try to find and fix the most common pattern: split company name with content/H2s in between
           
           // Pattern 1: "for Vi" followed by content, then H2, then "sa, highlighting"
-          cleanedText = cleanedText.replace(/for\s+([A-Z][a-z])\s*([^<]*?)<h2>.*?<\/h2>\s*([a-z]{2}),\s*highlighting/gi, (match, p1, p2, p3) => {
+          cleanedText = cleanedText.replace(/for\s+([A-Z][a-z])\s*([^<]*?)<h2>.*?<\/h2>\s*([a-z]{2}),\s*highlighting/gi, (match: string, p1: string, p2: string, p3: string) => {
             const companyName = p1 + (p2.trim() ? p2.trim() : '') + p3;
             return `for ${companyName}, highlighting`;
           });
           
           // Pattern 2: "Below is the Benzinga Edge scorecard for Vi" ... H2 ... "sa, highlighting"
-          cleanedText = cleanedText.replace(/Below is the.*?Benzinga Edge scorecard for\s+([A-Z][a-z])\s*([^<]*?)<h2>.*?<\/h2>\s*([a-z]{2}),\s*highlighting/gi, (match, p1, p2, p3) => {
+          cleanedText = cleanedText.replace(/Below is the.*?Benzinga Edge scorecard for\s+([A-Z][a-z])\s*([^<]*?)<h2>.*?<\/h2>\s*([a-z]{2}),\s*highlighting/gi, (match: string, p1: string, p2: string, p3: string) => {
             const companyName = p1 + (p2.trim() ? p2.trim() : '') + p3;
             return `Below is the <a href="https://www.benzinga.com/screener">Benzinga Edge scorecard</a> for ${companyName}, highlighting`;
           });
           
           // Pattern 3: More general - look for "for [single letter]" followed by content and then "[two letters], highlighting"
           // This catches cases where the company name was split
-          cleanedText = cleanedText.replace(/for\s+([A-Z][a-z])\s+([^,]*?)\s+([a-z]{2}),\s*highlighting/gi, (match, p1, p2, p3) => {
+          cleanedText = cleanedText.replace(/for\s+([A-Z][a-z])\s+([^,]*?)\s+([a-z]{2}),\s*highlighting/gi, (match: string, p1: string, p2: string, p3: string) => {
             // Check if p2 contains an H2 tag (indicating it was split)
             if (p2.includes('<h2>')) {
               const companyName = p1 + p3;
@@ -111,7 +111,7 @@ export default function AddSubheadsButton({
           });
           
           // Pattern 4: Look for "Below is the Benzinga Edge scorecard for Vi" (incomplete) followed by H2, then "sa, highlighting"
-          cleanedText = cleanedText.replace(/Below is the.*?Benzinga Edge scorecard for\s+([A-Z][a-z])\s+([^,]*?)<h2>.*?<\/h2>\s*([a-z]{2}),\s*highlighting/gi, (match, p1, p2, p3) => {
+          cleanedText = cleanedText.replace(/Below is the.*?Benzinga Edge scorecard for\s+([A-Z][a-z])\s+([^,]*?)<h2>.*?<\/h2>\s*([a-z]{2}),\s*highlighting/gi, (match: string, p1: string, p2: string, p3: string) => {
             const companyName = p1 + p3;
             return `Below is the <a href="https://www.benzinga.com/screener">Benzinga Edge scorecard</a> for ${companyName}, highlighting`;
           });
