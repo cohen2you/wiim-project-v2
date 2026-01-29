@@ -5,6 +5,10 @@ import ModularStoryBuilder from '../components/ModularStoryBuilder';
 import CustomizeContextModal from '../components/CustomizeContextModal';
 import AnalystNoteUpload from '../components/AnalystNoteUpload';
 import LocalDate from '../components/LocalDate';
+import QuickStoryGenerator from '../components/QuickStoryGenerator';
+import TechnicalAnalysisGenerator from '../components/TechnicalAnalysisGenerator';
+import EarningsPreviewGenerator from '../components/EarningsPreviewGenerator';
+import AnalystNoteGenerator from '../components/AnalystNoteGenerator';
 
 interface PR {
   id: string;
@@ -624,9 +628,68 @@ export default function PRStoryGeneratorPage() {
   };
 
   return (
-    <div style={{ maxWidth: 700, margin: 'auto', padding: 20, fontFamily: 'Arial, sans-serif' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-        <h1>Benzinga WIIM Story Generator</h1>
+    <div style={{ maxWidth: 1200, margin: 'auto', padding: 20, fontFamily: 'Arial, sans-serif' }}>
+      {/* WGO Article Generator Section - Top */}
+      <div style={{ marginBottom: 40 }}>
+        <TechnicalAnalysisGenerator />
+      </div>
+
+      {/* Quick Story Generator Section */}
+      <div style={{ 
+        marginBottom: 40, 
+        padding: '30px', 
+        backgroundColor: '#f8fafc', 
+        borderRadius: '12px', 
+        border: '2px solid #7c3aed',
+        boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)'
+      }}>
+        <div style={{ 
+          marginBottom: '20px', 
+          paddingBottom: '15px', 
+          borderBottom: '2px solid #e5e7eb' 
+        }}>
+          <h2 style={{ 
+            fontSize: '24px', 
+            fontWeight: '700', 
+            color: '#1e293b', 
+            margin: 0,
+            marginBottom: '8px'
+          }}>
+            Quick Story Generator
+          </h2>
+          <p style={{ 
+            fontSize: '14px', 
+            color: '#64748b', 
+            margin: 0 
+          }}>
+            Generate fast, context-aware stories with embedded links and related stock data
+          </p>
+        </div>
+        <QuickStoryGenerator />
+      </div>
+
+      {/* Earnings Preview Generator Section */}
+      <div style={{ marginBottom: 40 }}>
+        <EarningsPreviewGenerator />
+      </div>
+
+      {/* Analyst Note Generator Section */}
+      <div style={{ marginBottom: 40 }}>
+        <AnalystNoteGenerator />
+      </div>
+
+      {/* Benzinga WIIM Story Generator Section - Bottom */}
+      <div style={{ 
+        marginTop: 50, 
+        marginBottom: 30, 
+        padding: '30px', 
+        backgroundColor: '#f8fafc', 
+        borderRadius: '12px', 
+        border: '2px solid #dc2626',
+        boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)'
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+          <h1 style={{ fontSize: '28px', fontWeight: '700', color: '#1e293b', margin: 0 }}>Benzinga WIIM Story Generator</h1>
         <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
           <button
             onClick={() => setUseModularApproach(!useModularApproach)}
@@ -1312,6 +1375,8 @@ export default function PRStoryGeneratorPage() {
         onArticlesSelected={handleCustomContextGeneration}
         loading={loadingCustomContext}
       />
+
+      </div>
 
     </div>
   );

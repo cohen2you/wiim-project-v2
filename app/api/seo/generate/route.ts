@@ -87,6 +87,7 @@ ABSOLUTE RULES - NO EXCEPTIONS:
 4. DO NOT remove any existing content
 5. ONLY add <h2>Your Heading</h2> tags between existing paragraphs
 6. Preserve ALL existing formatting, bullet points, tables, and structure exactly as provided
+7. CRITICAL: Preserve ALL "## Section: ..." placeholders exactly as they are - DO NOT convert, modify, or remove them
 
 WHERE TO ADD H2s:
 - Add 2-3 H2s at natural content breakpoints
@@ -112,7 +113,8 @@ ABSOLUTE REQUIREMENTS:
 3. NEVER remove existing content
 4. ONLY insert <h2> tags between existing paragraphs
 5. Preserve ALL existing structure, formatting, section headers, bullet points, and tables exactly as provided
-6. If you cannot add H2s without modifying content, return the article unchanged
+6. CRITICAL: Preserve ALL "## Section: ..." placeholders exactly as they are - DO NOT convert, modify, or remove them
+7. If you cannot add H2s without modifying content, return the article unchanged
 
 You are a tool, not a writer. Insert tags only. Do not rewrite.`;
 
@@ -171,7 +173,8 @@ You are a tool, not a writer. Insert tags only. Do not rewrite.`;
 
     // Ensure H2 tags are properly formatted
     // Convert markdown H2 (## Heading) to HTML H2 if needed
-    optimizedText = optimizedText.replace(/^##\s+(.+)$/gm, '<h2>$1</h2>');
+    // BUT preserve ## Section: placeholders (don't convert them)
+    optimizedText = optimizedText.replace(/^##\s+(?!Section:)(.+)$/gm, '<h2>$1</h2>');
     
     // Ensure proper spacing around H2 tags
     // Add blank line before <h2> if not present
@@ -186,25 +189,42 @@ You are a tool, not a writer. Insert tags only. Do not rewrite.`;
     optimizedText = optimizedText.replace(/\n{3,}/g, '\n\n');
     
     // Post-processing: Remove H2s that are orphaned (right before structural sections or at the end)
-    // For WGO Concise format, ALLOW H2s before "The Details" - they're intentionally placed there
-    if (!isWGOConcise) {
-      // Remove H2s immediately before "The Details" for non-WGO formats only
-      optimizedText = optimizedText.replace(/\n*<h2>.*?<\/h2>\n*\n*(The Details|## The Details)/gi, '\n\n$1');
+    // BUT preserve H2s that are actually ## Section: placeholders (they should have been preserved, but if converted, restore them)
+    // First, restore any ## Section: markers that might have been converted to H2s
+    optimizedText = optimizedText.replace(/<h2>\s*Section:\s*([^<]+)<\/h2>/gi, '## Section: $1');
+    
+    // Check if this is a Quick Story format (has ## Section: placeholders but not WGO Concise structure)
+    const hasSectionPlaceholders = /##\s+Section:/i.test(optimizedText);
+    const isQuickStoryFormat = hasSectionPlaceholders && !isWGOConcise;
+    
+    // For Quick Story format, be less aggressive - only remove H2s at the very end
+    if (isQuickStoryFormat) {
+      // Only remove H2s at the very end (after price action line)
+      optimizedText = optimizedText.replace(/\n*<h2>(?!Section:).*?<\/h2>\s*$/gm, '');
+    } else {
+      // For WGO Concise format, ALLOW H2s before "The Details" - they're intentionally placed there
+      if (!isWGOConcise) {
+        // Remove H2s immediately before "The Details" for non-WGO formats only
+        optimizedText = optimizedText.replace(/\n*<h2>.*?<\/h2>\n*\n*(The Details|## The Details)/gi, '\n\n$1');
+      }
+      // For WGO Concise, we want H2s before "The Details", so don't remove them
+      
+      // Remove H2s immediately before "Executive Insight"
+      optimizedText = optimizedText.replace(/\n*<h2>.*?<\/h2>\n*\n*(Executive Insight|## Executive Insight)/gi, '\n\n$1');
+      
+      // Remove H2s immediately before "Technical & Market Profile" or "Technical & Market Profile"
+      optimizedText = optimizedText.replace(/\n*<h2>.*?<\/h2>\n*\n*(Technical & Market Profile|Technical & Market Profile|## Technical)/gi, '\n\n$1');
+      
+      // Remove H2s at the very end of the article (after the last structural section)
+      // BUT preserve ## Section: markers
+      optimizedText = optimizedText.replace(/\n*<h2>(?!Section:).*?<\/h2>\s*$/gm, '');
+      
+      // Remove H2s that are followed only by whitespace and then another structural section
+      // BUT preserve ## Section: markers - these are intentional placeholders and should NOT have H2s removed before them
+      // Only remove H2s before specific structural sections, NOT before ## Section: placeholders
+      // Match ## only when NOT followed by "Section:" (to avoid matching ## Section: placeholders)
+      optimizedText = optimizedText.replace(/\n*<h2>(?!Section:).*?<\/h2>\n+\s*(The Details|Executive Insight|Technical & Market Profile|##\s+(?!Section:)(?:The Details|Executive Insight|Technical))/gi, '\n\n$1');
     }
-    // For WGO Concise, we want H2s before "The Details", so don't remove them
-    
-    // Remove H2s immediately before "Executive Insight"
-    optimizedText = optimizedText.replace(/\n*<h2>.*?<\/h2>\n*\n*(Executive Insight|## Executive Insight)/gi, '\n\n$1');
-    
-    // Remove H2s immediately before "Technical & Market Profile" or "Technical & Market Profile"
-    optimizedText = optimizedText.replace(/\n*<h2>.*?<\/h2>\n*\n*(Technical & Market Profile|Technical & Market Profile|## Technical)/gi, '\n\n$1');
-    
-    // Remove H2s at the very end of the article (after the last structural section)
-    // This handles cases where H2 appears after "Technical & Market Profile" or at the end
-    optimizedText = optimizedText.replace(/\n*<h2>.*?<\/h2>\s*$/gm, '');
-    
-    // Remove H2s that are followed only by whitespace and then another structural section
-    optimizedText = optimizedText.replace(/\n*<h2>.*?<\/h2>\n+\s*(The Details|Executive Insight|Technical & Market Profile|##)/gi, '\n\n$1');
     
     // Final H2 count check
     const finalH2Count = (optimizedText.match(/<h2>/gi) || []).length;

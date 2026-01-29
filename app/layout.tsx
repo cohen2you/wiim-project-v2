@@ -1,5 +1,4 @@
 import './globals.css';
-import WGOArticleGeneratorWrapper from '../components/WGOArticleGeneratorWrapper';
 
 export default function RootLayout({
   children,
@@ -12,21 +11,7 @@ export default function RootLayout({
         className="bg-gray-50 font-sans text-gray-900 antialiased"
         suppressHydrationWarning={true}
       >
-        <div
-          style={{
-            maxWidth: '768px',
-            marginLeft: 'auto',
-            marginRight: 'auto',
-            border: '4px solid red',  // Remove if you don't want border visible
-            padding: '48px',
-            boxSizing: 'border-box',
-          }}
-        >
-          {children}
-        </div>
-        
-        {/* WGO Article Generator - Outside red outline */}
-        <WGOArticleGeneratorWrapper />
+        {children}
       </body>
     </html>
   );

@@ -72,8 +72,12 @@ export default function AddSubheadsButton({
           cleanedText = cleanedText.replace(/^```markdown\s*/i, '').replace(/\s*```$/i, '');
           cleanedText = cleanedText.replace(/^```\s*/, '').replace(/\s*```$/, '');
           
+          // First, restore any ## Section: markers that might have been converted to H2s by the external API
+          cleanedText = cleanedText.replace(/<h2>\s*Section:\s*([^<]+)<\/h2>/gi, '## Section: $1');
+          
           // Convert markdown H2 (## Heading) to HTML H2 (<h2>Heading</h2>)
-          cleanedText = cleanedText.replace(/^##\s+(.+)$/gm, '<h2>$1</h2>');
+          // BUT preserve ## Section: placeholders (don't convert them)
+          cleanedText = cleanedText.replace(/^##\s+(?!Section:)(.+)$/gm, '<h2>$1</h2>');
           
           // Convert markdown H3 (### Heading) to HTML H3 (<h3>Heading</h3>)
           cleanedText = cleanedText.replace(/^###\s+(.+)$/gm, '<h3>$1</h3>');
@@ -139,7 +143,29 @@ export default function AddSubheadsButton({
             }
           }
           
-          // 4. Fix orphaned closing tags and ensure proper HTML structure
+          // 4. Preserve ## Section: placeholders - ensure they're not removed or modified
+          // Check if original had ## Section: markers and ensure they're still present
+          const originalSectionMarkers = (articleText.match(/##\s*Section:/gi) || []).length;
+          const cleanedSectionMarkers = (cleanedText.match(/##\s*Section:/gi) || []).length;
+          if (originalSectionMarkers > 0 && cleanedSectionMarkers < originalSectionMarkers) {
+            console.warn('⚠️ Some ## Section: placeholders were removed, attempting to restore...');
+            // Try to restore from original
+            const originalSections = articleText.match(/##\s*Section:[^\n]+/gi) || [];
+            originalSections.forEach((section) => {
+              if (!cleanedText.includes(section)) {
+                // Find a good place to reinsert it (after the previous section or at appropriate location)
+                const sectionName = section.replace(/##\s*Section:\s*/i, '').trim();
+                // Try to find where it should go based on context
+                const contextPattern = new RegExp(`(${sectionName}[^<]*?)(<h2>|##|$)`, 'i');
+                if (!cleanedText.match(contextPattern)) {
+                  // Section marker is missing, but we can't easily restore it without context
+                  console.warn(`⚠️ Could not restore section marker: ${section}`);
+                }
+              }
+            });
+          }
+          
+          // Fix orphaned closing tags and ensure proper HTML structure
           // Remove </p> tags that appear immediately after section markers
           cleanedText = cleanedText.replace(/(##\s*Section:[^\n]+)\s*<\/p>/gi, '$1');
           // Remove </p> at the very end
