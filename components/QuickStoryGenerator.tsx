@@ -33,6 +33,8 @@ export default function QuickStoryGenerator() {
   const [template, setTemplate] = useState('price-movement');
   const [relatedStocks, setRelatedStocks] = useState('');
   const [customFocus, setCustomFocus] = useState('');
+  const [customSourceUrls, setCustomSourceUrls] = useState('');
+  const [multiFactorMode, setMultiFactorMode] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [result, setResult] = useState<QuickStoryResult | null>(null);
@@ -65,12 +67,14 @@ export default function QuickStoryGenerator() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
+          body: JSON.stringify({
           ticker: ticker.trim().toUpperCase(),
           wordCount,
           template,
           relatedStocks: relatedStocksArray,
           customFocus: template === 'custom' ? customFocus : undefined,
+          customSourceUrls: template === 'custom' ? customSourceUrls : undefined,
+          multiFactorMode: template === 'sector-context' ? multiFactorMode : false,
           aiProvider: provider,
         }),
       });
@@ -165,7 +169,13 @@ export default function QuickStoryGenerator() {
             <select
               id="template"
               value={template}
-              onChange={(e) => setTemplate(e.target.value)}
+              onChange={(e) => {
+                setTemplate(e.target.value);
+                // Reset multi-factor mode when changing templates
+                if (e.target.value !== 'sector-context') {
+                  setMultiFactorMode(false);
+                }
+              }}
               style={{ 
                 width: '100%', 
                 padding: '10px 12px', 
@@ -187,33 +197,89 @@ export default function QuickStoryGenerator() {
           </div>
         </div>
 
+        {/* Multi-Factor Analysis Toggle (only show for sector-context template) */}
+        {template === 'sector-context' && (
+          <div style={{ 
+            marginBottom: '16px', 
+            padding: '12px', 
+            backgroundColor: '#f9fafb', 
+            border: '1px solid #e5e7eb', 
+            borderRadius: '6px' 
+          }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={multiFactorMode}
+                onChange={(e) => setMultiFactorMode(e.target.checked)}
+                style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+                disabled={loading}
+              />
+              <span style={{ fontSize: '14px', fontWeight: '600', color: '#374151' }}>
+                Multi-Factor Analysis Mode
+              </span>
+            </label>
+            <p style={{ fontSize: '12px', color: '#6B7280', marginTop: '6px', marginLeft: '26px' }}>
+              Uses iterative generation to deeply analyze how multiple related companies' results affect the primary stock. Recommended when 3+ related stocks are provided.
+            </p>
+          </div>
+        )}
+
         {/* Custom Focus (only show for custom template) */}
         {template === 'custom' && (
-          <div>
-            <label htmlFor="customFocus" style={{ display: 'block', fontSize: '14px', fontWeight: '600', color: '#374151', marginBottom: '6px' }}>
-              Custom Focus
-            </label>
-            <textarea
-              id="customFocus"
-              value={customFocus}
-              onChange={(e) => setCustomFocus(e.target.value)}
-              placeholder="Describe what you want the story to focus on..."
-              rows={3}
-              style={{ 
-                width: '100%', 
-                padding: '10px 12px', 
-                border: '1px solid #d1d5db', 
-                borderRadius: '6px', 
-                fontSize: '14px',
-                outline: 'none',
-                fontFamily: 'inherit',
-                resize: 'vertical'
-              }}
-              onFocus={(e) => e.target.style.borderColor = '#7c3aed'}
-              onBlur={(e) => e.target.style.borderColor = '#d1d5db'}
-              disabled={loading}
-            />
-          </div>
+          <>
+            <div style={{ marginBottom: '16px' }}>
+              <label htmlFor="customFocus" style={{ display: 'block', fontSize: '14px', fontWeight: '600', color: '#374151', marginBottom: '6px' }}>
+                Custom Focus
+              </label>
+              <textarea
+                id="customFocus"
+                value={customFocus}
+                onChange={(e) => setCustomFocus(e.target.value)}
+                placeholder="Describe what you want the story to focus on..."
+                rows={3}
+                style={{ 
+                  width: '100%', 
+                  padding: '10px 12px', 
+                  border: '1px solid #d1d5db', 
+                  borderRadius: '6px', 
+                  fontSize: '14px',
+                  outline: 'none',
+                  fontFamily: 'inherit',
+                  resize: 'vertical'
+                }}
+                onFocus={(e) => e.target.style.borderColor = '#7c3aed'}
+                onBlur={(e) => e.target.style.borderColor = '#d1d5db'}
+                disabled={loading}
+              />
+            </div>
+            <div style={{ marginBottom: '16px' }}>
+              <label htmlFor="customSourceUrls" style={{ display: 'block', fontSize: '14px', fontWeight: '600', color: '#374151', marginBottom: '6px' }}>
+                Source URL(s) for Verification <span style={{ fontSize: '12px', fontWeight: '400', color: '#6B7280' }}>(Optional but recommended)</span>
+              </label>
+              <input
+                id="customSourceUrls"
+                type="text"
+                value={customSourceUrls}
+                onChange={(e) => setCustomSourceUrls(e.target.value)}
+                placeholder="https://example.com/article1, https://example.com/article2"
+                style={{ 
+                  width: '100%', 
+                  padding: '10px 12px', 
+                  border: '1px solid #d1d5db', 
+                  borderRadius: '6px', 
+                  fontSize: '14px',
+                  outline: 'none',
+                  fontFamily: 'inherit'
+                }}
+                onFocus={(e) => e.target.style.borderColor = '#7c3aed'}
+                onBlur={(e) => e.target.style.borderColor = '#d1d5db'}
+                disabled={loading}
+              />
+              <p style={{ fontSize: '12px', color: '#6B7280', marginTop: '4px' }}>
+                Provide source URLs (comma-separated) to verify information in custom focus. The AI will cross-reference your custom focus with these sources and prioritize verified information.
+              </p>
+            </div>
+          </>
         )}
 
         {/* Related Stocks and AI Provider in a row */}

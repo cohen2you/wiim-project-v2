@@ -5596,12 +5596,38 @@ export async function POST(request: Request) {
           let fixedEdgeContent = edgeContent.replace(/f="([^"]+)">([^<]+)<\/a>/gi, '<a href="$1">$2</a>');
           
           // Complete incomplete "Below is the" sentences
-          if (fixedEdgeContent.includes('Below is the') && !fixedEdgeContent.includes('Below is the <a href')) {
+          // Only fix if "Below is the" exists but the complete sentence with proper link is missing
+          // Check if the sentence already has the complete structure with the link to avoid duplication
+          const hasCompleteLink = fixedEdgeContent.includes('<a href="https://www.benzinga.com/screener">Benzinga Edge scorecard</a>');
+          const hasIncompleteText = fixedEdgeContent.match(/Below is the\s+(?!<a href="https:\/\/www\.benzinga\.com\/screener">Benzinga Edge scorecard<\/a>)/i);
+          
+          // Only fix if we have "Below is the" but NOT the complete link structure
+          if (hasIncompleteText && !hasCompleteLink) {
+            // Extract company name from existing text if present, otherwise use technicalData
+            const companyNameMatch = fixedEdgeContent.match(/Below is the.*?for\s+([^,:\n]+)/i);
+            let companyName = simplifyCompanyNameForEdge(technicalData.companyName || technicalData.symbol);
+            if (companyNameMatch && companyNameMatch[1]) {
+              // Use the company name from the text, but clean it up
+              const extractedName = companyNameMatch[1].trim();
+              // Remove any duplicate "Benzinga Edge scorecard" text that might be in there
+              companyName = extractedName.replace(/\s*Benzinga Edge scorecard\s*for\s*/gi, '').trim();
+              if (!companyName) {
+                companyName = simplifyCompanyNameForEdge(technicalData.companyName || technicalData.symbol);
+              }
+            }
+            
+            // Replace the incomplete sentence with the complete one
             fixedEdgeContent = fixedEdgeContent.replace(
-              /Below is the\s*(?!<a href)/gi,
-              `Below is the <a href="https://www.benzinga.com/screener">Benzinga Edge scorecard</a> for `
+              /Below is the\s+[^:]*:/gi,
+              `Below is the <a href="https://www.benzinga.com/screener">Benzinga Edge scorecard</a> for ${companyName}, highlighting its strengths and weaknesses compared to the broader market:`
             );
           }
+          
+          // Remove any duplicate "Benzinga Edge scorecard for" text that might have been created
+          fixedEdgeContent = fixedEdgeContent.replace(
+            /Benzinga Edge scorecard\s+for\s+Benzinga Edge scorecard\s+for/gi,
+            'Benzinga Edge scorecard for'
+          );
           
           // If content was fixed, replace it
           if (fixedEdgeContent !== edgeContent) {

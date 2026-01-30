@@ -1,9 +1,35 @@
 import { NextResponse } from 'next/server';
-import { aiProvider } from '@/lib/aiProvider';
+import { aiProvider, AIProvider } from '@/lib/aiProvider';
 
 const BENZINGA_API_KEY = process.env.BENZINGA_API_KEY;
 const BZ_NEWS_URL = 'https://api.benzinga.com/api/v2/news';
 const BZ_QUOTE_URL = 'https://api.benzinga.com/api/v2/quoteDelayed';
+
+// Helper to scrape news URL
+async function scrapeNewsUrl(url: string): Promise<string | null> {
+  try {
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+      }
+    });
+
+    if (!response.ok) return null;
+
+    const html = await response.text();
+    const text = html
+      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    return text.substring(0, 5000);
+  } catch (error) {
+    console.error('[QUICK STORY] Error scraping URL:', error);
+    return null;
+  }
+}
 
 // Story templates
 const STORY_TEMPLATES = {
@@ -879,10 +905,53 @@ function buildPrompt(
   customFocus?: string,
   earningsData?: any,
   priceData?: any,
-  consensusRatings?: any
+  consensusRatings?: any,
+  customSourceUrls?: string[],
+  customSourceContent?: Record<string, string>
 ): string {
   const templateInfo = STORY_TEMPLATES[template as keyof typeof STORY_TEMPLATES] || STORY_TEMPLATES['price-movement'];
   const focus = template === 'custom' && customFocus ? customFocus : templateInfo.focus;
+
+  // Build custom source verification section if custom template
+  let customSourceVerification = '';
+  if (template === 'custom') {
+    if (customSourceUrls && customSourceUrls.length > 0) {
+      customSourceVerification = `\n\nCUSTOM SOURCE URLS FOR VERIFICATION:\n`;
+      customSourceUrls.forEach((url, index) => {
+        customSourceVerification += `${index + 1}. ${url}\n`;
+        if (customSourceContent && customSourceContent[url]) {
+          const content = customSourceContent[url].substring(0, 2000);
+          customSourceVerification += `   Content: ${content}...\n`;
+        }
+      });
+    }
+    customSourceVerification += `\n\nCRITICAL VERIFICATION REQUIREMENTS FOR CUSTOM TEMPLATE:\n`;
+    customSourceVerification += `- Before using ANY information from custom focus, you MUST verify it matches information in:\n`;
+    customSourceVerification += `  1. Articles listed below (MOST AUTHORITATIVE - use these as primary source)\n`;
+    customSourceVerification += `  2. API data provided above (price, earnings, consensus)\n`;
+    if (customSourceUrls && customSourceUrls.length > 0) {
+      customSourceVerification += `  3. Scraped source content above (if URLs provided)\n`;
+    }
+    customSourceVerification += `- If custom focus contains information that CANNOT be verified from these sources:\n`;
+    customSourceVerification += `  * DO NOT use it, OR\n`;
+    if (customSourceUrls && customSourceUrls.length > 0) {
+      customSourceVerification += `  * If a source URL is provided, use it but note: "according to [source]"\n`;
+    } else {
+      customSourceVerification += `  * Mark it as unverified or omit it\n`;
+    }
+    customSourceVerification += `- If information in custom focus CONFLICTS with articles/API data, use the articles/API data (they are authoritative)\n`;
+    customSourceVerification += `- Example: If custom focus says "Project Marcus" but articles say "Project Genie", use "Project Genie" from articles\n`;
+    customSourceVerification += `- Information Hierarchy (most authoritative first):\n`;
+    customSourceVerification += `  1. API data (price, earnings, consensus) - ALWAYS use this\n`;
+    customSourceVerification += `  2. Articles listed below - ALWAYS use this\n`;
+    if (customSourceUrls && customSourceUrls.length > 0) {
+      customSourceVerification += `  3. Scraped source content (if URLs provided) - Use this\n`;
+      customSourceVerification += `  4. Custom focus text - ONLY use if verified by sources above\n`;
+    } else {
+      customSourceVerification += `  3. Custom focus text - ONLY use if verified by sources above\n`;
+    }
+    customSourceVerification += `\n`;
+  }
 
   let articlesText = '';
   if (articles.length > 0) {
@@ -971,7 +1040,7 @@ function buildPrompt(
   return `You are a financial journalist writing a ${wordCount}-word article about ${companyName} (${ticker}).
 
 ${focus}
-
+${customSourceVerification}
 CURRENT PRICE ACTION:
 ${priceAction || 'Price data not available'}
 ${temporalContext}
@@ -1101,6 +1170,308 @@ EARNINGS REACTION TEMPLATE - CRITICAL INSTRUCTIONS:
 Generate the article now:`;
 }
 
+// Multi-factor analysis generation (4-pass iterative method)
+async function generateMultiFactorStory(
+  ticker: string,
+  companyName: string,
+  priceAction: string,
+  articles: any[],
+  relatedStockData: Record<string, any>,
+  wordCount: number,
+  priceData: any,
+  provider: string
+): Promise<string> {
+  console.log(`[QUICK STORY] Multi-factor analysis mode enabled for ${ticker}`);
+  
+  const relatedStocksList = Object.keys(relatedStockData);
+  const priceActionDate = getPriceActionDate();
+  const temporalContext = getTemporalContext();
+  
+  // Fetch earnings/events data for related stocks
+  console.log(`[QUICK STORY] Fetching earnings/events data for ${relatedStocksList.length} related stocks...`);
+  const relatedStocksEarningsData: Record<string, any> = {};
+  const relatedStocksConsensus: Record<string, any> = {};
+  
+  for (const relatedTicker of relatedStocksList) {
+    try {
+      const [earnings, consensus] = await Promise.all([
+        fetchRecentEarningsResults(relatedTicker),
+        fetchConsensusRatings(relatedTicker),
+      ]);
+      if (earnings) relatedStocksEarningsData[relatedTicker] = earnings;
+      if (consensus) relatedStocksConsensus[relatedTicker] = consensus;
+    } catch (error) {
+      console.error(`[QUICK STORY] Error fetching data for ${relatedTicker}:`, error);
+    }
+  }
+  
+  // Pass 1: Generate initial draft with primary factor
+  console.log(`[QUICK STORY] Pass 1/4: Generating initial structure...`);
+  const primaryFactor = relatedStocksList.length > 0 ? relatedStocksList[0] : null;
+  const primaryData = primaryFactor ? relatedStockData[primaryFactor] : null;
+  const primaryEarnings = primaryFactor ? relatedStocksEarningsData[primaryFactor] : null;
+  
+  let primaryFactorText = '';
+  if (primaryFactor && primaryData) {
+    primaryFactorText = `\nPRIMARY FACTOR:\n`;
+    primaryFactorText += `${primaryData.name || primaryFactor} (${primaryFactor}): ${primaryData.change !== null ? `${primaryData.change > 0 ? '+' : ''}${primaryData.change.toFixed(2)}%` : 'N/A'}\n`;
+    if (primaryEarnings) {
+      if (primaryEarnings.type === 'recent') {
+        primaryFactorText += `Recent Earnings: EPS ${primaryEarnings.eps_actual !== null ? `$${typeof primaryEarnings.eps_actual === 'string' ? parseFloat(primaryEarnings.eps_actual).toFixed(2) : primaryEarnings.eps_actual.toFixed(2)}` : 'N/A'} vs Estimate ${primaryEarnings.eps_estimate !== null ? `$${typeof primaryEarnings.eps_estimate === 'string' ? parseFloat(primaryEarnings.eps_estimate).toFixed(2) : primaryEarnings.eps_estimate.toFixed(2)}` : 'N/A'} (${primaryEarnings.eps_beat_miss || 'N/A'})\n`;
+      } else if (primaryEarnings.type === 'upcoming') {
+        primaryFactorText += `Upcoming Earnings: EPS Estimate ${primaryEarnings.eps_estimate !== null ? `$${typeof primaryEarnings.eps_estimate === 'string' ? parseFloat(primaryEarnings.eps_estimate).toFixed(2) : primaryEarnings.eps_estimate.toFixed(2)}` : 'N/A'}\n`;
+      }
+    }
+  }
+  
+  let initialPrompt = `You are a financial journalist writing a ${wordCount}-word article about ${companyName} (${ticker}).
+
+CURRENT PRICE ACTION:
+${priceAction || 'Price data not available'}
+${temporalContext}
+IMPORTANT: The price action occurred on ${priceActionDate.dayName}. Always refer to this day by name (e.g., "on ${priceActionDate.dayName}") rather than using relative terms like "yesterday" or "today".
+${primaryFactorText}
+REQUIREMENTS:
+1. Write a concise article explaining why ${ticker} is moving based on the price action${primaryFactor ? ` and how ${primaryData?.name || primaryFactor}'s performance relates` : ''}.
+2. Use SEO subheadings: ## Section: [Subhead Title]
+3. Start with: <strong>${companyName}</strong> (${ticker.includes(':') ? ticker : `NASDAQ: ${ticker}`})
+4. Use HTML <strong> tags for company names on first mention
+5. End with price action line: "${priceAction || `${ticker} price data not available`}, according to Benzinga Pro data."
+6. Use <p> tags for paragraphs
+7. Aim for ${wordCount} words but prioritize data density
+
+Generate the initial article:`;
+
+  const initialResult = await aiProvider.generateCompletion(
+    [
+      {
+        role: 'system',
+        content: 'You are a professional financial journalist writing concise, data-dense articles for a financial news website.',
+      },
+      {
+        role: 'user',
+        content: initialPrompt,
+      },
+    ],
+    {
+      model: provider === 'gemini' ? 'gemini-3-pro-preview' : 'gpt-4o',
+      temperature: 0.3,
+      maxTokens: Math.max(wordCount * 2, 1500),
+    },
+    provider
+  );
+
+  let draft = initialResult.content.trim().replace(/^```(?:markdown|html)?\s*/i, '').replace(/\s*```$/i, '');
+
+  // Pass 2: Integrate all related factors with earnings/events data
+  if (relatedStocksList.length > 0) {
+    console.log(`[QUICK STORY] Pass 2/4: Integrating all ${relatedStocksList.length} related factors with earnings data...`);
+    
+    const formatEarningsForPrompt = (ticker: string, earnings: any): string => {
+      if (!earnings) return '';
+      let text = '';
+      if (earnings.type === 'recent') {
+        text += `Recent Earnings Report (${earnings.date || 'N/A'}):\n`;
+        if (earnings.eps_actual !== null && earnings.eps_estimate !== null) {
+          const epsActual = typeof earnings.eps_actual === 'string' ? parseFloat(earnings.eps_actual).toFixed(2) : earnings.eps_actual.toFixed(2);
+          const epsEst = typeof earnings.eps_estimate === 'string' ? parseFloat(earnings.eps_estimate).toFixed(2) : earnings.eps_estimate.toFixed(2);
+          text += `  EPS: $${epsActual} vs Estimate $${epsEst} (${earnings.eps_beat_miss || 'N/A'})`;
+          if (earnings.eps_surprise_pct !== null) {
+            text += ` - ${earnings.eps_surprise_pct > 0 ? '+' : ''}${earnings.eps_surprise_pct.toFixed(1)}% surprise`;
+          }
+          text += '\n';
+        }
+        if (earnings.revenue_actual !== null && earnings.revenue_estimate !== null) {
+          const formatRev = (val: number | string) => {
+            const num = typeof val === 'string' ? parseFloat(val) : val;
+            const millions = num / 1000000;
+            return millions >= 1000 ? `$${(millions / 1000).toFixed(2)}B` : `$${millions.toFixed(2)}M`;
+          };
+          text += `  Revenue: ${formatRev(earnings.revenue_actual)} vs Estimate ${formatRev(earnings.revenue_estimate)} (${earnings.revenue_beat_miss || 'N/A'})\n`;
+        }
+      } else if (earnings.type === 'upcoming') {
+        text += `Upcoming Earnings (${earnings.date || 'N/A'}):\n`;
+        if (earnings.eps_estimate !== null) {
+          text += `  EPS Estimate: $${typeof earnings.eps_estimate === 'string' ? parseFloat(earnings.eps_estimate).toFixed(2) : earnings.eps_estimate.toFixed(2)}\n`;
+        }
+      }
+      return text;
+    };
+
+    const relatedStocksText = relatedStocksList.map((relatedTicker) => {
+      const data = relatedStockData[relatedTicker];
+      const earnings = relatedStocksEarningsData[relatedTicker];
+      const consensus = relatedStocksConsensus[relatedTicker];
+      const changeText = data.change !== null 
+        ? `${data.change > 0 ? '+' : ''}${data.change.toFixed(2)}%`
+        : 'N/A';
+      
+      let stockInfo = `${data.name || relatedTicker} (${relatedTicker}): ${changeText}\n`;
+      if (earnings) {
+        stockInfo += formatEarningsForPrompt(relatedTicker, earnings);
+      }
+      if (consensus && consensus.consensus_rating) {
+        stockInfo += `Analyst Consensus: ${consensus.consensus_rating}`;
+        if (consensus.consensus_price_target) {
+          stockInfo += `, Price Target: $${typeof consensus.consensus_price_target === 'string' ? parseFloat(consensus.consensus_price_target).toFixed(2) : consensus.consensus_price_target.toFixed(2)}`;
+        }
+        stockInfo += '\n';
+      }
+      return stockInfo;
+    }).join('\n');
+
+    const refinePrompt = `You are refining a financial news article. Below is the current draft, followed by detailed data for ALL related companies that need to be integrated.
+
+CURRENT DRAFT:
+${draft}
+
+ALL RELATED COMPANIES DATA TO INTEGRATE:
+${relatedStocksText}
+
+CRITICAL INSTRUCTIONS:
+1. Integrate ALL the related companies above into your article with their earnings/consensus data
+2. Each related company should get its own dedicated section explaining their results
+3. Include specific metrics: earnings beats/misses, revenue numbers, analyst ratings
+4. Show how each company's performance relates to ${ticker}
+5. Maintain the existing structure but expand with detailed analysis
+6. Keep SEO subheadings: ## Section: [Subhead Title]
+7. Use specific numbers and data points from the earnings/consensus information
+8. Aim for ${wordCount} words but prioritize depth and data density
+9. End with: "${priceAction || `${ticker} price data not available`}, according to Benzinga Pro data."
+
+Refine the article to integrate all factors with detailed data:`;
+
+    const refineResult = await aiProvider.generateCompletion(
+      [
+        {
+          role: 'system',
+          content: 'You are a professional financial journalist refining an article to integrate multiple companies with their earnings and analyst data. Focus on including specific metrics and data points.',
+        },
+        {
+          role: 'user',
+          content: refinePrompt,
+        },
+      ],
+      {
+        model: provider === 'gemini' ? 'gemini-3-pro-preview' : 'gpt-4o',
+        temperature: 0.3,
+        maxTokens: Math.max(wordCount * 3, 2000),
+      },
+      provider
+    );
+
+    draft = refineResult.content.trim().replace(/^```(?:markdown|html)?\s*/i, '').replace(/\s*```$/i, '');
+  }
+
+  // Pass 3: Deep causal analysis - build read-through logic
+  console.log(`[QUICK STORY] Pass 3/4: Building deep causal analysis and read-through logic...`);
+  
+  const causalAnalysisPrompt = `You are performing a deep causal analysis on a financial news article. The current article includes multiple related companies, but it needs STRONGER causal connections explaining HOW each factor affects ${ticker}.
+
+CURRENT ARTICLE:
+${draft}
+
+RELATED COMPANIES AFFECTING ${ticker}:
+${relatedStocksList.map((ticker) => relatedStockData[ticker]?.name || ticker).join(', ')}
+
+CRITICAL CAUSAL ANALYSIS REQUIREMENTS:
+1. For EACH related company, you MUST explain the SPECIFIC read-through effect on ${ticker}
+2. Build explicit causal chains using this format:
+   - "[Related Company] result → sector impact → ${ticker} effect"
+   - Example: "Microsoft's AI capex acceleration creates read-through pressure on Meta because..."
+3. Use specific causal language:
+   - "creates read-through pressure"
+   - "signals sector weakness/strength"
+   - "spills into [sector/stock]"
+   - "converges to create"
+   - "ripples through"
+   - "amplifies concerns about"
+4. Show CONVERGENCE: Explain how these factors COMBINE to create sector pressure/momentum
+5. Each related company section should start with HOW their results affect ${ticker}, not just what happened
+6. Add a section explaining the convergence: "## Section: How Factors Converge" or similar
+7. Prohibit generic statements - every connection must be specific and causal
+8. Maintain all existing data and metrics
+9. Keep SEO subheadings: ## Section: [Subhead Title]
+10. End with: "${priceAction || `${ticker} price data not available`}, according to Benzinga Pro data."
+
+Rewrite the article with deep causal analysis and explicit read-through logic:`;
+
+  const causalResult = await aiProvider.generateCompletion(
+    [
+      {
+        role: 'system',
+        content: 'You are a senior financial analyst performing deep causal analysis. You must build explicit read-through logic showing how each factor creates specific effects on the primary stock. Use causal language and show convergence of factors.',
+      },
+      {
+        role: 'user',
+        content: causalAnalysisPrompt,
+      },
+    ],
+    {
+      model: provider === 'gemini' ? 'gemini-3-pro-preview' : 'gpt-4o',
+      temperature: 0.3,
+      maxTokens: Math.max(wordCount * 3, 2500),
+    },
+    provider
+  );
+
+  draft = causalResult.content.trim().replace(/^```(?:markdown|html)?\s*/i, '').replace(/\s*```$/i, '');
+
+  // Pass 4: Final refinement - lead paragraph and overall polish
+  console.log(`[QUICK STORY] Pass 4/4: Final refinement of lead and overall polish...`);
+  
+  const finalRefinePrompt = `You are performing final refinement on a multi-factor financial news article. The article has good causal analysis, but the lead paragraph needs to synthesize ALL factors and the overall article needs polish.
+
+CURRENT ARTICLE:
+${draft}
+
+RELATED COMPANIES:
+${relatedStocksList.map((ticker) => relatedStockData[ticker]?.name || ticker).join(', ')}
+
+FINAL REFINEMENT REQUIREMENTS:
+1. Rewrite the FIRST paragraph (lead) to:
+   - Mention ALL related companies that affect ${ticker}
+   - Explain how their results CONVERGE to create sector pressure/momentum
+   - Use specific language: "cascade of read-throughs", "convergence of signals", "risk-off shift", "sector-wide pressure"
+   - Show the causal chain in the lead: how factors combine to affect ${ticker}
+   - Be 3-4 sentences, data-dense
+   - Start with: <strong>${companyName}</strong> (${ticker.includes(':') ? ticker : `NASDAQ: ${ticker}`})
+2. Review the body sections:
+   - Ensure each section has strong causal language
+   - Verify read-through logic is explicit
+   - Check that convergence is explained
+3. Maintain all specific metrics and data points
+4. Keep SEO subheadings: ## Section: [Subhead Title]
+5. Ensure smooth flow between sections
+6. End with: "${priceAction || `${ticker} price data not available`}, according to Benzinga Pro data."
+
+Provide the fully refined article:`;
+
+  const finalRefineResult = await aiProvider.generateCompletion(
+    [
+      {
+        role: 'system',
+        content: 'You are a professional financial journalist performing final refinement on a multi-factor analysis article. Focus on synthesizing all factors in the lead and ensuring strong causal connections throughout.',
+      },
+      {
+        role: 'user',
+        content: finalRefinePrompt,
+      },
+    ],
+    {
+      model: provider === 'gemini' ? 'gemini-3-pro-preview' : 'gpt-4o',
+      temperature: 0.3,
+      maxTokens: Math.max(wordCount * 3, 2500),
+    },
+    provider
+  );
+
+  const finalStory = finalRefineResult.content.trim().replace(/^```(?:markdown|html)?\s*/i, '').replace(/\s*```$/i, '');
+  
+  console.log(`[QUICK STORY] Multi-factor analysis complete (4 passes)`);
+  return finalStory;
+}
+
 export async function POST(req: Request) {
   try {
     const {
@@ -1109,6 +1480,8 @@ export async function POST(req: Request) {
       template = 'price-movement',
       relatedStocks = [],
       customFocus,
+      customSourceUrls,
+      multiFactorMode = false,
       aiProvider: providerOverride,
     } = await req.json();
 
@@ -1147,23 +1520,72 @@ export async function POST(req: Request) {
     const companyName = priceData?.name || tickerUpper;
     const priceAction = formatPriceAction(priceData, tickerUpper);
 
-    // Build prompt
-    const prompt = buildPrompt(
-      tickerUpper,
-      companyName,
-      priceAction,
-      articles,
-      relatedStockData,
-      template,
-      wordCount,
-      customFocus,
-      earningsData || undefined,
-      priceData || undefined,
-      consensusRatings || undefined
-    );
+    // Scrape custom source URLs if provided (for custom template)
+    let customSourceContent: Record<string, string> = {};
+    if (template === 'custom' && customSourceUrls) {
+      const urlArray = typeof customSourceUrls === 'string' 
+        ? customSourceUrls.split(',').map(url => url.trim()).filter(url => url)
+        : Array.isArray(customSourceUrls) ? customSourceUrls : [];
+      
+      if (urlArray.length > 0) {
+        console.log(`[QUICK STORY] Scraping ${urlArray.length} custom source URLs...`);
+        const scrapePromises = urlArray.map(async (url: string) => {
+          try {
+            const content = await scrapeNewsUrl(url);
+            if (content) {
+              customSourceContent[url] = content;
+              console.log(`[QUICK STORY] Successfully scraped ${url}, content length: ${content.length}`);
+            } else {
+              console.warn(`[QUICK STORY] Failed to scrape ${url}`);
+            }
+          } catch (error) {
+            console.error(`[QUICK STORY] Error scraping ${url}:`, error);
+          }
+        });
+        await Promise.all(scrapePromises);
+      }
+    }
 
-    // Generate story
-    const result = await aiProvider.generateCompletion(
+    // Use multi-factor analysis if enabled for sector-context template
+    let story: string;
+    if (template === 'sector-context' && multiFactorMode && Object.keys(relatedStockData).length > 0) {
+      console.log(`[QUICK STORY] Using multi-factor analysis mode`);
+      story = await generateMultiFactorStory(
+        tickerUpper,
+        companyName,
+        priceAction,
+        articles,
+        relatedStockData,
+        wordCount,
+        priceData || undefined,
+        provider
+      );
+    } else {
+      // Standard single-pass generation
+      const customUrlsArray = template === 'custom' && customSourceUrls
+        ? (typeof customSourceUrls === 'string' 
+            ? customSourceUrls.split(',').map(url => url.trim()).filter(url => url)
+            : Array.isArray(customSourceUrls) ? customSourceUrls : [])
+        : undefined;
+      
+      const prompt = buildPrompt(
+        tickerUpper,
+        companyName,
+        priceAction,
+        articles,
+        relatedStockData,
+        template,
+        wordCount,
+        customFocus,
+        earningsData || undefined,
+        priceData || undefined,
+        consensusRatings || undefined,
+        customUrlsArray,
+        Object.keys(customSourceContent).length > 0 ? customSourceContent : undefined
+      );
+
+      // Generate story
+      const result = await aiProvider.generateCompletion(
       [
         {
           role: 'system',
@@ -1180,9 +1602,10 @@ export async function POST(req: Request) {
         maxTokens: Math.max(wordCount * 3, 2000), // Increased to prevent truncation
       },
       provider
-    );
+      );
 
-    let story = result.content.trim();
+      story = result.content.trim();
+    }
 
     // Clean up any markdown wrappers
     story = story.replace(/^```(?:markdown|html)?\s*/i, '').replace(/\s*```$/i, '');
@@ -1208,6 +1631,12 @@ export async function POST(req: Request) {
       console.log(`[QUICK STORY] Current hyperlink count: ${currentHyperlinkCount}, expected: ${expectedHyperlinks}`);
       
       // Build a more explicit prompt with hyperlink requirements
+      const customUrlsArrayRetry = template === 'custom' && customSourceUrls
+        ? (typeof customSourceUrls === 'string' 
+            ? customSourceUrls.split(',').map(url => url.trim()).filter(url => url)
+            : Array.isArray(customSourceUrls) ? customSourceUrls : [])
+        : undefined;
+      
       const retryPrompt = buildPrompt(
         tickerUpper,
         companyName,
@@ -1219,7 +1648,9 @@ export async function POST(req: Request) {
         customFocus,
         earningsData || undefined,
         priceData || undefined,
-        consensusRatings || undefined
+        consensusRatings || undefined,
+        customUrlsArrayRetry,
+        Object.keys(customSourceContent).length > 0 ? customSourceContent : undefined
       ) + `\n\nCRITICAL VALIDATION REQUIRED BEFORE SUBMITTING:
 CRITICAL WRITING STYLE REMINDER:
 - Write naturally as a journalist - DO NOT explicitly reference articles or reports
