@@ -83,18 +83,27 @@ async function fetchPriceData(ticker: string) {
   }
 }
 
-// Fetch recent Benzinga articles
-async function fetchRecentArticles(ticker: string, count: number = 5): Promise<any[]> {
+// Fetch recent Benzinga articles, filtered by price action date
+async function fetchRecentArticles(ticker: string, count: number = 5, priceActionDate?: Date): Promise<any[]> {
   try {
     if (!BENZINGA_API_KEY) {
       return [];
     }
 
-    const dateFrom = new Date();
-    dateFrom.setDate(dateFrom.getDate() - 7);
+    // Use price action date if provided, otherwise use current date
+    const targetDate = priceActionDate || new Date();
+    
+    // Fetch articles from the price action date and up to 5 days before (to ensure we have enough articles)
+    const dateFrom = new Date(targetDate);
+    dateFrom.setDate(dateFrom.getDate() - 5);
     const dateFromStr = dateFrom.toISOString().slice(0, 10);
+    
+    // Set dateTo to the day after price action date to include all articles from that day
+    const dateTo = new Date(targetDate);
+    dateTo.setDate(dateTo.getDate() + 1);
+    const dateToStr = dateTo.toISOString().slice(0, 10);
 
-    const url = `${BZ_NEWS_URL}?token=${BENZINGA_API_KEY}&tickers=${encodeURIComponent(ticker)}&items=${count * 3}&fields=headline,title,created,url,channels,teaser&accept=application/json&displayOutput=full&dateFrom=${dateFromStr}`;
+    const url = `${BZ_NEWS_URL}?token=${BENZINGA_API_KEY}&tickers=${encodeURIComponent(ticker)}&items=${count * 5}&fields=headline,title,created,url,channels,teaser&accept=application/json&displayOutput=full&dateFrom=${dateFromStr}&dateTo=${dateToStr}`;
 
     const response = await fetch(url, {
       headers: { Accept: 'application/json' },
@@ -106,20 +115,73 @@ async function fetchRecentArticles(ticker: string, count: number = 5): Promise<a
     }
 
     const data = await response.json();
-    if (!Array.isArray(data)) return [];
+    console.log(`[QUICK STORY] API response for ${ticker}:`, {
+      isArray: Array.isArray(data),
+      length: Array.isArray(data) ? data.length : 'N/A',
+      dateRange: `${dateFromStr} to ${dateToStr}`,
+    });
+    
+    if (!Array.isArray(data)) {
+      console.warn(`[QUICK STORY] API returned non-array response for ${ticker}`);
+      return [];
+    }
 
-    // Filter out press releases
+    // Filter out press releases and filter by date relevance
     const prChannelNames = ['press releases', 'press-releases', 'pressrelease', 'pr'];
     const normalize = (str: string) => str.toLowerCase().replace(/[-_]/g, ' ');
+    
+    // Get the price action date as a string for comparison (YYYY-MM-DD)
+    const priceActionDateStr = targetDate.toISOString().slice(0, 10);
+    
+    // Get dates for comparison
+    const dayBefore = new Date(targetDate);
+    dayBefore.setDate(dayBefore.getDate() - 1);
+    const dayBeforeStr = dayBefore.toISOString().slice(0, 10);
+    
+    const twoDaysBefore = new Date(targetDate);
+    twoDaysBefore.setDate(twoDaysBefore.getDate() - 2);
+    const twoDaysBeforeStr = twoDaysBefore.toISOString().slice(0, 10);
 
-    const filteredArticles = data
+    let filteredArticles = data
       .filter((item: any) => {
+        // Filter out press releases
         if (Array.isArray(item.channels) && item.channels.some((ch: any) =>
           typeof ch.name === 'string' && prChannelNames.includes(normalize(ch.name))
         )) {
           return false;
         }
-        return true;
+        
+        // Filter out insight stories and opinion articles
+        const articleUrl = item.url || '';
+        if (articleUrl.startsWith('https://www.benzinga.com/insights/')) {
+          return false;
+        }
+        if (articleUrl.startsWith('https://www.benzinga.com/Opinion/')) {
+          return false;
+        }
+        
+        return true; // Include all articles within the date range
+      })
+      .sort((a: any, b: any) => {
+        // Sort by date: same day as price action first, then day before, then older
+        const aDate = a.created ? new Date(a.created).toISOString().slice(0, 10) : '';
+        const bDate = b.created ? new Date(b.created).toISOString().slice(0, 10) : '';
+        
+        // Priority: same day > day before > 2 days before > older
+        const getPriority = (date: string) => {
+          if (date === priceActionDateStr) return 1;
+          if (date === dayBeforeStr) return 2;
+          if (date === twoDaysBeforeStr) return 3;
+          return 4;
+        };
+        
+        const aPriority = getPriority(aDate);
+        const bPriority = getPriority(bDate);
+        
+        if (aPriority !== bPriority) return aPriority - bPriority;
+        
+        // If same priority, sort by date descending (newest first)
+        return new Date(b.created || 0).getTime() - new Date(a.created || 0).getTime();
       })
       .slice(0, count)
       .map((item: any) => ({
@@ -129,6 +191,74 @@ async function fetchRecentArticles(ticker: string, count: number = 5): Promise<a
         teaser: item.teaser || null,
       }));
 
+    console.log(`[QUICK STORY] Fetched ${filteredArticles.length} articles for ${ticker}, price action date: ${priceActionDateStr}`);
+    if (filteredArticles.length > 0) {
+      console.log(`[QUICK STORY] Article dates: ${filteredArticles.map((a: any) => new Date(a.date).toISOString().slice(0, 10)).join(', ')}`);
+    } else if (data.length > 0) {
+      console.warn(`[QUICK STORY] ${data.length} articles returned from API but all were filtered out (likely all press releases)`);
+    } else {
+      console.warn(`[QUICK STORY] No articles found for ${ticker} in date range ${dateFromStr} to ${dateToStr}`);
+    }
+
+    // Fallback: If no articles found in the date range, try a wider range (30 days)
+    if (filteredArticles.length === 0) {
+      console.log(`[QUICK STORY] No articles found in 5-day range, trying 30-day range for ${ticker}`);
+      const fallbackDateFrom = new Date(targetDate);
+      fallbackDateFrom.setDate(fallbackDateFrom.getDate() - 30);
+      const fallbackDateFromStr = fallbackDateFrom.toISOString().slice(0, 10);
+      
+      const fallbackUrl = `${BZ_NEWS_URL}?token=${BENZINGA_API_KEY}&tickers=${encodeURIComponent(ticker)}&items=${count * 5}&fields=headline,title,created,url,channels,teaser&accept=application/json&displayOutput=full&dateFrom=${fallbackDateFromStr}&dateTo=${dateToStr}`;
+      
+      try {
+        const fallbackResponse = await fetch(fallbackUrl, {
+          headers: { Accept: 'application/json' },
+        });
+        
+        if (fallbackResponse.ok) {
+          const fallbackData = await fallbackResponse.json();
+          if (Array.isArray(fallbackData) && fallbackData.length > 0) {
+            console.log(`[QUICK STORY] Found ${fallbackData.length} articles in 30-day range`);
+            
+            filteredArticles = fallbackData
+              .filter((item: any) => {
+                // Filter out press releases
+                if (Array.isArray(item.channels) && item.channels.some((ch: any) =>
+                  typeof ch.name === 'string' && prChannelNames.includes(normalize(ch.name))
+                )) {
+                  return false;
+                }
+                
+                // Filter out insight stories and opinion articles
+                const articleUrl = item.url || '';
+                if (articleUrl.startsWith('https://www.benzinga.com/insights/')) {
+                  return false;
+                }
+                if (articleUrl.startsWith('https://www.benzinga.com/Opinion/')) {
+                  return false;
+                }
+                
+                return true;
+              })
+              .sort((a: any, b: any) => {
+                // Sort by date descending (newest first)
+                return new Date(b.created || 0).getTime() - new Date(a.created || 0).getTime();
+              })
+              .slice(0, count)
+              .map((item: any) => ({
+                headline: item.headline || item.title || 'No headline',
+                url: item.url || '',
+                date: item.created || '',
+                teaser: item.teaser || null,
+              }));
+            
+            console.log(`[QUICK STORY] Using ${filteredArticles.length} articles from fallback search`);
+          }
+        }
+      } catch (fallbackError) {
+        console.error(`[QUICK STORY] Fallback search failed for ${ticker}:`, fallbackError);
+      }
+    }
+
     return filteredArticles;
   } catch (error) {
     console.error('[QUICK STORY] Error fetching articles:', error);
@@ -136,7 +266,76 @@ async function fetchRecentArticles(ticker: string, count: number = 5): Promise<a
   }
 }
 
-// Fetch most recent earnings results (with actuals)
+// Fetch consensus ratings from Benzinga
+async function fetchConsensusRatings(ticker: string) {
+  try {
+    if (!BENZINGA_API_KEY) {
+      return null;
+    }
+
+    const params = new URLSearchParams();
+    params.append('token', BENZINGA_API_KEY);
+    params.append('parameters[tickers]', ticker);
+    
+    const consensusUrl = `https://api.benzinga.com/api/v1/consensus-ratings?${params.toString()}`;
+    
+    const consensusRes = await fetch(consensusUrl, {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json'
+      },
+    });
+      
+    if (consensusRes.ok) {
+      const consensusData = await consensusRes.json();
+      
+      let extractedConsensus = null;
+      
+      if (Array.isArray(consensusData)) {
+        extractedConsensus = consensusData.find((item: any) => 
+          item.ticker?.toUpperCase() === ticker.toUpperCase() || 
+          item.symbol?.toUpperCase() === ticker.toUpperCase()
+        ) || consensusData[0];
+      } else if (consensusData.consensus) {
+        extractedConsensus = consensusData.consensus;
+      } else if (consensusData[ticker.toUpperCase()]) {
+        extractedConsensus = consensusData[ticker.toUpperCase()];
+      } else if (consensusData.ratings && Array.isArray(consensusData.ratings)) {
+        extractedConsensus = consensusData.ratings.find((item: any) => 
+          item.ticker?.toUpperCase() === ticker.toUpperCase() || 
+          item.symbol?.toUpperCase() === ticker.toUpperCase()
+        ) || consensusData.ratings[0];
+      } else {
+        extractedConsensus = consensusData;
+      }
+      
+      if (extractedConsensus) {
+        const consensusPriceTarget = 
+          extractedConsensus.consensus_price_target ?? 
+          extractedConsensus.consensusPriceTarget ??
+          extractedConsensus.price_target ??
+          extractedConsensus.priceTarget ??
+          extractedConsensus.target ??
+          extractedConsensus.pt ??
+          extractedConsensus.consensus_target ??
+          null;
+        
+        return {
+          consensus_rating: extractedConsensus.consensus_rating || extractedConsensus.consensusRating || extractedConsensus.rating || null,
+          consensus_price_target: consensusPriceTarget,
+          total_analyst_count: extractedConsensus.total_analyst_count || extractedConsensus.totalAnalystCount || extractedConsensus.analyst_count || extractedConsensus.count || null,
+        };
+      }
+    }
+    
+    return null;
+  } catch (error) {
+    console.error(`[QUICK STORY] Error fetching consensus ratings for ${ticker}:`, error);
+    return null;
+  }
+}
+
+// Fetch most recent earnings results (with actuals) or upcoming earnings (with estimates)
 async function fetchRecentEarningsResults(ticker: string) {
   try {
     if (!BENZINGA_API_KEY) {
@@ -146,12 +345,14 @@ async function fetchRecentEarningsResults(ticker: string) {
     const today = new Date();
     const dateTo = today.toISOString().split('T')[0];
     const dateFrom = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]; // Last 90 days
+    const dateToUpcoming = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]; // Next 90 days
 
+    // Fetch both past and upcoming earnings
     const url = 'https://api.benzinga.com/api/v2/calendar/earnings' +
       `?token=${BENZINGA_API_KEY}` +
       `&parameters[tickers]=${encodeURIComponent(ticker)}` +
       `&parameters[date_from]=${dateFrom}` +
-      `&parameters[date_to]=${dateTo}`;
+      `&parameters[date_to]=${dateToUpcoming}`;
 
     const response = await fetch(url, {
       headers: { Accept: 'application/json' },
@@ -167,7 +368,7 @@ async function fetchRecentEarningsResults(ticker: string) {
       return null;
     }
 
-    // Find the most recent earnings with actual results
+    // Find the most recent earnings with actual results (past earnings)
     const earningsWithActuals = data.earnings
       .filter((item: any) => {
         const earningsDate = item.date || item.earnings_date || item.earningsDate;
@@ -189,80 +390,132 @@ async function fetchRecentEarningsResults(ticker: string) {
         return dateB.getTime() - dateA.getTime(); // Most recent first
       });
 
-    if (earningsWithActuals.length === 0) {
-      return null;
-    }
+    // If we have recent earnings with actuals, use that
+    if (earningsWithActuals.length > 0) {
+      const mostRecent = earningsWithActuals[0];
+      const earningsDate = mostRecent.date || mostRecent.earnings_date || mostRecent.earningsDate;
+      
+      // Extract EPS data
+      const epsActual = mostRecent.eps || mostRecent.eps_actual || mostRecent.epsActual || 
+                       mostRecent.eps_actual_reported || mostRecent.actual_eps || mostRecent.reported_eps || null;
+      const epsEst = mostRecent.eps_est || mostRecent.epsEst || mostRecent.eps_estimate || 
+                    mostRecent.epsEstimate || mostRecent.estimated_eps || mostRecent.eps_consensus || null;
+      const epsPrior = mostRecent.eps_prior || mostRecent.epsPrior || mostRecent.eps_prev || 
+                      mostRecent.previous_eps || null;
+      
+      // Extract Revenue data
+      const revenueActual = mostRecent.revenue || mostRecent.revenue_actual || mostRecent.revenueActual || 
+                           mostRecent.revenue_actual_reported || mostRecent.actual_revenue || mostRecent.reported_revenue || null;
+      const revenueEst = mostRecent.revenue_est || mostRecent.revenueEst || mostRecent.revenue_estimate || 
+                        mostRecent.revenueEstimate || mostRecent.estimated_revenue || mostRecent.revenue_consensus || null;
+      const revenuePrior = mostRecent.revenue_prior || mostRecent.revenuePrior || mostRecent.rev_prev || 
+                          mostRecent.previous_revenue || null;
 
-    const mostRecent = earningsWithActuals[0];
-    const earningsDate = mostRecent.date || mostRecent.earnings_date || mostRecent.earningsDate;
-    
-    // Extract EPS data
-    const epsActual = mostRecent.eps || mostRecent.eps_actual || mostRecent.epsActual || 
-                     mostRecent.eps_actual_reported || mostRecent.actual_eps || mostRecent.reported_eps || null;
-    const epsEst = mostRecent.eps_est || mostRecent.epsEst || mostRecent.eps_estimate || 
-                  mostRecent.epsEstimate || mostRecent.estimated_eps || mostRecent.eps_consensus || null;
-    const epsPrior = mostRecent.eps_prior || mostRecent.epsPrior || mostRecent.eps_prev || 
-                    mostRecent.previous_eps || null;
-    
-    // Extract Revenue data
-    const revenueActual = mostRecent.revenue || mostRecent.revenue_actual || mostRecent.revenueActual || 
-                         mostRecent.revenue_actual_reported || mostRecent.actual_revenue || mostRecent.reported_revenue || null;
-    const revenueEst = mostRecent.revenue_est || mostRecent.revenueEst || mostRecent.revenue_estimate || 
-                      mostRecent.revenueEstimate || mostRecent.estimated_revenue || mostRecent.revenue_consensus || null;
-    const revenuePrior = mostRecent.revenue_prior || mostRecent.revenuePrior || mostRecent.rev_prev || 
-                        mostRecent.previous_revenue || null;
-
-    // Calculate beats/misses
-    let epsBeatMiss = null;
-    if (epsActual !== null && epsEst !== null) {
-      const actual = typeof epsActual === 'string' ? parseFloat(epsActual) : epsActual;
-      const estimate = typeof epsEst === 'string' ? parseFloat(epsEst) : epsEst;
-      if (!isNaN(actual) && !isNaN(estimate)) {
-        epsBeatMiss = actual > estimate ? 'Beat' : actual < estimate ? 'Miss' : 'Meet';
+      // Calculate beats/misses
+      let epsBeatMiss = null;
+      if (epsActual !== null && epsEst !== null) {
+        const actual = typeof epsActual === 'string' ? parseFloat(epsActual) : epsActual;
+        const estimate = typeof epsEst === 'string' ? parseFloat(epsEst) : epsEst;
+        if (!isNaN(actual) && !isNaN(estimate)) {
+          epsBeatMiss = actual > estimate ? 'Beat' : actual < estimate ? 'Miss' : 'Meet';
+        }
       }
-    }
 
-    let revenueBeatMiss = null;
-    if (revenueActual !== null && revenueEst !== null) {
-      const actual = typeof revenueActual === 'string' ? parseFloat(revenueActual) : revenueActual;
-      const estimate = typeof revenueEst === 'string' ? parseFloat(revenueEst) : revenueEst;
-      if (!isNaN(actual) && !isNaN(estimate)) {
-        revenueBeatMiss = actual > estimate ? 'Beat' : actual < estimate ? 'Miss' : 'Meet';
+      let revenueBeatMiss = null;
+      if (revenueActual !== null && revenueEst !== null) {
+        const actual = typeof revenueActual === 'string' ? parseFloat(revenueActual) : revenueActual;
+        const estimate = typeof revenueEst === 'string' ? parseFloat(revenueEst) : revenueEst;
+        if (!isNaN(actual) && !isNaN(estimate)) {
+          revenueBeatMiss = actual > estimate ? 'Beat' : actual < estimate ? 'Miss' : 'Meet';
+        }
       }
-    }
 
-    // Calculate surprise percentages
-    let epsSurprisePct = null;
-    if (epsActual !== null && epsEst !== null && epsEst !== 0) {
-      const actual = typeof epsActual === 'string' ? parseFloat(epsActual) : epsActual;
-      const estimate = typeof epsEst === 'string' ? parseFloat(epsEst) : epsEst;
-      if (!isNaN(actual) && !isNaN(estimate) && estimate !== 0) {
-        epsSurprisePct = ((actual - estimate) / Math.abs(estimate)) * 100;
+      // Calculate surprise percentages
+      let epsSurprisePct = null;
+      if (epsActual !== null && epsEst !== null && epsEst !== 0) {
+        const actual = typeof epsActual === 'string' ? parseFloat(epsActual) : epsActual;
+        const estimate = typeof epsEst === 'string' ? parseFloat(epsEst) : epsEst;
+        if (!isNaN(actual) && !isNaN(estimate) && estimate !== 0) {
+          epsSurprisePct = ((actual - estimate) / Math.abs(estimate)) * 100;
+        }
       }
-    }
 
-    let revenueSurprisePct = null;
-    if (revenueActual !== null && revenueEst !== null && revenueEst !== 0) {
-      const actual = typeof revenueActual === 'string' ? parseFloat(revenueActual) : revenueActual;
-      const estimate = typeof revenueEst === 'string' ? parseFloat(revenueEst) : revenueEst;
-      if (!isNaN(actual) && !isNaN(estimate) && estimate !== 0) {
-        revenueSurprisePct = ((actual - estimate) / Math.abs(estimate)) * 100;
+      let revenueSurprisePct = null;
+      if (revenueActual !== null && revenueEst !== null && revenueEst !== 0) {
+        const actual = typeof revenueActual === 'string' ? parseFloat(revenueActual) : revenueActual;
+        const estimate = typeof revenueEst === 'string' ? parseFloat(revenueEst) : revenueEst;
+        if (!isNaN(actual) && !isNaN(estimate) && estimate !== 0) {
+          revenueSurprisePct = ((actual - estimate) / Math.abs(estimate)) * 100;
+        }
       }
+
+      console.log(`[QUICK STORY] Found recent earnings with actuals for ${ticker}, date: ${earningsDate}`);
+      
+      return {
+        type: 'recent',
+        date: earningsDate,
+        eps_actual: epsActual,
+        eps_estimate: epsEst,
+        eps_prior: epsPrior,
+        eps_beat_miss: epsBeatMiss,
+        eps_surprise_pct: epsSurprisePct,
+        revenue_actual: revenueActual,
+        revenue_estimate: revenueEst,
+        revenue_prior: revenuePrior,
+        revenue_beat_miss: revenueBeatMiss,
+        revenue_surprise_pct: revenueSurprisePct,
+      };
     }
 
-    return {
-      date: earningsDate,
-      eps_actual: epsActual,
-      eps_estimate: epsEst,
-      eps_prior: epsPrior,
-      eps_beat_miss: epsBeatMiss,
-      eps_surprise_pct: epsSurprisePct,
-      revenue_actual: revenueActual,
-      revenue_estimate: revenueEst,
-      revenue_prior: revenuePrior,
-      revenue_beat_miss: revenueBeatMiss,
-      revenue_surprise_pct: revenueSurprisePct,
-    };
+    // If no recent earnings with actuals, look for upcoming earnings with estimates
+    const upcomingEarnings = data.earnings
+      .filter((item: any) => {
+        const earningsDate = item.date || item.earnings_date || item.earningsDate;
+        if (!earningsDate) return false;
+        
+        // Check if this earnings has estimates
+        const hasEstimates = (item.eps_est || item.epsEst || item.eps_estimate || item.epsEstimate || item.estimated_eps) ||
+                           (item.revenue_est || item.revenueEst || item.revenue_estimate || item.revenueEstimate || item.estimated_revenue);
+        
+        if (!hasEstimates) return false;
+        
+        // Only include future earnings
+        const date = new Date(earningsDate);
+        return date > today;
+      })
+      .sort((a: any, b: any) => {
+        const dateA = new Date(a.date || a.earnings_date || a.earningsDate || 0);
+        const dateB = new Date(b.date || b.earnings_date || b.earningsDate || 0);
+        return dateA.getTime() - dateB.getTime(); // Earliest upcoming first
+      });
+
+    if (upcomingEarnings.length > 0) {
+      const nextEarnings = upcomingEarnings[0];
+      const earningsDate = nextEarnings.date || nextEarnings.earnings_date || nextEarnings.earningsDate;
+      
+      const epsEst = nextEarnings.eps_est || nextEarnings.epsEst || nextEarnings.eps_estimate || 
+                    nextEarnings.epsEstimate || nextEarnings.estimated_eps || null;
+      const epsPrior = nextEarnings.eps_prior || nextEarnings.epsPrior || nextEarnings.eps_prev || 
+                      nextEarnings.previous_eps || null;
+      
+      const revenueEst = nextEarnings.revenue_est || nextEarnings.revenueEst || nextEarnings.revenue_estimate || 
+                        nextEarnings.revenueEstimate || nextEarnings.estimated_revenue || null;
+      const revenuePrior = nextEarnings.revenue_prior || nextEarnings.revenuePrior || nextEarnings.rev_prev || 
+                          nextEarnings.previous_revenue || null;
+
+      console.log(`[QUICK STORY] Found upcoming earnings with estimates for ${ticker}, date: ${earningsDate}`);
+      
+      return {
+        type: 'upcoming',
+        date: earningsDate,
+        eps_estimate: epsEst,
+        eps_prior: epsPrior,
+        revenue_estimate: revenueEst,
+        revenue_prior: revenuePrior,
+      };
+    }
+
+    return null;
   } catch (error) {
     console.error(`[QUICK STORY] Error fetching earnings results for ${ticker}:`, error);
     return null;
@@ -339,6 +592,78 @@ function getMarketSession(): 'premarket' | 'regular' | 'afterhours' | 'closed' {
 }
 
 // Format price action text
+// Get the date when price action occurred (previous trading day if early morning)
+function getPriceActionDate(): { date: Date; dayName: string; isToday: boolean; isYesterday: boolean; temporalContext: string } {
+  const now = new Date();
+  
+  // Get ET time components
+  const etFormatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    hour: 'numeric',
+    minute: '2-digit',
+    weekday: 'long',
+    day: 'numeric',
+    month: 'numeric',
+    year: 'numeric',
+    hour12: false,
+  });
+  
+  const parts = etFormatter.formatToParts(now);
+  const hour = parseInt(parts.find(p => p.type === 'hour')?.value || '0', 10);
+  const minute = parseInt(parts.find(p => p.type === 'minute')?.value || '0', 10);
+  const dayOfWeek = parts.find(p => p.type === 'weekday')?.value || 'Monday';
+  const day = parseInt(parts.find(p => p.type === 'day')?.value || '1', 10);
+  const month = parseInt(parts.find(p => p.type === 'month')?.value || '1', 10);
+  const year = parseInt(parts.find(p => p.type === 'year')?.value || '2024', 10);
+  
+  const time = hour * 100 + minute;
+  
+  // If it's before 9:30 AM ET, the price action is from the previous trading day
+  let priceActionDate = new Date(year, month - 1, day);
+  let isToday = true;
+  let isYesterday = false;
+  
+  if (time < 930) {
+    // Before market open, price action is from yesterday
+    priceActionDate.setDate(priceActionDate.getDate() - 1);
+    isToday = false;
+    isYesterday = true;
+    
+    // If yesterday was Sunday, go back to Friday
+    if (priceActionDate.getDay() === 0) {
+      priceActionDate.setDate(priceActionDate.getDate() - 2);
+    }
+    // If yesterday was Saturday, go back to Friday
+    if (priceActionDate.getDay() === 6) {
+      priceActionDate.setDate(priceActionDate.getDate() - 1);
+    }
+  }
+  
+  const dayName = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    weekday: 'long',
+  }).format(priceActionDate);
+  
+  let temporalContext = '';
+  if (isToday && time >= 930 && time < 1600) {
+    temporalContext = 'earlier today during regular trading hours';
+  } else if (isToday && time >= 1600) {
+    temporalContext = 'today';
+  } else if (isYesterday) {
+    temporalContext = 'yesterday';
+  } else {
+    temporalContext = `on ${dayName}`;
+  }
+  
+  return {
+    date: priceActionDate,
+    dayName,
+    isToday,
+    isYesterday,
+    temporalContext,
+  };
+}
+
 function formatPriceAction(quote: any, ticker: string): string {
   if (!quote || !quote.lastTradePrice) {
     return '';
@@ -347,13 +672,8 @@ function formatPriceAction(quote: any, ticker: string): string {
   const symbol = quote.symbol || ticker.toUpperCase();
   const companyName = quote.name || symbol;
   const marketSession = getMarketSession();
-  
-  const now = new Date();
-  const formatter = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'America/New_York',
-    weekday: 'long',
-  });
-  const dayOfWeek = formatter.format(now);
+  const priceActionDate = getPriceActionDate();
+  const dayOfWeek = priceActionDate.dayName;
   
   // Regular session data
   const regularClose = quote.close || quote.lastTradePrice || quote.last;
@@ -375,7 +695,7 @@ function formatPriceAction(quote: any, ticker: string): string {
   const extChangeAbs = extChange !== null ? Math.abs(extChange).toFixed(2) : null;
   const extDirection = extChange !== null ? (extChange > 0 ? 'up' : 'down') : null;
   
-  // Build price action text
+  // Build price action text with temporal context
   if (marketSession === 'afterhours' && hasExtendedHours) {
     // Show both regular session and after-hours
     return `${symbol} was ${regularDirection} ${regularChangeAbs}% at $${regularPrice} during regular trading hours, and was ${extDirection} ${extChangeAbs}% at $${extPrice} in after-hours trading on ${dayOfWeek}`;
@@ -391,60 +711,157 @@ function formatPriceAction(quote: any, ticker: string): string {
   }
 }
 
+// Get temporal context for prompt
+function getTemporalContext(): string {
+  const priceActionDate = getPriceActionDate();
+  const now = new Date();
+  const etTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+  const hour = etTime.getHours();
+  const minute = etTime.getMinutes();
+  const time = hour * 100 + minute;
+  
+  let context = '';
+  if (priceActionDate.isToday && time >= 930 && time < 1600) {
+    context = 'The price action occurred earlier today during regular trading hours.';
+  } else if (priceActionDate.isToday && time >= 1600) {
+    context = 'The price action occurred today.';
+  } else if (priceActionDate.isYesterday) {
+    context = 'The price action occurred yesterday (the previous trading day).';
+  } else {
+    context = `The price action occurred on ${priceActionDate.dayName} (the previous trading day).`;
+  }
+  
+  return context;
+}
+
 // Format earnings data for prompt
-function formatEarningsData(earnings: any): string {
+function formatEarningsData(earnings: any, consensusRatings?: any): string {
   if (!earnings) return '';
 
-  let text = '\n\nEARNINGS RESULTS:\n';
-  text += `Report Date: ${earnings.date || 'N/A'}\n`;
+  const formatRevenue = (val: number | string | null) => {
+    if (val === null || val === undefined) return 'N/A';
+    const num = typeof val === 'string' ? parseFloat(val) : val;
+    if (isNaN(num)) return 'N/A';
+    const millions = num / 1000000;
+    if (millions >= 1000) {
+      return `$${(millions / 1000).toFixed(2)}B`;
+    }
+    return `$${millions.toFixed(2)}M`;
+  };
 
-  if (earnings.eps_actual !== null && earnings.eps_estimate !== null) {
-    const epsActual = typeof earnings.eps_actual === 'string' 
-      ? parseFloat(earnings.eps_actual).toFixed(2) 
-      : earnings.eps_actual.toFixed(2);
-    const epsEst = typeof earnings.eps_estimate === 'string' 
-      ? parseFloat(earnings.eps_estimate).toFixed(2) 
-      : earnings.eps_estimate.toFixed(2);
-    
-    text += `EPS: Reported $${epsActual} vs. Estimate $${epsEst}`;
-    if (earnings.eps_beat_miss) {
-      text += ` (${earnings.eps_beat_miss})`;
+  // Format earnings date for display
+  const formatEarningsDate = (dateStr: string | null | undefined): string => {
+    if (!dateStr) return 'N/A';
+    try {
+      const date = new Date(dateStr);
+      return date.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+    } catch {
+      return dateStr;
     }
-    if (earnings.eps_surprise_pct !== null) {
-      const surprise = earnings.eps_surprise_pct > 0 ? '+' : '';
-      text += ` - ${surprise}${earnings.eps_surprise_pct.toFixed(1)}% surprise`;
-    }
-    if (earnings.eps_prior !== null) {
-      const prior = typeof earnings.eps_prior === 'string' 
-        ? parseFloat(earnings.eps_prior).toFixed(2) 
-        : earnings.eps_prior.toFixed(2);
-      text += ` (Prior: $${prior})`;
-    }
-    text += '\n';
-  }
+  };
 
-  if (earnings.revenue_actual !== null && earnings.revenue_estimate !== null) {
-    const formatRevenue = (val: number | string) => {
-      const num = typeof val === 'string' ? parseFloat(val) : val;
-      const millions = num / 1000000;
-      if (millions >= 1000) {
-        return `$${(millions / 1000).toFixed(2)}B`;
+  let text = '\n\nEARNINGS DATA:\n';
+  
+  if (earnings.type === 'recent') {
+    // Recent earnings with actual results
+    const formattedDate = formatEarningsDate(earnings.date);
+    text += `Earnings Report Date: ${formattedDate}\n`;
+    text += `Status: RECENT REPORT (Actual results available)\n`;
+    text += `CRITICAL: You MUST use the exact date "${formattedDate}" in your first paragraph when mentioning the earnings report. DO NOT use "recently" or vague date references - use the actual date.\n\n`;
+
+    if (earnings.eps_actual !== null && earnings.eps_estimate !== null) {
+      const epsActual = typeof earnings.eps_actual === 'string' 
+        ? parseFloat(earnings.eps_actual).toFixed(2) 
+        : earnings.eps_actual.toFixed(2);
+      const epsEst = typeof earnings.eps_estimate === 'string' 
+        ? parseFloat(earnings.eps_estimate).toFixed(2) 
+        : earnings.eps_estimate.toFixed(2);
+      
+      text += `EPS: Reported $${epsActual} vs. Estimate $${epsEst}`;
+      if (earnings.eps_beat_miss) {
+        text += ` (${earnings.eps_beat_miss})`;
       }
-      return `$${millions.toFixed(2)}M`;
-    };
+      if (earnings.eps_surprise_pct !== null) {
+        const surprise = earnings.eps_surprise_pct > 0 ? '+' : '';
+        text += ` - ${surprise}${earnings.eps_surprise_pct.toFixed(1)}% surprise`;
+      }
+      if (earnings.eps_prior !== null) {
+        const prior = typeof earnings.eps_prior === 'string' 
+          ? parseFloat(earnings.eps_prior).toFixed(2) 
+          : earnings.eps_prior.toFixed(2);
+        text += ` (Prior Period: $${prior})`;
+      }
+      text += '\n';
+    }
 
-    text += `Revenue: Reported ${formatRevenue(earnings.revenue_actual)} vs. Estimate ${formatRevenue(earnings.revenue_estimate)}`;
-    if (earnings.revenue_beat_miss) {
-      text += ` (${earnings.revenue_beat_miss})`;
+    if (earnings.revenue_actual !== null && earnings.revenue_estimate !== null) {
+      text += `Revenue: Reported ${formatRevenue(earnings.revenue_actual)} vs. Estimate ${formatRevenue(earnings.revenue_estimate)}`;
+      if (earnings.revenue_beat_miss) {
+        text += ` (${earnings.revenue_beat_miss})`;
+      }
+      if (earnings.revenue_surprise_pct !== null) {
+        const surprise = earnings.revenue_surprise_pct > 0 ? '+' : '';
+        text += ` - ${surprise}${earnings.revenue_surprise_pct.toFixed(1)}% surprise`;
+      }
+      if (earnings.revenue_prior !== null) {
+        text += ` (Prior Period: ${formatRevenue(earnings.revenue_prior)})`;
+      }
+      text += '\n';
     }
-    if (earnings.revenue_surprise_pct !== null) {
-      const surprise = earnings.revenue_surprise_pct > 0 ? '+' : '';
-      text += ` - ${surprise}${earnings.revenue_surprise_pct.toFixed(1)}% surprise`;
+  } else if (earnings.type === 'upcoming') {
+    // Upcoming earnings with estimates
+    const formattedDate = formatEarningsDate(earnings.date);
+    text += `Upcoming Earnings Date: ${formattedDate}\n`;
+    text += `Status: UPCOMING REPORT (Estimates only)\n`;
+    text += `CRITICAL: You MUST use the exact date "${formattedDate}" in your first paragraph when mentioning the upcoming earnings report. DO NOT use "recently" or vague date references - use the actual date.\n\n`;
+
+    if (earnings.eps_estimate !== null) {
+      const epsEst = typeof earnings.eps_estimate === 'string' 
+        ? parseFloat(earnings.eps_estimate).toFixed(2) 
+        : earnings.eps_estimate.toFixed(2);
+      
+      text += `EPS Estimate: $${epsEst}`;
+      if (earnings.eps_prior !== null) {
+        const prior = typeof earnings.eps_prior === 'string' 
+          ? parseFloat(earnings.eps_prior).toFixed(2) 
+          : earnings.eps_prior.toFixed(2);
+        const change = parseFloat(epsEst) - parseFloat(prior);
+        const changePct = prior != 0 ? ((change / Math.abs(parseFloat(prior))) * 100) : 0;
+        const changeText = change > 0 ? `up ${changePct.toFixed(1)}%` : change < 0 ? `down ${Math.abs(changePct).toFixed(1)}%` : 'unchanged';
+        text += ` (${changeText} from prior period: $${prior})`;
+      }
+      text += '\n';
     }
-    if (earnings.revenue_prior !== null) {
-      text += ` (Prior: ${formatRevenue(earnings.revenue_prior)})`;
+
+    if (earnings.revenue_estimate !== null) {
+      text += `Revenue Estimate: ${formatRevenue(earnings.revenue_estimate)}`;
+      if (earnings.revenue_prior !== null) {
+        const priorNum = typeof earnings.revenue_prior === 'string' ? parseFloat(earnings.revenue_prior) : earnings.revenue_prior;
+        const estNum = typeof earnings.revenue_estimate === 'string' ? parseFloat(earnings.revenue_estimate) : earnings.revenue_estimate;
+        const change = estNum - priorNum;
+        const changePct = priorNum != 0 ? ((change / Math.abs(priorNum)) * 100) : 0;
+        const changeText = change > 0 ? `up ${changePct.toFixed(1)}%` : change < 0 ? `down ${Math.abs(changePct).toFixed(1)}%` : 'unchanged';
+        text += ` (${changeText} from prior period: ${formatRevenue(earnings.revenue_prior)})`;
+      }
+      text += '\n';
     }
-    text += '\n';
+
+    // Add analyst consensus if available
+    if (consensusRatings) {
+      text += '\nAnalyst Consensus:\n';
+      if (consensusRatings.consensus_rating) {
+        text += `Consensus Rating: ${consensusRatings.consensus_rating}\n`;
+      }
+      if (consensusRatings.consensus_price_target) {
+        const target = typeof consensusRatings.consensus_price_target === 'string' 
+          ? parseFloat(consensusRatings.consensus_price_target).toFixed(2)
+          : consensusRatings.consensus_price_target.toFixed(2);
+        text += `Consensus Price Target: $${target}\n`;
+      }
+      if (consensusRatings.total_analyst_count) {
+        text += `Analyst Coverage: ${consensusRatings.total_analyst_count} analysts\n`;
+      }
+    }
   }
 
   return text;
@@ -461,16 +878,42 @@ function buildPrompt(
   wordCount: number,
   customFocus?: string,
   earningsData?: any,
-  priceData?: any
+  priceData?: any,
+  consensusRatings?: any
 ): string {
   const templateInfo = STORY_TEMPLATES[template as keyof typeof STORY_TEMPLATES] || STORY_TEMPLATES['price-movement'];
   const focus = template === 'custom' && customFocus ? customFocus : templateInfo.focus;
 
   let articlesText = '';
   if (articles.length > 0) {
+    const priceActionDate = getPriceActionDate();
+    const priceActionDateStr = priceActionDate.date.toISOString().slice(0, 10);
+    
     articlesText = `\n\nRECENT ARTICLES (MANDATORY: You MUST create a hyperlink for ALL ${articles.length} articles below - include each one in your story):\n`;
+    articlesText += `IMPORTANT: The price action occurred on ${priceActionDate.dayName}. Articles are listed below with their publication dates.\n`;
+    articlesText += `CRITICAL TEMPORAL CONTEXT RULES:\n`;
+    articlesText += `- Articles marked "[SAME DAY AS PRICE ACTION]" are reporting on events from ${priceActionDate.dayName} - you can reference the day if relevant\n`;
+    articlesText += `- Articles marked "[X DAYS BEFORE PRICE ACTION]" are providing context about events that happened BEFORE the article was published - use vague temporal references like "recently", "earlier this week", "in recent days", "earlier" - DO NOT use the article's publication day name (e.g., "on Monday") as that refers to when the article was published, not when the event happened\n\n`;
+    
     articles.forEach((article, index) => {
-      articlesText += `${index + 1}. ${article.headline}: ${article.url}`;
+      const articleDate = article.date ? new Date(article.date) : null;
+      const articleDateStr = articleDate ? articleDate.toISOString().slice(0, 10) : '';
+      const articleDayName = articleDate ? new Intl.DateTimeFormat('en-US', { weekday: 'long', month: 'long', day: 'numeric' }).format(articleDate) : 'Unknown date';
+      
+      // Determine if article is from same day, day before, or older
+      let dateContext = '';
+      if (articleDateStr === priceActionDateStr) {
+        dateContext = `[SAME DAY AS PRICE ACTION - ${priceActionDate.dayName}]`;
+      } else {
+        const daysDiff = Math.floor((priceActionDate.date.getTime() - (articleDate?.getTime() || 0)) / (1000 * 60 * 60 * 24));
+        if (daysDiff === 1) {
+          dateContext = `[1 DAY BEFORE PRICE ACTION]`;
+        } else if (daysDiff > 1) {
+          dateContext = `[${daysDiff} DAYS BEFORE PRICE ACTION - MUST PROVIDE TEMPORAL CONTEXT]`;
+        }
+      }
+      
+      articlesText += `${index + 1}. ${article.headline}: ${article.url}\n   Published: ${articleDayName} ${dateContext}`;
       if (article.teaser) {
         // Truncate teaser to first 200 characters to keep it concise
         const teaser = article.teaser.length > 200 
@@ -483,9 +926,21 @@ function buildPrompt(
     articlesText += `\n\nCRITICAL HYPERLINK REQUIREMENTS:
 - You MUST create a hyperlink for ALL ${articles.length} articles listed above
 - At least ONE hyperlink MUST appear in your FIRST paragraph (the lead paragraph)
-- Each hyperlink should use three sequential words from the article headline
+- Each hyperlink should use three sequential words from the article headline, BUT:
+  * DO NOT use the exact headline text as your hyperlink (e.g., if headline is "Can You Buy NASA Stock?", don't hyperlink "Can You Buy NASA Stock?")
+  * DO NOT use generic phrases like "recent reports", "according to reports", "recent news", etc. as hyperlink text
+  * Instead, use three sequential words that naturally fit into your sentence context
+  * The hyperlink text should read as part of your narrative, not as a headline or reference
 - Embed hyperlinks naturally throughout the article - distribute them across different paragraphs
-- Count your hyperlinks before submitting: you need exactly ${articles.length} hyperlinks total\n`;
+- Count your hyperlinks before submitting: you need exactly ${articles.length} hyperlinks total
+- CRITICAL: Write naturally as a journalist - DO NOT explicitly reference articles or reports
+- DO NOT use phrases like "as reported", "as discussed", "according to a report", "as covered in an article", "this article", "the report", "in a report", "recent reports", "according to reports", "recent news", etc.
+- Simply write the narrative and embed hyperlinks seamlessly within the text - the hyperlink text should flow naturally as part of the sentence
+- For older articles (marked "[X DAYS BEFORE PRICE ACTION]"): These articles provide context about events that happened earlier. Use vague temporal references like "recently", "earlier this week", "in recent days", "earlier", etc. - DO NOT use the specific day name (e.g., "on Monday") as the article is reporting on events that occurred before its publication date. The day name refers to when the article was published, not when the event happened.
+- Example of GOOD hyperlink embedding: "The company's stock rebounded following a major hardware delivery for its upcoming Neutron rocket."
+- Example of BAD hyperlink embedding: "This development was covered in a Rocket Lab Stock Rebounds article."
+- Example of BAD hyperlink embedding: "Recent reports indicate the company is expanding."
+- Example of BAD hyperlink embedding: "Can You Buy NASA Stock? explores investment options."\n`;
   }
 
   let relatedStocksText = '';
@@ -507,15 +962,20 @@ function buildPrompt(
 
   let earningsText = '';
   if (template === 'earnings-reaction' && earningsData) {
-    earningsText = formatEarningsData(earningsData);
+    earningsText = formatEarningsData(earningsData, consensusRatings);
   }
 
+  const temporalContext = getTemporalContext();
+  const priceActionDate = getPriceActionDate();
+  
   return `You are a financial journalist writing a ${wordCount}-word article about ${companyName} (${ticker}).
 
 ${focus}
 
 CURRENT PRICE ACTION:
 ${priceAction || 'Price data not available'}
+${temporalContext}
+IMPORTANT: The price action occurred on ${priceActionDate.dayName}. Always refer to this day by name (e.g., "on ${priceActionDate.dayName}") rather than using relative terms like "yesterday" or "today".
 ${priceData && priceData.extendedHoursPrice && priceData.extendedHoursChangePercent !== null ? `\nNOTE: The stock closed ${priceData.regularChangePercent > 0 ? 'up' : 'down'} ${Math.abs(priceData.regularChangePercent || 0).toFixed(2)}% during regular trading hours, but is ${priceData.extendedHoursChangePercent > 0 ? 'up' : 'down'} ${Math.abs(priceData.extendedHoursChangePercent).toFixed(2)}% in after-hours trading. When describing the stock movement, mention both the regular session performance and after-hours movement if they differ significantly.` : ''}
 ${earningsText}
 ${articlesText}
@@ -523,16 +983,43 @@ ${articlesText}
 ${relatedStocksText}
 
 REQUIREMENTS:
+${template === 'earnings-reaction' && earningsData ? `
+EARNINGS REACTION TEMPLATE - CRITICAL INSTRUCTIONS:
+- This is an EARNINGS REACTION story - the earnings data provided above MUST be prominently featured
+- CRITICAL: You MUST include the exact earnings date (e.g., "on November 10" or "on November 10, 2025") in your FIRST paragraph - DO NOT use "recently" or vague date references
+- If earnings data shows "RECENT REPORT": Lead with the actual EPS and revenue results, beats/misses, and surprise percentages, and include the exact report date
+- If earnings data shows "UPCOMING REPORT": Lead with the estimates, analyst expectations, and comparisons to prior periods, and include the exact earnings date
+- Include specific numbers: EPS ($X.XX), Revenue ($X.XXB or $X.XXM), beat/miss status, surprise percentages
+- Compare to estimates and prior periods when available
+- Analyst consensus data (if provided) should be mentioned to provide context
+- The earnings data is the PRIMARY focus of this story - make it the centerpiece, not just a mention
+- REQUIRED: At least ONE hyperlink MUST appear in the FIRST paragraph alongside the earnings information
+
+` : ''}
 1. CRITICAL HYPERLINK REQUIREMENT (HIGHEST PRIORITY):
    - You MUST create a hyperlink for EVERY article provided above - no exceptions
    - If ${articles.length} articles are provided, you must include ${articles.length} hyperlinks in your story
-   - REQUIRED: At least ONE hyperlink MUST appear in the FIRST paragraph (lead paragraph)
-   - For each article, create a hyperlink using THREE SEQUENTIAL WORDS from the article headline
+   - REQUIRED: At least ONE hyperlink MUST appear in the FIRST paragraph (lead paragraph) - this is MANDATORY, not optional
+   - For earnings reaction stories: The first paragraph must include BOTH the earnings date AND at least one hyperlink
+   - For each article, create a hyperlink using THREE SEQUENTIAL WORDS from the article headline, BUT:
+     * DO NOT use the exact headline text as your hyperlink (e.g., if headline is "Can You Buy NASA Stock?", don't hyperlink "Can You Buy NASA Stock?")
+     * DO NOT use generic phrases like "recent reports", "according to reports", "recent news", etc. as hyperlink text
+     * Instead, use three sequential words that naturally fit into your sentence context
+     * The hyperlink text should read as part of your narrative, not as a headline or reference
    - Format: <a href="URL">three sequential words</a> (use HTML format, NOT markdown)
    - Do NOT mention "Benzinga" or any source name when linking
    - Embed each hyperlink naturally within your sentences throughout the article
    - Distribute the hyperlinks throughout the article - don't cluster them all in one paragraph
    - Before submitting, count your hyperlinks: you need exactly ${articles.length} hyperlinks total
+   - CRITICAL WRITING STYLE: Write as a normal journalist - DO NOT explicitly reference articles, reports, or sources
+   - DO NOT use phrases like: "as reported", "as discussed", "according to a report", "as covered in an article", "this article", "the report", "in a report", "as noted in", "which was discussed in", "this development was covered in", "recent reports", "according to reports", "recent news", etc.
+   - DO NOT use the exact headline text as hyperlink text - extract three sequential words that fit naturally into your sentence
+   - Simply write the narrative naturally and embed hyperlinks seamlessly - the hyperlink text should flow as part of the sentence, not be called out as a reference or headline
+   - For older articles (marked "[X DAYS BEFORE PRICE ACTION]"): These articles provide context about events that happened earlier. Use vague temporal references like "recently", "earlier this week", "in recent days", "earlier", etc. - DO NOT use the specific day name (e.g., "on Monday") as the article is reporting on events that occurred before its publication date. The day name refers to when the article was published, not when the event happened.
+   - Example of GOOD: "The company's stock rebounded following a major hardware delivery for its upcoming Neutron rocket."
+   - Example of BAD: "This development was covered in a Rocket Lab Stock Rebounds article."
+   - Example of BAD: "Recent reports indicate the company is expanding."
+   - Example of BAD: "Can You Buy NASA Stock? explores investment options."
 2. Word count: Aim for ${wordCount} words, but prioritize DATA DENSITY over hitting the exact count.
    - If you've covered all the key information and there's nothing new to add, it's acceptable to fall short (minimum ${Math.floor(wordCount * 0.8)} words)
    - DO NOT add fluff, repetition, or filler content just to reach the word count
@@ -581,18 +1068,30 @@ REQUIREMENTS:
    - Example: "Meta Platforms was up 2.5% during regular trading hours, but declined 0.50% in after-hours trading"
    - Always distinguish between regular session performance and after-hours movement when they differ significantly
    - Use the price action data provided to accurately report both regular session and after-hours performance
-9. Use professional, journalistic tone suitable for financial news.
-10. Focus on current events and recent developments.
-11. PRICE ACTION SECTION:
+9. TEMPORAL ACCURACY - CRITICAL:
+   - The price action occurred ${temporalContext.toLowerCase()}
+   - When describing the stock movement, ALWAYS use the day of the week name instead of relative terms like "yesterday" or "today"
+   - Use the format: "on [DayName]" (e.g., "on Thursday", "on Friday", "on Monday")
+   - The price action day is: ${priceActionDate.dayName}
+   - Examples:
+     * "surged on ${priceActionDate.dayName}", "climbed on ${priceActionDate.dayName}", "was up on ${priceActionDate.dayName}"
+     * "experienced a significant surge on ${priceActionDate.dayName}"
+     * "gained momentum on ${priceActionDate.dayName}"
+   - DO NOT use: "yesterday", "today", "earlier today" - always use the specific day name: "${priceActionDate.dayName}"
+   - Always match the temporal language to when the price action actually occurred, using the day name provided above
+10. Use professional, journalistic tone suitable for financial news.
+11. Focus on current events and recent developments.
+12. PRICE ACTION SECTION:
    - If you include a "## Section: Price Action" placeholder, provide ONLY new information not already covered
    - DO NOT repeat the price movement that was already mentioned in the lead paragraph
    - If the price action was already fully described earlier, you can skip adding content to this section or provide only the section marker
    - The price action line at the end is sufficient - don't repeat it in the section content
-12. End with a price action line: "${priceAction || `${ticker} price data not available`}, according to Benzinga Pro data."
-13. Format the article with proper paragraph breaks using <p> tags.
-14. Do NOT include "Also Read" or "Read Next" sections.
-15. Do NOT mention "Benzinga" or any source name when referencing the articles - just embed the links naturally.
-16. DATA DENSITY RULE: Every paragraph must introduce NEW information. If you find yourself repeating facts, data points, or analysis already mentioned, either:
+13. End with a price action line: "${priceAction || `${ticker} price data not available`}, according to Benzinga Pro data."
+14. Format the article with proper paragraph breaks using <p> tags.
+15. Do NOT include "Also Read" or "Read Next" sections.
+16. Do NOT mention "Benzinga" or any source name when referencing the articles - just embed the links naturally.
+17. CRITICAL: Write naturally as a journalist - DO NOT explicitly mention that you're referencing articles or reports. Simply write the story and embed hyperlinks seamlessly within the narrative. Avoid phrases like "as reported", "as discussed", "according to a report", "this article", "the report", etc.
+17. DATA DENSITY RULE: Every paragraph must introduce NEW information. If you find yourself repeating facts, data points, or analysis already mentioned, either:
     - Skip that content entirely
     - Or provide a different angle/context that adds value
     - Avoid phrases like "underscores", "highlights", "reflects" when they're just restating what was already said
@@ -622,10 +1121,13 @@ export async function POST(req: Request) {
 
     console.log(`[QUICK STORY] Generating story for ${tickerUpper}, template: ${template}, word count: ${wordCount}`);
 
+    // Get price action date to filter articles
+    const priceActionDate = getPriceActionDate();
+    
     // Fetch data in parallel
     const [priceData, articles, earningsData] = await Promise.all([
       fetchPriceData(tickerUpper),
-      fetchRecentArticles(tickerUpper, 5),
+      fetchRecentArticles(tickerUpper, 5, priceActionDate.date),
       template === 'earnings-reaction' ? fetchRecentEarningsResults(tickerUpper) : Promise.resolve(null),
     ]);
 
@@ -633,6 +1135,12 @@ export async function POST(req: Request) {
     let relatedStockData: Record<string, any> = {};
     if (relatedStocks && Array.isArray(relatedStocks) && relatedStocks.length > 0) {
       relatedStockData = await fetchRelatedStockData(relatedStocks);
+    }
+
+    // Fetch consensus ratings for earnings reaction template
+    let consensusRatings: any = null;
+    if (template === 'earnings-reaction') {
+      consensusRatings = await fetchConsensusRatings(tickerUpper);
     }
 
     // Format price action
@@ -650,7 +1158,8 @@ export async function POST(req: Request) {
       wordCount,
       customFocus,
       earningsData || undefined,
-      priceData || undefined
+      priceData || undefined,
+      consensusRatings || undefined
     );
 
     // Generate story
@@ -709,8 +1218,20 @@ export async function POST(req: Request) {
         wordCount,
         customFocus,
         earningsData || undefined,
-        priceData || undefined
+        priceData || undefined,
+        consensusRatings || undefined
       ) + `\n\nCRITICAL VALIDATION REQUIRED BEFORE SUBMITTING:
+CRITICAL WRITING STYLE REMINDER:
+- Write naturally as a journalist - DO NOT explicitly reference articles or reports
+- DO NOT use phrases like "as reported", "as discussed", "according to a report", "as covered in an article", "this article", "the report", "in a report", "as noted in", "which was discussed in", "this development was covered in", "recent reports", "according to reports", "recent news", etc.
+- DO NOT use the exact headline text as hyperlink text - extract three sequential words that fit naturally into your sentence
+- Simply write the narrative and embed hyperlinks seamlessly - the hyperlink text should flow naturally as part of the sentence, not as a headline or reference
+- Example of GOOD: "The company's stock rebounded following a major hardware delivery for its upcoming Neutron rocket."
+- Example of BAD: "This development was covered in a Rocket Lab Stock Rebounds article."
+- Example of BAD: "Recent reports indicate the company is expanding."
+- Example of BAD: "Can You Buy NASA Stock? explores investment options."
+
+CRITICAL VALIDATION REQUIRED BEFORE SUBMITTING:
 - You MUST have exactly ${expectedHyperlinks} hyperlinks in your story (one for each article)
 - Current count: ${currentHyperlinkCount} hyperlinks found
 - You are MISSING ${expectedHyperlinks - currentHyperlinkCount} hyperlink(s)
