@@ -1179,7 +1179,7 @@ async function generateMultiFactorStory(
   relatedStockData: Record<string, any>,
   wordCount: number,
   priceData: any,
-  provider: string
+  provider: AIProvider
 ): Promise<string> {
   console.log(`[QUICK STORY] Multi-factor analysis mode enabled for ${ticker}`);
   
@@ -1490,7 +1490,7 @@ export async function POST(req: Request) {
     }
 
     const tickerUpper = ticker.toUpperCase().trim();
-    const provider = providerOverride || 'openai';
+    const provider: AIProvider = (providerOverride as AIProvider) || 'openai';
 
     console.log(`[QUICK STORY] Generating story for ${tickerUpper}, template: ${template}, word count: ${wordCount}`);
 
