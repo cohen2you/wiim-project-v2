@@ -94,8 +94,8 @@ export async function POST(request: Request) {
     // Ensure proper paragraph formatting - split by double newlines and rejoin
     const technicalParagraphs = bodyText
       .split(/\n\n+/)
-      .map(p => p.trim())
-      .filter(p => p && p.length > 0 && !p.match(/^##\s*Section:/));
+      .map((p: string) => p.trim())
+      .filter((p: string) => p && p.length > 0 && !p.match(/^##\s*Section:/));
     
     console.log('[CHART EXTRACTION] Technical paragraphs count:', technicalParagraphs.length);
     if (technicalParagraphs.length > 0) {
@@ -115,7 +115,7 @@ export async function POST(request: Request) {
     
     // INSERT CHART PLACEHOLDERS
     // Split content into paragraphs for easier manipulation
-    const paragraphs = formattedContent.split(/\n\n+/).filter(p => p.trim());
+    const paragraphs = formattedContent.split(/\n\n+/).filter((p: string) => p.trim());
     
     console.log('[CHART INSERTION] Total paragraphs:', paragraphs.length);
     console.log('[CHART INSERTION] First paragraph sample:', paragraphs[0]?.substring(0, 100));
@@ -161,7 +161,7 @@ export async function POST(request: Request) {
     
     // Re-split since we modified the array
     formattedContent = paragraphs.join('\n\n');
-    const updatedParagraphs = formattedContent.split(/\n\n+/).filter(p => p.trim() && !p.match(/^##\s*Section:/));
+    const updatedParagraphs = formattedContent.split(/\n\n+/).filter((p: string) => p.trim() && !p.match(/^##\s*Section:/));
     
     // 2. Insert rsi-heatmap chart after the paragraph that mentions RSI
     // Look for paragraph containing RSI discussion - make regex more flexible
@@ -260,7 +260,7 @@ export async function POST(request: Request) {
       } else {
         // No next section, find a good spot after 2-3 paragraphs of content
         const afterFirstSection = currentStory.substring(firstSection.index + firstSection.text.length);
-        const paragraphs = afterFirstSection.split(/\n\n+/).filter(p => p.trim() && !p.match(/^##\s*Section:/));
+        const paragraphs = afterFirstSection.split(/\n\n+/).filter((p: string) => p.trim() && !p.match(/^##\s*Section:/));
         
         if (paragraphs.length >= 2) {
           // Find the end of the second paragraph
@@ -319,7 +319,7 @@ export async function POST(request: Request) {
     // 2. THE JOIN: Use triple newlines temporarily to ensure separation, 
     // then collapse them down to doubles.
     // Filter removes empty strings to prevent excessive newlines
-    let result = finalParts.filter(p => p && p.length > 0).join('\n\n\n');
+    let result = finalParts.filter((p: string) => p && p.length > 0).join('\n\n\n');
     
     // 3. THE FIX FOR "COLLAPSED" HEADERS
     // This is a surgical strike: If "Analysis" is followed by text on the same line, 
