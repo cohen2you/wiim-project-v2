@@ -370,7 +370,7 @@ export async function POST(req: Request) {
     // If ticker is comma-separated (e.g., "U, TTWO"), use the first one for primary search
     let primaryTicker = ticker;
     if (ticker && ticker.includes(',')) {
-      const tickers = ticker.split(',').map(t => t.trim().toUpperCase()).filter(t => t);
+      const tickers = ticker.split(',').map((t: string) => t.trim().toUpperCase()).filter((t: string) => t);
       primaryTicker = tickers[0] || null;
       console.log(`[QUICK STORY SEARCH] Multiple tickers provided: ${tickers.join(', ')}, using ${primaryTicker} for primary search`);
     }
@@ -396,7 +396,7 @@ export async function POST(req: Request) {
       allTickers.push(primaryTicker);
     }
     if (ticker && ticker.includes(',')) {
-      const tickers = ticker.split(',').map(t => t.trim().toUpperCase()).filter(t => t);
+      const tickers = ticker.split(',').map((t: string) => t.trim().toUpperCase()).filter((t: string) => t);
       tickers.forEach(t => {
         if (!allTickers.includes(t)) {
           allTickers.push(t);
