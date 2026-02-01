@@ -23,9 +23,18 @@ export async function POST(request: Request) {
       : undefined;
 
     // Call the WGO Generator to get technical analysis
-    // Use internal API call - construct URL from request
-    const requestUrl = new URL(request.url);
-    const baseUrl = `${requestUrl.protocol}//${requestUrl.host}`;
+    // Use localhost for internal API calls to avoid SSL issues on Render
+    // In production, use localhost; in development, use the request URL
+    const isProduction = process.env.NODE_ENV === 'production';
+    const port = process.env.PORT || '3000';
+    const baseUrl = isProduction 
+      ? `http://localhost:${port}`
+      : (() => {
+          const requestUrl = new URL(request.url);
+          return `${requestUrl.protocol}//${requestUrl.host}`;
+        })();
+    
+    console.log(`[ADD WGO TECHNICAL] Using baseUrl: ${baseUrl} for internal API call`);
     
     const wgoResponse = await fetch(`${baseUrl}/api/generate/technical-analysis`, {
       method: 'POST',
@@ -141,11 +150,13 @@ export async function POST(request: Request) {
       // Insert chart image after the SMA paragraph
       const nextIndex = smaParagraphIndex + 1;
       if (nextIndex >= paragraphs.length || !paragraphs[nextIndex].match(/price-moving-averages|chart.*image/i)) {
-        // Construct chart API URL - check for environment variable first, then fallback to same base URL
-        const chartApiBaseUrl = process.env.CHART_API_URL || (() => {
-          const requestUrl = new URL(request.url);
-          return `${requestUrl.protocol}//${requestUrl.host}`;
-        })();
+        // Construct chart API URL - check for environment variable first, then use localhost in production
+        const chartApiBaseUrl = process.env.CHART_API_URL || (isProduction 
+          ? `http://localhost:${port}`
+          : (() => {
+              const requestUrl = new URL(request.url);
+              return `${requestUrl.protocol}//${requestUrl.host}`;
+            })());
         const chartImageUrl = `${chartApiBaseUrl}/api/charts/image?symbol=${tickerUpper}&chartType=price-moving-averages`;
         // Insert as HTML img tag
         const chartImgTag = `<img src="${chartImageUrl}" alt="Price with Moving Averages" style="max-width: 100%; height: auto; display: block; margin: 20px auto;" />`;
@@ -183,11 +194,13 @@ export async function POST(request: Request) {
       // Insert chart image after the RSI paragraph
       const nextIndex = rsiParagraphIndex + 1;
       if (nextIndex >= updatedParagraphs.length || !updatedParagraphs[nextIndex].match(/rsi-heatmap|chart.*image/i)) {
-        // Construct chart API URL - check for environment variable first, then fallback to same base URL
-        const chartApiBaseUrl = process.env.CHART_API_URL || (() => {
-          const requestUrl = new URL(request.url);
-          return `${requestUrl.protocol}//${requestUrl.host}`;
-        })();
+        // Construct chart API URL - check for environment variable first, then use localhost in production
+        const chartApiBaseUrl = process.env.CHART_API_URL || (isProduction 
+          ? `http://localhost:${port}`
+          : (() => {
+              const requestUrl = new URL(request.url);
+              return `${requestUrl.protocol}//${requestUrl.host}`;
+            })());
         const chartImageUrl = `${chartApiBaseUrl}/api/charts/image?symbol=${tickerUpper}&chartType=rsi-heatmap`;
         // Insert as HTML img tag
         const chartImgTag = `<img src="${chartImageUrl}" alt="RSI Heatmap Timeline" style="max-width: 100%; height: auto; display: block; margin: 20px auto;" />`;
