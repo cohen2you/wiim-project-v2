@@ -2036,13 +2036,13 @@ export async function POST(req: Request) {
       // Also fetch additional related articles for context (up to 4 more)
       // Handle multiple tickers (comma-separated)
       if (tickerUpper.includes(',')) {
-        const tickers = tickerUpper.split(',').map(t => t.trim()).filter(t => t);
-        const articlePromises = tickers.map(t => fetchRecentArticles(t, 3, priceActionDate.date));
+        const tickers = tickerUpper.split(',').map((t: string) => t.trim()).filter((t: string) => t);
+        const articlePromises = tickers.map((t: string) => fetchRecentArticles(t, 3, priceActionDate.date));
         const articleArrays = await Promise.all(articlePromises);
         const relatedArticles = articleArrays.flat();
         // Deduplicate by URL
-        const seenUrls = new Set(articles.map(a => a.url));
-        const uniqueRelated = relatedArticles.filter(a => !seenUrls.has(a.url));
+        const seenUrls = new Set(articles.map((a: any) => a.url));
+        const uniqueRelated = relatedArticles.filter((a: any) => !seenUrls.has(a.url));
         articles = [...articles, ...uniqueRelated];
       } else {
         const relatedArticles = await fetchRecentArticles(tickerUpper, 4, priceActionDate.date);
@@ -2051,15 +2051,15 @@ export async function POST(req: Request) {
     } else {
       // Standard article fetching - handle multiple tickers
       if (tickerUpper.includes(',')) {
-        const tickers = tickerUpper.split(',').map(t => t.trim()).filter(t => t);
+        const tickers = tickerUpper.split(',').map((t: string) => t.trim()).filter((t: string) => t);
         // Fetch articles for each ticker, aiming for 5 total
         const articlesPerTicker = Math.ceil(5 / tickers.length);
-        const articlePromises = tickers.map(t => fetchRecentArticles(t, articlesPerTicker, priceActionDate.date));
+        const articlePromises = tickers.map((t: string) => fetchRecentArticles(t, articlesPerTicker, priceActionDate.date));
         const articleArrays = await Promise.all(articlePromises);
         // Combine and deduplicate by URL
         const allArticles = articleArrays.flat();
         const seenUrls = new Set<string>();
-        articles = allArticles.filter(a => {
+        articles = allArticles.filter((a: any) => {
           if (seenUrls.has(a.url)) return false;
           seenUrls.add(a.url);
           return true;
@@ -2102,11 +2102,11 @@ export async function POST(req: Request) {
     
     // Handle multiple tickers (comma-separated)
     if (tickerUpper.includes(',')) {
-      const tickers = tickerUpper.split(',').map(t => t.trim()).filter(t => t);
+      const tickers = tickerUpper.split(',').map((t: string) => t.trim()).filter((t: string) => t);
       const priceActions = await Promise.all(
-        tickers.map(t => generatePriceAction(t))
+        tickers.map((t: string) => generatePriceAction(t))
       );
-      priceAction = priceActions.filter(pa => pa).join(' ');
+      priceAction = priceActions.filter((pa: string) => pa).join(' ');
     } else {
       priceAction = await generatePriceAction(tickerUpper);
     }
