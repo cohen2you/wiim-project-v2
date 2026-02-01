@@ -1,9 +1,175 @@
 import { NextResponse } from 'next/server';
 import { aiProvider, AIProvider } from '@/lib/aiProvider';
+import { fetchETFs, formatETFInfo } from '@/lib/etf-utils';
 
 const BENZINGA_API_KEY = process.env.BENZINGA_API_KEY;
+const POLYGON_API_KEY = process.env.POLYGON_API_KEY;
 const BZ_NEWS_URL = 'https://api.benzinga.com/api/v2/news';
 const BZ_QUOTE_URL = 'https://api.benzinga.com/api/v2/quoteDelayed';
+
+// Helper functions from WGO Generator
+function normalizeCompanyName(name: string): string {
+  if (!name) return name;
+  if (name === name.toUpperCase() && name.length > 1) {
+    return name.charAt(0).toUpperCase() + name.slice(1).toLowerCase();
+  }
+  return name;
+}
+
+function getMarketStatusTimeBased(): 'open' | 'premarket' | 'afterhours' | 'closed' {
+  const now = new Date();
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    weekday: 'long',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+  
+  const parts = formatter.formatToParts(now);
+  const dayName = parts.find(part => part.type === 'weekday')?.value ?? 'Sunday';
+  const hourString = parts.find(part => part.type === 'hour')?.value ?? '00';
+  const minuteString = parts.find(part => part.type === 'minute')?.value ?? '00';
+  
+  const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const dayIndex = dayNames.indexOf(dayName);
+  const hour = parseInt(hourString, 10);
+  const minute = parseInt(minuteString, 10);
+  const time = hour * 100 + minute;
+  
+  if (dayIndex === 0 || dayIndex === 6) return 'closed';
+  if (time >= 400 && time < 930) return 'premarket';
+  if (time >= 930 && time < 1600) return 'open';
+  if (time >= 1600 && time < 2000) return 'afterhours';
+  return 'closed';
+}
+
+// Fetch price data from Benzinga API (same as WGO Generator)
+async function fetchPriceDataFromBenzinga(ticker: string): Promise<{ quote: any; changePercent: number | undefined } | null> {
+  try {
+    if (!BENZINGA_API_KEY) {
+      console.error('[QUICK STORY] BENZINGA_API_KEY not found');
+      return null;
+    }
+    
+    const url = `${BZ_QUOTE_URL}?token=${BENZINGA_API_KEY}&symbols=${ticker}`;
+    const res = await fetch(url);
+    
+    if (!res.ok) {
+      console.error(`[QUICK STORY] Failed to fetch price data for ${ticker}:`, res.statusText);
+      return null;
+    }
+    
+    const data = await res.json();
+    if (!data || typeof data !== 'object') {
+      return null;
+    }
+    
+    const quote = data[ticker.toUpperCase()];
+    if (!quote || typeof quote !== 'object' || !quote.lastTradePrice) {
+      return null;
+    }
+    
+    const changePercent = typeof quote.changePercent === 'number' ? quote.changePercent : undefined;
+    return { quote, changePercent };
+  } catch (error) {
+    console.error(`[QUICK STORY] Error fetching price data for ${ticker}:`, error);
+    return null;
+  }
+}
+
+// Generate price action using Benzinga API (same as WGO Generator)
+async function generatePriceAction(ticker: string): Promise<string> {
+  try {
+    const priceData = await fetchPriceDataFromBenzinga(ticker);
+    if (!priceData) {
+      return '';
+    }
+    
+    const { quote, changePercent } = priceData;
+    const symbol = quote.symbol ?? ticker.toUpperCase();
+    const companyName = normalizeCompanyName(quote.name ?? symbol);
+    
+    if (!symbol || !quote.lastTradePrice) {
+      return '';
+    }
+    
+    const marketStatus = getMarketStatusTimeBased();
+    
+    const now = new Date();
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/New_York',
+      weekday: 'long',
+    });
+    const currentDayName = formatter.format(now);
+    const dayOfWeek = (currentDayName === 'Sunday' || currentDayName === 'Saturday') ? 'Friday' : currentDayName;
+    const isWeekend = currentDayName === 'Sunday' || currentDayName === 'Saturday';
+    
+    let regularSessionChange = 0;
+    let afterHoursChange = 0;
+    let regularUpDown = '';
+    let afterHoursUpDown = '';
+    
+    if (marketStatus === 'afterhours' && quote.close && quote.lastTradePrice && quote.previousClosePrice) {
+      regularSessionChange = ((quote.close - quote.previousClosePrice) / quote.previousClosePrice) * 100;
+      regularUpDown = regularSessionChange > 0 ? 'up' : regularSessionChange < 0 ? 'down' : 'unchanged';
+      afterHoursChange = ((quote.lastTradePrice - quote.close) / quote.close) * 100;
+      afterHoursUpDown = afterHoursChange > 0 ? 'up' : afterHoursChange < 0 ? 'down' : 'unchanged';
+    }
+    
+    const lastPrice = typeof quote.lastTradePrice === 'number' ? quote.lastTradePrice : parseFloat(quote.lastTradePrice);
+    const formattedPrice = lastPrice.toFixed(2);
+    const priceString = String(formattedPrice);
+    
+    const shouldShowChangePercent = marketStatus === 'open'
+      ? (changePercent !== undefined && changePercent !== 0)
+      : changePercent !== undefined;
+    
+    const changePercentForCalc = changePercent ?? 0;
+    const upDown = changePercentForCalc > 0 ? 'up' : changePercentForCalc < 0 ? 'down' : 'unchanged';
+    const absChange = Math.abs(changePercentForCalc).toFixed(2);
+    
+    let priceActionText = '';
+    
+    if (marketStatus === 'open') {
+      if (shouldShowChangePercent) {
+        priceActionText = `${symbol} Price Action: ${companyName} shares were ${upDown} ${absChange}% at $${priceString} at the time of publication on ${dayOfWeek}`;
+      } else {
+        priceActionText = `${symbol} Price Action: ${companyName} shares were trading at $${priceString} at the time of publication on ${dayOfWeek}`;
+      }
+    } else if (marketStatus === 'afterhours' && quote.close && quote.lastTradePrice && quote.previousClosePrice) {
+      const absRegularChange = Math.abs(regularSessionChange).toFixed(2);
+      const absAfterHoursChange = Math.abs(afterHoursChange).toFixed(2);
+      priceActionText = `${symbol} Price Action: ${companyName} shares were ${regularUpDown} ${absRegularChange}% during regular trading and ${afterHoursUpDown} ${absAfterHoursChange}% in after-hours trading on ${dayOfWeek}, last trading at $${priceString}`;
+    } else {
+      let marketStatusPhrase = '';
+      if (marketStatus === 'premarket') {
+        marketStatusPhrase = ' during premarket trading';
+      } else if (marketStatus === 'afterhours') {
+        marketStatusPhrase = ' during after-hours trading';
+      } else if (marketStatus === 'closed') {
+        marketStatusPhrase = isWeekend ? '' : ' while the market was closed';
+      }
+      const timePhrase = (marketStatus === 'closed' && !isWeekend) ? ' at the time of publication' : '';
+      if (shouldShowChangePercent) {
+        priceActionText = `${symbol} Price Action: ${companyName} shares were ${upDown} ${absChange}% at $${priceString}${marketStatusPhrase}${timePhrase} on ${dayOfWeek}`;
+      } else {
+        priceActionText = `${symbol} Price Action: ${companyName} shares were trading at $${priceString}${marketStatusPhrase}${timePhrase} on ${dayOfWeek}`;
+      }
+    }
+    
+    const prefixMatch = priceActionText.match(/^([A-Z]+\s+Price Action:)\s+(.+)$/);
+    if (prefixMatch) {
+      const prefix = prefixMatch[1];
+      const rest = prefixMatch[2];
+      return `<strong>${prefix}</strong> ${rest}, according to <a href="https://pro.benzinga.com/dashboard">Benzinga Pro data</a>.`;
+    }
+    return `<strong>${priceActionText}</strong>, according to <a href="https://pro.benzinga.com/dashboard">Benzinga Pro data</a>.`;
+  } catch (error) {
+    console.error(`[QUICK STORY] Error generating price action for ${ticker}:`, error);
+    return '';
+  }
+}
 
 // Helper to scrape news URL
 async function scrapeNewsUrl(url: string): Promise<string | null> {
@@ -31,6 +197,96 @@ async function scrapeNewsUrl(url: string): Promise<string | null> {
   }
 }
 
+// Market context interface (from WGO Generator)
+interface MarketContext {
+  indices: Array<{ name: string; ticker: string; change: number }>;
+  sectors: Array<{ name: string; ticker: string; change: number }>;
+  marketBreadth: { advancers: number; decliners: number; ratio: string };
+  topGainers: Array<{ name: string; ticker: string; change: number }>;
+  topLosers: Array<{ name: string; ticker: string; change: number }>;
+}
+
+// Fetch market context (from WGO Generator)
+async function fetchMarketContext(usePreviousDay: boolean = false): Promise<MarketContext | null> {
+  try {
+    console.log('[QUICK STORY] Fetching market context data...');
+    const INDICES = ['SPY', 'QQQ', 'DIA', 'IWM'];
+    const SECTORS = ['XLK', 'XLF', 'XLE', 'XLV', 'XLI', 'XLP', 'XLY', 'XLU', 'XLRE', 'XLC', 'XLB'];
+    
+    const [indicesRes, sectorsRes, gainersRes, losersRes] = await Promise.all([
+      fetch(`https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers?tickers=${INDICES.join(',')}&apikey=${POLYGON_API_KEY}`),
+      fetch(`https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers?tickers=${SECTORS.join(',')}&apikey=${POLYGON_API_KEY}`),
+      fetch(`https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/gainers?apikey=${POLYGON_API_KEY}`),
+      fetch(`https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/losers?apikey=${POLYGON_API_KEY}`)
+    ]);
+
+    const [indicesData, sectorsData, gainersData, losersData] = await Promise.all([
+      indicesRes.json(),
+      sectorsRes.json(),
+      gainersRes.json(),
+      losersRes.json()
+    ]);
+
+    const indices = (indicesData.tickers || []).map((idx: any) => ({
+      name: idx.ticker === 'SPY' ? 'S&P 500' : 
+            idx.ticker === 'QQQ' ? 'Nasdaq' : 
+            idx.ticker === 'DIA' ? 'Dow Jones' : 
+            idx.ticker === 'IWM' ? 'Russell 2000' : idx.ticker,
+      ticker: idx.ticker,
+      change: idx.todaysChangePerc || 0
+    }));
+
+    const sectors = (sectorsData.tickers || []).map((sector: any) => ({
+      name: sector.ticker === 'XLK' ? 'Technology' :
+            sector.ticker === 'XLF' ? 'Financials' :
+            sector.ticker === 'XLE' ? 'Energy' :
+            sector.ticker === 'XLV' ? 'Healthcare' :
+            sector.ticker === 'XLI' ? 'Industrials' :
+            sector.ticker === 'XLP' ? 'Consumer Staples' :
+            sector.ticker === 'XLY' ? 'Consumer Discretionary' :
+            sector.ticker === 'XLU' ? 'Utilities' :
+            sector.ticker === 'XLRE' ? 'Real Estate' :
+            sector.ticker === 'XLC' ? 'Communication Services' :
+            sector.ticker === 'XLB' ? 'Materials' : sector.ticker,
+      ticker: sector.ticker,
+      change: sector.todaysChangePerc || 0
+    }));
+
+    const gainers = (gainersData.tickers || [])
+      .filter((t: any) => t.lastTrade?.p && t.lastTrade.p > 5 && t.day?.v && t.day.v > 1000000 && !t.ticker.endsWith('W'))
+      .slice(0, 5)
+      .map((stock: any) => ({
+        name: stock.ticker,
+        ticker: stock.ticker,
+        change: stock.todaysChangePerc || 0
+      }));
+
+    const losers = (losersData.tickers || [])
+      .filter((t: any) => t.lastTrade?.p && t.lastTrade.p > 5 && t.day?.v && t.day.v > 1000000 && !t.ticker.endsWith('W'))
+      .slice(0, 5)
+      .map((stock: any) => ({
+        name: stock.ticker,
+        ticker: stock.ticker,
+        change: stock.todaysChangePerc || 0
+      }));
+
+    const advancers = sectors.filter((s: { name: string; ticker: string; change: number }) => s.change > 0).length;
+    const decliners = sectors.filter((s: { name: string; ticker: string; change: number }) => s.change < 0).length;
+    const ratio = decliners > 0 ? (advancers / decliners).toFixed(1) : 'N/A';
+
+    return {
+      indices,
+      sectors: sectors.sort((a: { name: string; ticker: string; change: number }, b: { name: string; ticker: string; change: number }) => b.change - a.change),
+      marketBreadth: { advancers, decliners, ratio },
+      topGainers: gainers,
+      topLosers: losers
+    };
+  } catch (error) {
+    console.error('[QUICK STORY] Error fetching market context:', error);
+    return null;
+  }
+}
+
 // Story templates
 const STORY_TEMPLATES = {
   'earnings-reaction': {
@@ -51,62 +307,28 @@ const STORY_TEMPLATES = {
   },
 };
 
-// Fetch price data from Benzinga
+// Fetch price data from Benzinga (using WGO Generator approach)
 async function fetchPriceData(ticker: string) {
-  try {
-    if (!BENZINGA_API_KEY) {
-      console.log('[QUICK STORY] BENZINGA_API_KEY not configured');
-      return null;
-    }
-
-    const url = `${BZ_QUOTE_URL}?token=${BENZINGA_API_KEY}&symbols=${encodeURIComponent(ticker)}`;
-    const response = await fetch(url, {
-      headers: { Accept: 'application/json' },
-    });
-
-    if (!response.ok) {
-      console.error(`[QUICK STORY] Failed to fetch price data for ${ticker}:`, response.status);
-      return null;
-    }
-
-    const data = await response.json();
-    if (data && data[ticker]) {
-      const quote = data[ticker];
-      // Calculate regular session change from close vs previousClose
-      const regularClose = quote.close || quote.lastTradePrice || quote.last || null;
-      const previousClose = quote.previousClosePrice || quote.previous_close || null;
-      let regularChangePercent = quote.changePercent || quote.change_percent || null;
-      
-      // If we have close and previousClose, calculate regular session change
-      if (regularClose && previousClose && previousClose > 0) {
-        const closeNum = typeof regularClose === 'number' ? regularClose : parseFloat(regularClose);
-        const prevCloseNum = typeof previousClose === 'number' ? previousClose : parseFloat(previousClose);
-        if (!isNaN(closeNum) && !isNaN(prevCloseNum)) {
-          regularChangePercent = ((closeNum - prevCloseNum) / prevCloseNum) * 100;
-        }
-      }
-      
-      // Extended hours data (multiple field name variations)
-      const extendedHoursPrice = quote.ethPrice || quote.extendedHoursPrice || quote.afterHoursPrice || quote.ahPrice || quote.extendedPrice || null;
-      const extendedHoursChangePercent = quote.ethChangePercent || quote.extendedHoursChangePercent || quote.afterHoursChangePercent || quote.ahChangePercent || quote.extendedChangePercent || null;
-      
-      return {
-        symbol: quote.symbol || ticker,
-        name: quote.name || ticker,
-        lastTradePrice: quote.lastTradePrice || quote.last || null,
-        changePercent: quote.changePercent || quote.change_percent || null,
-        close: regularClose,
-        previousClosePrice: previousClose,
-        regularChangePercent: regularChangePercent,
-        extendedHoursPrice: extendedHoursPrice,
-        extendedHoursChangePercent: extendedHoursChangePercent,
-      };
-    }
-    return null;
-  } catch (error) {
-    console.error(`[QUICK STORY] Error fetching price data for ${ticker}:`, error);
+  const priceData = await fetchPriceDataFromBenzinga(ticker);
+  if (!priceData) {
     return null;
   }
+  
+  const { quote, changePercent } = priceData;
+  const regularClose = quote.close || quote.lastTradePrice || null;
+  const previousClose = quote.previousClosePrice || quote.previous_close || null;
+  
+  return {
+    symbol: quote.symbol || ticker,
+    name: quote.name || ticker,
+    lastTradePrice: quote.lastTradePrice || null,
+    changePercent: changePercent ?? null,
+    close: regularClose,
+    previousClosePrice: previousClose,
+    regularChangePercent: changePercent ?? null,
+    extendedHoursPrice: quote.ethPrice || quote.extendedHoursPrice || null,
+    extendedHoursChangePercent: quote.ethChangePercent || quote.extendedHoursChangePercent || null,
+  };
 }
 
 // Fetch recent Benzinga articles, filtered by price action date
@@ -129,7 +351,7 @@ async function fetchRecentArticles(ticker: string, count: number = 5, priceActio
     dateTo.setDate(dateTo.getDate() + 1);
     const dateToStr = dateTo.toISOString().slice(0, 10);
 
-    const url = `${BZ_NEWS_URL}?token=${BENZINGA_API_KEY}&tickers=${encodeURIComponent(ticker)}&items=${count * 5}&fields=headline,title,created,url,channels,teaser&accept=application/json&displayOutput=full&dateFrom=${dateFromStr}&dateTo=${dateToStr}`;
+    const url = `${BZ_NEWS_URL}?token=${BENZINGA_API_KEY}&tickers=${encodeURIComponent(ticker)}&items=${count * 5}&fields=headline,title,created,url,channels,teaser,body&accept=application/json&displayOutput=full&dateFrom=${dateFromStr}&dateTo=${dateToStr}`;
 
     const response = await fetch(url, {
       headers: { Accept: 'application/json' },
@@ -289,6 +511,158 @@ async function fetchRecentArticles(ticker: string, count: number = 5, priceActio
   } catch (error) {
     console.error('[QUICK STORY] Error fetching articles:', error);
     return [];
+  }
+}
+
+// Fetch simplified technical data (RSI, MACD, moving averages, company description)
+async function fetchSimplifiedTechnicalData(ticker: string) {
+  try {
+    const POLYGON_API_KEY = process.env.POLYGON_API_KEY;
+    if (!POLYGON_API_KEY) {
+      return null;
+    }
+
+    const [overviewRes, rsiRes, macdRes, sma20Res, sma100Res] = await Promise.all([
+      fetch(`https://api.polygon.io/v3/reference/tickers/${ticker}?apikey=${POLYGON_API_KEY}`),
+      fetch(`https://api.polygon.io/v1/indicators/rsi?ticker=${ticker}&timespan=day&adjusted=true&window=14&series_type=close&order=desc&limit=1&apikey=${POLYGON_API_KEY}`),
+      fetch(`https://api.polygon.io/v1/indicators/macd?ticker=${ticker}&timespan=day&adjusted=true&short_window=12&long_window=26&signal_window=9&series_type=close&order=desc&limit=1&apikey=${POLYGON_API_KEY}`),
+      fetch(`https://api.polygon.io/v1/indicators/sma?ticker=${ticker}&timespan=day&adjusted=true&window=20&series_type=close&order=desc&limit=1&apikey=${POLYGON_API_KEY}`),
+      fetch(`https://api.polygon.io/v1/indicators/sma?ticker=${ticker}&timespan=day&adjusted=true&window=100&series_type=close&order=desc&limit=1&apikey=${POLYGON_API_KEY}`),
+    ]);
+
+    let description = null;
+    if (overviewRes.ok) {
+      const overviewData = await overviewRes.json();
+      description = overviewData?.results?.description || null;
+    }
+
+    let rsi = null;
+    if (rsiRes.ok) {
+      const rsiData = await rsiRes.json();
+      if (rsiData?.results?.values?.[0]?.value) {
+        rsi = rsiData.results.values[0].value;
+      }
+    }
+
+    let macd = null;
+    let macdSignal = null;
+    if (macdRes.ok) {
+      const macdData = await macdRes.json();
+      if (macdData?.results?.values?.[0]) {
+        macd = macdData.results.values[0].value;
+        macdSignal = macdData.results.values[0].signal;
+      }
+    }
+
+    let sma20 = null;
+    if (sma20Res.ok) {
+      const sma20Data = await sma20Res.json();
+      if (sma20Data?.results?.values?.[0]?.value) {
+        sma20 = sma20Data.results.values[0].value;
+      }
+    }
+
+    let sma100 = null;
+    if (sma100Res.ok) {
+      const sma100Data = await sma100Res.json();
+      if (sma100Data?.results?.values?.[0]?.value) {
+        sma100 = sma100Data.results.values[0].value;
+      }
+    }
+
+    return { description, rsi, macd, macdSignal, sma20, sma100 };
+  } catch (error) {
+    console.error(`[QUICK STORY] Error fetching technical data for ${ticker}:`, error);
+    return null;
+  }
+}
+
+// Fetch recent analyst actions
+async function fetchRecentAnalystActions(ticker: string, limit: number = 3) {
+  try {
+    if (!BENZINGA_API_KEY) return [];
+    const analystUrl = `https://api.benzinga.com/api/v2.1/calendar/ratings?token=${BENZINGA_API_KEY}&parameters[tickers]=${encodeURIComponent(ticker)}&parameters[range]=6m`;
+    const analystRes = await fetch(analystUrl, { headers: { Accept: 'application/json' } });
+    if (!analystRes.ok) return [];
+    
+    const analystData = await analystRes.json();
+    const ratingsArray = Array.isArray(analystData) ? analystData : (analystData.ratings || []);
+    
+    return ratingsArray
+      .sort((a: any, b: any) => {
+        const dateA = new Date(a.date || a.created || 0).getTime();
+        const dateB = new Date(b.date || b.created || 0).getTime();
+        return dateB - dateA;
+      })
+      .slice(0, limit)
+      .map((rating: any) => {
+        const firm = rating.analyst || rating.firm || 'Unknown Firm';
+        const actionCompany = rating.action_company || rating.action || '';
+        const currentRating = rating.rating_current || rating.rating || '';
+        const priceTarget = rating.adjusted_pt_current || rating.pt_current || rating.pt || null;
+        const actionPt = rating.action_pt || null;
+        
+        let actionText = '';
+        const actionLower = actionCompany.toLowerCase();
+        if (actionLower.includes('downgrade')) {
+          actionText = `Downgraded to ${currentRating}`;
+        } else if (actionLower.includes('upgrade')) {
+          actionText = `Upgraded to ${currentRating}`;
+        } else if (actionLower.includes('initiate') || actionLower.includes('reinstated')) {
+          actionText = `Initiated with ${currentRating}`;
+        } else if (currentRating) {
+          actionText = `${currentRating}`;
+        }
+        
+        if (priceTarget && actionPt) {
+          const direction = actionPt.charAt(0).toUpperCase() + actionPt.slice(1).toLowerCase();
+          actionText += ` (${direction} Target to $${priceTarget})`;
+        } else if (priceTarget) {
+          actionText += ` (Target $${priceTarget})`;
+        }
+        
+        return { firm, action: actionText, date: rating.date || rating.created || null };
+      });
+  } catch (error) {
+    console.error(`[QUICK STORY] Error fetching analyst actions for ${ticker}:`, error);
+    return [];
+  }
+}
+
+// Fetch Benzinga Edge rankings
+async function fetchEdgeRankings(ticker: string) {
+  try {
+    const BENZINGA_EDGE_API_KEY = process.env.BENZINGA_EDGE_API_KEY;
+    if (!BENZINGA_EDGE_API_KEY) return null;
+    const url = `https://data-api-next.benzinga.com/rest/v3/tickerDetail?apikey=${BENZINGA_EDGE_API_KEY}&symbols=${encodeURIComponent(ticker)}`;
+    const response = await fetch(url, { headers: { 'Accept': 'application/json' } });
+    if (!response.ok) return null;
+    
+    const data = await response.json();
+    if (data.result && Array.isArray(data.result) && data.result.length > 0) {
+      const tickerData = data.result[0];
+      if (tickerData.rankings && typeof tickerData.rankings === 'object') {
+        const getRankingValue = (obj: any, prefix: string): number | null => {
+          if (obj[prefix] !== undefined && obj[prefix] !== null && typeof obj[prefix] === 'number') return obj[prefix];
+          if (obj[`${prefix}_score`] !== undefined && obj[`${prefix}_score`] !== null && typeof obj[`${prefix}_score`] === 'number') return obj[`${prefix}_score`];
+          return null;
+        };
+        const edgeData = {
+          ticker: ticker.toUpperCase(),
+          value_rank: getRankingValue(tickerData.rankings, 'value'),
+          growth_rank: getRankingValue(tickerData.rankings, 'growth'),
+          quality_rank: getRankingValue(tickerData.rankings, 'quality'),
+          momentum_rank: getRankingValue(tickerData.rankings, 'momentum'),
+        };
+        if (edgeData.value_rank !== null || edgeData.growth_rank !== null || edgeData.quality_rank !== null || edgeData.momentum_rank !== null) {
+          return edgeData;
+        }
+      }
+    }
+    return null;
+  } catch (error) {
+    console.error(`[QUICK STORY] Error fetching Edge rankings for ${ticker}:`, error);
+    return null;
   }
 }
 
@@ -907,7 +1281,10 @@ function buildPrompt(
   priceData?: any,
   consensusRatings?: any,
   customSourceUrls?: string[],
-  customSourceContent?: Record<string, string>
+  customSourceContent?: Record<string, string>,
+  technicalData?: any,
+  analystActions?: any[],
+  edgeRankings?: any
 ): string {
   const templateInfo = STORY_TEMPLATES[template as keyof typeof STORY_TEMPLATES] || STORY_TEMPLATES['price-movement'];
   const focus = template === 'custom' && customFocus ? customFocus : templateInfo.focus;
@@ -916,14 +1293,41 @@ function buildPrompt(
   let customSourceVerification = '';
   if (template === 'custom') {
     if (customSourceUrls && customSourceUrls.length > 0) {
-      customSourceVerification = `\n\nCUSTOM SOURCE URLS FOR VERIFICATION:\n`;
+      customSourceVerification = `\n\nCUSTOM SOURCE URLS FOR VERIFICATION (CRITICAL: Use specific details from these sources):\n`;
       customSourceUrls.forEach((url, index) => {
         customSourceVerification += `${index + 1}. ${url}\n`;
         if (customSourceContent && customSourceContent[url]) {
-          const content = customSourceContent[url].substring(0, 2000);
-          customSourceVerification += `   Content: ${content}...\n`;
+          // Include more content (up to 3000 chars) and emphasize using specific details
+          const content = customSourceContent[url].substring(0, 3000);
+          customSourceVerification += `   SOURCE CONTENT (USE SPECIFIC DETAILS FROM THIS): ${content}${customSourceContent[url].length > 3000 ? '...' : ''}\n`;
+          customSourceVerification += `   IMPORTANT: Extract and use SPECIFIC details, capabilities, features, quotes, or claims from this source content. Do NOT just summarize - include concrete details.\n`;
+        } else {
+          customSourceVerification += `   NOTE: Source content not available - verify information from articles and API data only.\n`;
         }
       });
+      
+      // Add hyperlink requirement for source URLs
+      const benzingaUrls = customSourceUrls.filter(url => url.includes('benzinga.com'));
+      const nonBenzingaUrls = customSourceUrls.filter(url => !url.includes('benzinga.com'));
+      
+      if (benzingaUrls.length > 0) {
+        customSourceVerification += `\n🚨 HYPERLINK REQUIREMENT FOR BENZINGA SOURCES (MANDATORY) 🚨:\n`;
+        benzingaUrls.forEach(url => {
+          customSourceVerification += `- You MUST hyperlink "${url}" in your LEAD paragraph using natural text (3 sequential words from the article/page title or content)\n`;
+          customSourceVerification += `- Format: <a href="${url}">three sequential words</a>\n`;
+          customSourceVerification += `- This is MANDATORY - the hyperlink MUST appear in the first paragraph\n`;
+        });
+      }
+      
+      if (nonBenzingaUrls.length > 0) {
+        customSourceVerification += `\n🚨 CITATION REQUIREMENT FOR NON-BENZINGA SOURCES (MANDATORY) 🚨:\n`;
+        nonBenzingaUrls.forEach(url => {
+          customSourceVerification += `- You MUST cite and hyperlink "${url}" in your SECOND paragraph (not the lead) using natural text\n`;
+          customSourceVerification += `- Format: <a href="${url}">three sequential words</a>\n`;
+          customSourceVerification += `- Example: "According to Google's announcement, Project Genie..." where "Google's announcement" is hyperlinked to ${url}\n`;
+          customSourceVerification += `- This is MANDATORY - the hyperlink MUST appear in the second paragraph\n`;
+        });
+      }
     }
     customSourceVerification += `\n\nCRITICAL VERIFICATION REQUIREMENTS FOR CUSTOM TEMPLATE:\n`;
     customSourceVerification += `- Before using ANY information from custom focus, you MUST verify it matches information in:\n`;
@@ -954,17 +1358,26 @@ function buildPrompt(
   }
 
   let articlesText = '';
+  console.log(`[QUICK STORY] buildPrompt: articles.length = ${articles.length}`);
   if (articles.length > 0) {
     const priceActionDate = getPriceActionDate();
     const priceActionDateStr = priceActionDate.date.toISOString().slice(0, 10);
     
-    articlesText = `\n\nRECENT ARTICLES (MANDATORY: You MUST create a hyperlink for ALL ${articles.length} articles below - include each one in your story):\n`;
+    console.log(`[QUICK STORY] buildPrompt: Building articlesText for ${articles.length} articles`);
+    articlesText = `\n\n🚨 RECENT BENZINGA ARTICLES (MANDATORY: You MUST create a hyperlink for ALL ${articles.length} articles below - include each one in your story) 🚨:\n`;
     articlesText += `IMPORTANT: The price action occurred on ${priceActionDate.dayName}. Articles are listed below with their publication dates.\n`;
     articlesText += `CRITICAL TEMPORAL CONTEXT RULES:\n`;
     articlesText += `- Articles marked "[SAME DAY AS PRICE ACTION]" are reporting on events from ${priceActionDate.dayName} - you can reference the day if relevant\n`;
     articlesText += `- Articles marked "[X DAYS BEFORE PRICE ACTION]" are providing context about events that happened BEFORE the article was published - use vague temporal references like "recently", "earlier this week", "in recent days", "earlier" - DO NOT use the article's publication day name (e.g., "on Monday") as that refers to when the article was published, not when the event happened\n\n`;
     
     articles.forEach((article, index) => {
+      console.log(`[QUICK STORY] buildPrompt: Processing article ${index + 1}/${articles.length}:`, {
+        headline: article.headline || article.title || 'NO HEADLINE',
+        url: article.url || 'NO URL',
+        date: article.date || article.created || 'NO DATE',
+        hasTeaser: !!article.teaser
+      });
+      
       const articleDate = article.date ? new Date(article.date) : null;
       const articleDateStr = articleDate ? articleDate.toISOString().slice(0, 10) : '';
       const articleDayName = articleDate ? new Intl.DateTimeFormat('en-US', { weekday: 'long', month: 'long', day: 'numeric' }).format(articleDate) : 'Unknown date';
@@ -982,34 +1395,67 @@ function buildPrompt(
         }
       }
       
-      articlesText += `${index + 1}. ${article.headline}: ${article.url}\n   Published: ${articleDayName} ${dateContext}`;
+      const headline = article.headline || article.title || 'NO HEADLINE';
+      const url = article.url || 'NO URL';
+      
+      articlesText += `${index + 1}. ${headline}: ${url}\n   Published: ${articleDayName} ${dateContext}`;
+      
+      // Include teaser if available
       if (article.teaser) {
-        // Truncate teaser to first 200 characters to keep it concise
-        const teaser = article.teaser.length > 200 
-          ? article.teaser.substring(0, 200) + '...' 
-          : article.teaser;
-        articlesText += `\n   Excerpt: ${teaser}`;
+        articlesText += `\n   Teaser: ${article.teaser}`;
       }
-      articlesText += '\n';
+      
+      // Include article body content (up to 2000 characters) for detailed context
+      if (article.body) {
+        const bodyContent = article.body.length > 2000 
+          ? article.body.substring(0, 2000) + '...' 
+          : article.body;
+        articlesText += `\n   Full Content: ${bodyContent}`;
+      } else if (article.teaser) {
+        // If no body, use full teaser
+        articlesText += `\n   Content: ${article.teaser}`;
+      }
+      
+      articlesText += '\n\n';
     });
-    articlesText += `\n\nCRITICAL HYPERLINK REQUIREMENTS:
-- You MUST create a hyperlink for ALL ${articles.length} articles listed above
-- At least ONE hyperlink MUST appear in your FIRST paragraph (the lead paragraph)
-- Each hyperlink should use three sequential words from the article headline, BUT:
+    
+    console.log(`[QUICK STORY] buildPrompt: articlesText length: ${articlesText.length} characters`);
+    articlesText += `\n\n🚨 CRITICAL ARTICLE CONTENT EXTRACTION REQUIREMENTS (HIGHEST PRIORITY) 🚨:
+- You MUST extract and use SPECIFIC DETAILS from the article content provided above
+- DO NOT just summarize - pull out specific numbers, quotes, dates, names, percentages, dollar amounts, and concrete facts
+- Include direct quotes from executives, analysts, or sources when available in the articles
+- Extract specific context, background information, and details that explain WHY things are happening
+- Use the FULL article content (not just the headline or teaser) to provide rich, detailed context
+- Every paragraph should include specific details pulled from the articles - avoid generic statements
+
+🚨 CRITICAL HYPERLINK REQUIREMENTS (MANDATORY) 🚨:
+- You MUST create a hyperlink for ALL ${articles.length} articles listed above - NO EXCEPTIONS
+- At least ONE hyperlink MUST appear in your FIRST paragraph (the lead paragraph) - THIS IS MANDATORY
+- Format: <a href="URL">three sequential words</a> (use HTML format, NOT markdown)
+- HYPERLINK TEXT SELECTION RULES (CRITICAL):
+  * You may use words from the article headline as inspiration, BUT the hyperlink text MUST flow naturally in your sentence
+  * DO NOT use headline fragments that don't make grammatical sense in context (e.g., if headline is "Gold, Silver Are Surging", don't hyperlink "Gold, Silver Are" - that's a headline fragment)
   * DO NOT use the exact headline text as your hyperlink (e.g., if headline is "Can You Buy NASA Stock?", don't hyperlink "Can You Buy NASA Stock?")
   * DO NOT use generic phrases like "recent reports", "according to reports", "recent news", etc. as hyperlink text
-  * Instead, use three sequential words that naturally fit into your sentence context
-  * The hyperlink text should read as part of your narrative, not as a headline or reference
+  * The hyperlink text should read as a natural part of your sentence, NOT as a headline fragment
+  * If the first three words of a headline don't flow naturally, choose different words from the headline or rephrase
+  * The hyperlink text must make grammatical sense in the context of your sentence
+  * Example: If headline is "Gold, Silver Are Surging to Record Highs", you could hyperlink "record highs" or "surging to record" - NOT "Gold, Silver Are"
+  * Example: If headline is "Tariff Fears Reignite on Canada Trade", you could hyperlink "trade tensions" or "tariff concerns" - NOT "Tariff Fears Reignite"
 - Embed hyperlinks naturally throughout the article - distribute them across different paragraphs
 - Count your hyperlinks before submitting: you need exactly ${articles.length} hyperlinks total
+- VALIDATION: Before submitting, verify you have exactly ${articles.length} hyperlinks in your article
 - CRITICAL: Write naturally as a journalist - DO NOT explicitly reference articles or reports
 - DO NOT use phrases like "as reported", "as discussed", "according to a report", "as covered in an article", "this article", "the report", "in a report", "recent reports", "according to reports", "recent news", etc.
 - Simply write the narrative and embed hyperlinks seamlessly within the text - the hyperlink text should flow naturally as part of the sentence
 - For older articles (marked "[X DAYS BEFORE PRICE ACTION]"): These articles provide context about events that happened earlier. Use vague temporal references like "recently", "earlier this week", "in recent days", "earlier", etc. - DO NOT use the specific day name (e.g., "on Monday") as the article is reporting on events that occurred before its publication date. The day name refers to when the article was published, not when the event happened.
 - Example of GOOD hyperlink embedding: "The company's stock rebounded following a major hardware delivery for its upcoming Neutron rocket."
+- Example of BAD hyperlink embedding: "Meta and other Gold, Silver Are social media giants" (headline fragment doesn't flow)
+- Example of BAD hyperlink embedding: "factors such as tariff fears reigniting on Canada" (headline fragment doesn't flow)
 - Example of BAD hyperlink embedding: "This development was covered in a Rocket Lab Stock Rebounds article."
 - Example of BAD hyperlink embedding: "Recent reports indicate the company is expanding."
-- Example of BAD hyperlink embedding: "Can You Buy NASA Stock? explores investment options."\n`;
+- Example of BAD hyperlink embedding: "Can You Buy NASA Stock? explores investment options."
+- REMINDER: If you fail to include all ${articles.length} hyperlinks, your article will be rejected and regenerated.\n`;
   }
 
   let relatedStocksText = '';
@@ -1034,6 +1480,12 @@ function buildPrompt(
     earningsText = formatEarningsData(earningsData, consensusRatings);
   }
 
+  // Technical data removed - will be added in a second step
+
+  // Analyst data removed - only include if mentioned in Benzinga articles
+
+  // Edge rankings removed - will be added in a second step
+
   const temporalContext = getTemporalContext();
   const priceActionDate = getPriceActionDate();
   
@@ -1048,6 +1500,15 @@ IMPORTANT: The price action occurred on ${priceActionDate.dayName}. Always refer
 ${priceData && priceData.extendedHoursPrice && priceData.extendedHoursChangePercent !== null ? `\nNOTE: The stock closed ${priceData.regularChangePercent > 0 ? 'up' : 'down'} ${Math.abs(priceData.regularChangePercent || 0).toFixed(2)}% during regular trading hours, but is ${priceData.extendedHoursChangePercent > 0 ? 'up' : 'down'} ${Math.abs(priceData.extendedHoursChangePercent).toFixed(2)}% in after-hours trading. When describing the stock movement, mention both the regular session performance and after-hours movement if they differ significantly.` : ''}
 ${earningsText}
 ${articlesText}
+${customSourceUrls && customSourceUrls.length > 0 ? `\n\n🚨 SOURCE URL HYPERLINK REQUIREMENT (MANDATORY) 🚨:
+${customSourceUrls.filter((url: string) => !url.includes('benzinga.com')).length > 0 ? `- You MUST hyperlink the source URL(s) provided above in your SECOND paragraph (not the lead)
+- Format: <a href="SOURCE_URL">natural text from source</a>
+- Example: "According to <a href="${customSourceUrls.find((url: string) => !url.includes('benzinga.com')) || ''}">Google's announcement</a>, Project Genie..."
+- This is MANDATORY - the source URL hyperlink MUST appear in the second paragraph\n` : ''}
+${customSourceUrls.filter((url: string) => url.includes('benzinga.com')).length > 0 ? `- You MUST hyperlink the Benzinga source URL(s) provided above in your LEAD paragraph
+- Format: <a href="SOURCE_URL">natural text from source</a>
+- This is MANDATORY - the source URL hyperlink MUST appear in the first paragraph\n` : ''}
+` : ''}
 
 ${relatedStocksText}
 
@@ -1065,16 +1526,25 @@ EARNINGS REACTION TEMPLATE - CRITICAL INSTRUCTIONS:
 - REQUIRED: At least ONE hyperlink MUST appear in the FIRST paragraph alongside the earnings information
 
 ` : ''}
-1. CRITICAL HYPERLINK REQUIREMENT (HIGHEST PRIORITY):
-   - You MUST create a hyperlink for EVERY article provided above - no exceptions
-   - If ${articles.length} articles are provided, you must include ${articles.length} hyperlinks in your story
-   - REQUIRED: At least ONE hyperlink MUST appear in the FIRST paragraph (lead paragraph) - this is MANDATORY, not optional
+1. 🚨 CRITICAL HYPERLINK REQUIREMENT (HIGHEST PRIORITY - MANDATORY) 🚨:
+   - You MUST create a hyperlink for EVERY article provided above - NO EXCEPTIONS
+   - If ${articles.length} articles are provided, you must include EXACTLY ${articles.length} hyperlinks in your story
+   - REQUIRED: At least ONE hyperlink MUST appear in the FIRST paragraph (lead paragraph) - THIS IS MANDATORY, NOT OPTIONAL
+   - VALIDATION: Before submitting, count your hyperlinks - you need exactly ${articles.length} hyperlinks total
+   - If you fail to include all ${articles.length} hyperlinks, your article will be rejected
    - For earnings reaction stories: The first paragraph must include BOTH the earnings date AND at least one hyperlink
-   - For each article, create a hyperlink using THREE SEQUENTIAL WORDS from the article headline, BUT:
+   - HYPERLINK TEXT SELECTION RULES (CRITICAL - READ CAREFULLY):
+     * You may use words from the article headline as inspiration, BUT the hyperlink text MUST flow naturally in your sentence
+     * DO NOT use headline fragments that don't make grammatical sense in context
+     * Example BAD: If headline is "Gold, Silver Are Surging", don't hyperlink "Gold, Silver Are" - that's a headline fragment that doesn't flow
+     * Example BAD: If headline is "Tariff Fears Reignite", don't hyperlink "Tariff Fears Reignite" - choose words that flow naturally
      * DO NOT use the exact headline text as your hyperlink (e.g., if headline is "Can You Buy NASA Stock?", don't hyperlink "Can You Buy NASA Stock?")
      * DO NOT use generic phrases like "recent reports", "according to reports", "recent news", etc. as hyperlink text
-     * Instead, use three sequential words that naturally fit into your sentence context
-     * The hyperlink text should read as part of your narrative, not as a headline or reference
+     * The hyperlink text should read as a natural part of your sentence, NOT as a headline fragment
+     * If the first three words of a headline don't flow naturally, choose different words from the headline or rephrase
+     * The hyperlink text must make grammatical sense in the context of your sentence
+     * Example GOOD: If headline is "Gold, Silver Are Surging to Record Highs", hyperlink "record highs" or "surging to record" - NOT "Gold, Silver Are"
+     * Example GOOD: If headline is "Tariff Fears Reignite on Canada Trade", hyperlink "trade tensions" or "tariff concerns" - NOT "Tariff Fears Reignite"
    - Format: <a href="URL">three sequential words</a> (use HTML format, NOT markdown)
    - Do NOT mention "Benzinga" or any source name when linking
    - Embed each hyperlink naturally within your sentences throughout the article
@@ -1082,19 +1552,21 @@ EARNINGS REACTION TEMPLATE - CRITICAL INSTRUCTIONS:
    - Before submitting, count your hyperlinks: you need exactly ${articles.length} hyperlinks total
    - CRITICAL WRITING STYLE: Write as a normal journalist - DO NOT explicitly reference articles, reports, or sources
    - DO NOT use phrases like: "as reported", "as discussed", "according to a report", "as covered in an article", "this article", "the report", "in a report", "as noted in", "which was discussed in", "this development was covered in", "recent reports", "according to reports", "recent news", etc.
-   - DO NOT use the exact headline text as hyperlink text - extract three sequential words that fit naturally into your sentence
    - Simply write the narrative naturally and embed hyperlinks seamlessly - the hyperlink text should flow as part of the sentence, not be called out as a reference or headline
    - For older articles (marked "[X DAYS BEFORE PRICE ACTION]"): These articles provide context about events that happened earlier. Use vague temporal references like "recently", "earlier this week", "in recent days", "earlier", etc. - DO NOT use the specific day name (e.g., "on Monday") as the article is reporting on events that occurred before its publication date. The day name refers to when the article was published, not when the event happened.
    - Example of GOOD: "The company's stock rebounded following a major hardware delivery for its upcoming Neutron rocket."
+   - Example of BAD: "Meta and other Gold, Silver Are social media giants" (headline fragment doesn't flow)
+   - Example of BAD: "factors such as tariff fears reigniting on Canada" (headline fragment doesn't flow)
    - Example of BAD: "This development was covered in a Rocket Lab Stock Rebounds article."
    - Example of BAD: "Recent reports indicate the company is expanding."
    - Example of BAD: "Can You Buy NASA Stock? explores investment options."
-2. Word count: Aim for ${wordCount} words, but prioritize DATA DENSITY over hitting the exact count.
-   - If you've covered all the key information and there's nothing new to add, it's acceptable to fall short (minimum ${Math.floor(wordCount * 0.8)} words)
-   - DO NOT add fluff, repetition, or filler content just to reach the word count
+2. Article length: Write a comprehensive article with no word count limit. Prioritize DATA DENSITY and completeness.
+   - Include all relevant information from the provided data
+   - DO NOT add fluff, repetition, or filler content
    - Every sentence must provide NEW information or context - avoid repeating facts already stated
    - If a section would just repeat information from earlier paragraphs, either skip it or provide genuinely new data
-3. Start with the company name and ticker: <strong>${companyName}</strong> (${ticker.includes(':') ? ticker : `NASDAQ: ${ticker}`})
+3. LEAD PARAGRAPH - CRITICAL REQUIREMENTS:
+   - Start with the company name and ticker: <strong>${companyName}</strong> (${ticker.includes(':') ? ticker : `NASDAQ: ${ticker}`})
    - Use HTML <strong> tags to bold ONLY the company name, NOT the ticker
    - CRITICAL: On the FIRST mention of ANY company (main company or related stocks), you MUST include:
      * The FULL company name (e.g., "Microsoft Corporation", "NVIDIA Corporation", not just "Microsoft" or "NVIDIA")
@@ -1102,6 +1574,14 @@ EARNINGS REACTION TEMPLATE - CRITICAL INSTRUCTIONS:
      * Bold the company name: <strong>Microsoft Corporation</strong> (NASDAQ: MSFT)
    - After the first mention, use the shortened company name without bolding or ticker (e.g., "Microsoft", "NVIDIA")
    - This applies to ALL companies mentioned in the article (main company and related stocks)
+   - LEAD PARAGRAPH CONTENT RULES (MANDATORY):
+     * DO NOT simply restate the price action (e.g., "dropped 0.11% to $83.91") - that information is in the price action line at the bottom
+     * Instead, focus on WHY the stock moved - provide context from the Benzinga articles
+     * You MUST include at least ONE hyperlink to a Benzinga article in the lead paragraph
+     * The hyperlink should explain the context or reason for the price movement
+     * Example GOOD: "<strong>General Motors Company</strong> (NYSE: GM) shares declined on Friday following <a href="URL">announcements of strategic moves</a> that included a dividend hike and $6 billion stock buyback."
+     * Example BAD: "<strong>General Motors Company</strong> (NYSE: GM) experienced a slight decline in its stock price, dropping 0.11% to $83.91 on Friday, as reported by Benzinga Pro data." (This just repeats the price action line)
+     * Focus on the news, context, or events that explain the movement, not the movement itself
 4. COMPANY NAME FORMATTING: 
    - FIRST MENTION: Use HTML <strong> tags to bold ONLY the company name, NOT the ticker. CRITICAL RULES:
      * Use the FULL company name (e.g., "Microsoft Corporation", "NVIDIA Corporation", "Apple Inc.", "Meta Platforms, Inc.")
@@ -1152,10 +1632,13 @@ EARNINGS REACTION TEMPLATE - CRITICAL INSTRUCTIONS:
 11. Focus on current events and recent developments.
 12. PRICE ACTION SECTION:
    - If you include a "## Section: Price Action" placeholder, provide ONLY new information not already covered
-   - DO NOT repeat the price movement that was already mentioned in the lead paragraph
+   - DO NOT repeat the price movement in this section - the lead paragraph should focus on context, not price details
    - If the price action was already fully described earlier, you can skip adding content to this section or provide only the section marker
    - The price action line at the end is sufficient - don't repeat it in the section content
-13. End with a price action line: "${priceAction || `${ticker} price data not available`}, according to Benzinga Pro data."
+13. PRICE ACTION LINE (END OF ARTICLE):
+   - End with a price action line: "${priceAction || `${ticker} price data not available`}, according to Benzinga Pro data."
+   - This line is separate from the lead paragraph and provides the factual price data
+   - The lead paragraph should NOT repeat this information - it should focus on the context/reason for the move
 14. Format the article with proper paragraph breaks using <p> tags.
 15. Do NOT include "Also Read" or "Read Next" sections.
 16. Do NOT mention "Benzinga" or any source name when referencing the articles - just embed the links naturally.
@@ -1166,6 +1649,14 @@ EARNINGS REACTION TEMPLATE - CRITICAL INSTRUCTIONS:
     - Avoid phrases like "underscores", "highlights", "reflects" when they're just restating what was already said
     - DO NOT add filler sentences just to reach word count - quality over quantity
     - If you've covered all key information and there's nothing new to add, it's better to end the article than add repetitive fluff
+18. CRITICAL: DO NOT create standalone sections for analyst sentiment, analyst ratings, or analyst data unless that information is explicitly mentioned in one of the provided Benzinga articles and can be hyperlinked to that article. All sections must be linked to Benzinga articles - do not create sections based on API data alone.
+19. ARTICLE CONTENT FOCUS (HIGHEST PRIORITY):
+   - Extract SPECIFIC details from the article content provided: quotes, numbers, percentages, dates, names, dollar amounts, specific facts
+   - Include direct quotes from executives, analysts, or sources when mentioned in the articles
+   - Provide rich context and background information from the articles - explain WHY things are happening, not just WHAT
+   - Use the full article content to build a comprehensive narrative with concrete details
+   - DO NOT create sections based on technical data (RSI, MACD, Edge rankings, moving averages) - technical analysis will be added in a second step
+   - Focus on the story, context, and details from the articles themselves
 
 Generate the article now:`;
 }
@@ -1179,7 +1670,10 @@ async function generateMultiFactorStory(
   relatedStockData: Record<string, any>,
   wordCount: number,
   priceData: any,
-  provider: AIProvider
+  provider: AIProvider,
+  technicalData?: any,
+  analystActions?: any[],
+  edgeRankings?: any
 ): Promise<string> {
   console.log(`[QUICK STORY] Multi-factor analysis mode enabled for ${ticker}`);
   
@@ -1238,7 +1732,7 @@ REQUIREMENTS:
 4. Use HTML <strong> tags for company names on first mention
 5. End with price action line: "${priceAction || `${ticker} price data not available`}, according to Benzinga Pro data."
 6. Use <p> tags for paragraphs
-7. Aim for ${wordCount} words but prioritize data density
+7. Write comprehensively with no word count limit - prioritize data density and completeness
 
 Generate the initial article:`;
 
@@ -1481,6 +1975,7 @@ export async function POST(req: Request) {
       relatedStocks = [],
       customFocus,
       customSourceUrls,
+      selectedArticleUrl,
       multiFactorMode = false,
       aiProvider: providerOverride,
     } = await req.json();
@@ -1497,11 +1992,99 @@ export async function POST(req: Request) {
     // Get price action date to filter articles
     const priceActionDate = getPriceActionDate();
     
-    // Fetch data in parallel
-    const [priceData, articles, earningsData] = await Promise.all([
+    // For custom template with selected article, use that as primary source
+    let articles: any[] = [];
+    if (template === 'custom' && selectedArticleUrl) {
+      // Fetch the selected article - try Benzinga API first, then scrape
+      try {
+        // Try to get article from Benzinga API
+        const dateFrom = new Date();
+        dateFrom.setDate(dateFrom.getDate() - 30);
+        const dateFromStr = dateFrom.toISOString().slice(0, 10);
+        
+        const articleResponse = await fetch(`${BZ_NEWS_URL}?token=${BENZINGA_API_KEY}&items=100&fields=headline,title,created,url,channels,teaser,body&accept=application/json&displayOutput=full&dateFrom=${dateFromStr}`, {
+          headers: { Accept: 'application/json' },
+        });
+        
+        if (articleResponse.ok) {
+          const articleData = await articleResponse.json();
+          if (Array.isArray(articleData)) {
+            const foundArticle = articleData.find((a: any) => a.url === selectedArticleUrl);
+            if (foundArticle) {
+              articles = [foundArticle]; // Use selected article as primary
+            }
+          }
+        }
+        
+        // If API lookup fails, scrape the URL
+        if (articles.length === 0) {
+          const scrapedContent = await scrapeNewsUrl(selectedArticleUrl);
+          if (scrapedContent) {
+            articles = [{
+              headline: 'Selected Article',
+              url: selectedArticleUrl,
+              teaser: scrapedContent.substring(0, 200),
+              body: scrapedContent,
+              created: new Date().toISOString(),
+            }];
+          }
+        }
+      } catch (error) {
+        console.error('[QUICK STORY] Error fetching selected article:', error);
+      }
+      
+      // Also fetch additional related articles for context (up to 4 more)
+      // Handle multiple tickers (comma-separated)
+      if (tickerUpper.includes(',')) {
+        const tickers = tickerUpper.split(',').map(t => t.trim()).filter(t => t);
+        const articlePromises = tickers.map(t => fetchRecentArticles(t, 3, priceActionDate.date));
+        const articleArrays = await Promise.all(articlePromises);
+        const relatedArticles = articleArrays.flat();
+        // Deduplicate by URL
+        const seenUrls = new Set(articles.map(a => a.url));
+        const uniqueRelated = relatedArticles.filter(a => !seenUrls.has(a.url));
+        articles = [...articles, ...uniqueRelated];
+      } else {
+        const relatedArticles = await fetchRecentArticles(tickerUpper, 4, priceActionDate.date);
+        articles = [...articles, ...relatedArticles];
+      }
+    } else {
+      // Standard article fetching - handle multiple tickers
+      if (tickerUpper.includes(',')) {
+        const tickers = tickerUpper.split(',').map(t => t.trim()).filter(t => t);
+        // Fetch articles for each ticker, aiming for 5 total
+        const articlesPerTicker = Math.ceil(5 / tickers.length);
+        const articlePromises = tickers.map(t => fetchRecentArticles(t, articlesPerTicker, priceActionDate.date));
+        const articleArrays = await Promise.all(articlePromises);
+        // Combine and deduplicate by URL
+        const allArticles = articleArrays.flat();
+        const seenUrls = new Set<string>();
+        articles = allArticles.filter(a => {
+          if (seenUrls.has(a.url)) return false;
+          seenUrls.add(a.url);
+          return true;
+        }).slice(0, 5); // Limit to 5 total
+      } else {
+        articles = await fetchRecentArticles(tickerUpper, 5, priceActionDate.date);
+      }
+    }
+    
+    // Log articles after fetching
+    console.log(`[QUICK STORY] Total articles fetched: ${articles.length}`);
+    console.log(`[QUICK STORY] Article URLs:`, articles.map((a: any) => a.url || 'NO URL'));
+    console.log(`[QUICK STORY] Article headlines:`, articles.map((a: any) => a.headline || a.title || 'NO HEADLINE'));
+    
+    // Fetch comprehensive WGO-style data in parallel
+    // Note: For Quick Story Generator, we'll use the full WGO data structure
+    // but build the narrative around articles instead of scraped content
+    const [priceData, earningsData, technicalData, analystActions, edgeRankings, consensusRatingsData, marketContext] = await Promise.all([
       fetchPriceData(tickerUpper),
-      fetchRecentArticles(tickerUpper, 5, priceActionDate.date),
       template === 'earnings-reaction' ? fetchRecentEarningsResults(tickerUpper) : Promise.resolve(null),
+      fetchSimplifiedTechnicalData(tickerUpper), // Will be replaced with full WGO fetchTechnicalData
+      fetchRecentAnalystActions(tickerUpper, 3),
+      fetchEdgeRankings(tickerUpper),
+      fetchConsensusRatings(tickerUpper),
+      fetchMarketContext(), // Add market context like WGO
     ]);
 
     // Fetch related stock data if provided
@@ -1510,15 +2093,23 @@ export async function POST(req: Request) {
       relatedStockData = await fetchRelatedStockData(relatedStocks);
     }
 
-    // Fetch consensus ratings for earnings reaction template
-    let consensusRatings: any = null;
-    if (template === 'earnings-reaction') {
-      consensusRatings = await fetchConsensusRatings(tickerUpper);
-    }
+    // Use consensus ratings (already fetched above)
+    const consensusRatings = consensusRatingsData;
 
-    // Format price action
+    // Generate price action using WGO Generator function (handles multiple tickers)
     const companyName = priceData?.name || tickerUpper;
-    const priceAction = formatPriceAction(priceData, tickerUpper);
+    let priceAction = '';
+    
+    // Handle multiple tickers (comma-separated)
+    if (tickerUpper.includes(',')) {
+      const tickers = tickerUpper.split(',').map(t => t.trim()).filter(t => t);
+      const priceActions = await Promise.all(
+        tickers.map(t => generatePriceAction(t))
+      );
+      priceAction = priceActions.filter(pa => pa).join(' ');
+    } else {
+      priceAction = await generatePriceAction(tickerUpper);
+    }
 
     // Scrape custom source URLs if provided (for custom template)
     let customSourceContent: Record<string, string> = {};
@@ -1558,15 +2149,30 @@ export async function POST(req: Request) {
         relatedStockData,
         wordCount,
         priceData || undefined,
-        provider
+        provider,
+        technicalData || undefined,
+        analystActions || undefined,
+        edgeRankings || undefined
       );
     } else {
-      // Standard single-pass generation
+      // Generate Quick Story using original approach (not WGO Generator)
+      console.log(`[QUICK STORY] Generating Quick Story with ${articles.length} articles`);
+      
+      // Generate story using custom prompt
       const customUrlsArray = template === 'custom' && customSourceUrls
         ? (typeof customSourceUrls === 'string' 
             ? customSourceUrls.split(',').map(url => url.trim()).filter(url => url)
             : Array.isArray(customSourceUrls) ? customSourceUrls : [])
         : undefined;
+      
+      // Log before building prompt
+      console.log(`[QUICK STORY] ===== BUILDING PROMPT =====`);
+      console.log(`[QUICK STORY] Articles array length: ${articles.length}`);
+      console.log(`[QUICK STORY] Articles for prompt:`, articles.map((a: any) => ({
+        headline: a.headline || a.title || 'NO HEADLINE',
+        url: a.url || 'NO URL',
+        hasTeaser: !!a.teaser
+      })));
       
       const prompt = buildPrompt(
         tickerUpper,
@@ -1581,27 +2187,30 @@ export async function POST(req: Request) {
         priceData || undefined,
         consensusRatings || undefined,
         customUrlsArray,
-        Object.keys(customSourceContent).length > 0 ? customSourceContent : undefined
+        Object.keys(customSourceContent).length > 0 ? customSourceContent : undefined,
+        technicalData || undefined,
+        analystActions || undefined,
+        edgeRankings || undefined
       );
 
       // Generate story
       const result = await aiProvider.generateCompletion(
-      [
+        [
+          {
+            role: 'system',
+            content: 'You are a professional financial journalist writing concise, data-dense articles for a financial news website. HIGHEST PRIORITY: You must hyperlink EVERY article provided - if 5 articles are given, include exactly 5 hyperlinks distributed throughout the story. CRITICAL LEAD PARAGRAPH RULE: The lead paragraph must focus on WHY the stock moved (context from articles), NOT just restate the price action. At least ONE hyperlink MUST appear in the first paragraph explaining the context. DO NOT repeat the price action details (percentage, price) in the lead - that information is in the price action line at the bottom. Use HTML format: <a href="URL">text</a> NOT markdown format. Always use HTML <strong> tags to bold company names (not tickers) and prominent people\'s names on their first mention. CRITICAL: On the FIRST mention of ANY company (main or related), you MUST use the FULL company name (e.g., "Microsoft Corporation", "NVIDIA Corporation") with the ticker in parentheses. Use subhead placeholders (## Section:) and bullet points (<ul>/<li>) to break up content and improve readability. Prioritize data density - avoid fluff and repetition.',
+          },
+          {
+            role: 'user',
+            content: prompt,
+          },
+        ],
         {
-          role: 'system',
-          content: 'You are a professional financial journalist writing concise, data-dense articles for a financial news website. HIGHEST PRIORITY: You must hyperlink EVERY article provided - if 5 articles are given, include exactly 5 hyperlinks distributed throughout the story. At least ONE hyperlink MUST appear in the first paragraph. Use HTML format: <a href="URL">text</a> NOT markdown format. Always use HTML <strong> tags to bold company names (not tickers) and prominent people\'s names on their first mention. CRITICAL: On the FIRST mention of ANY company (main or related), you MUST use the FULL company name (e.g., "Microsoft Corporation", "NVIDIA Corporation") with the ticker in parentheses. Use subhead placeholders (## Section:) and bullet points (<ul>/<li>) to break up content and improve readability. Prioritize data density - avoid fluff and repetition.',
+          model: provider === 'gemini' ? 'gemini-3-pro-preview' : 'gpt-4o',
+          temperature: 0.3, // Lower temperature for more consistent instruction following
+          maxTokens: 8000, // Removed word count limit - allow full story generation
         },
-        {
-          role: 'user',
-          content: prompt,
-        },
-      ],
-      {
-        model: provider === 'gemini' ? 'gemini-3-pro-preview' : 'gpt-4o',
-        temperature: 0.3, // Lower temperature for more consistent instruction following
-        maxTokens: Math.max(wordCount * 3, 2000), // Increased to prevent truncation
-      },
-      provider
+        provider
       );
 
       story = result.content.trim();
@@ -1609,6 +2218,65 @@ export async function POST(req: Request) {
 
     // Clean up any markdown wrappers
     story = story.replace(/^```(?:markdown|html)?\s*/i, '').replace(/\s*```$/i, '');
+    
+    // Fix formatting: Ensure proper spacing around section markers
+    // First, handle cases where section marker appears directly after text with no newline
+    story = story.replace(/([^\n])\s*##\s*Section:/g, '$1\n\n## Section:');
+    // Ensure section markers have proper spacing after them
+    story = story.replace(/##\s*Section:([^\n]+)\n([^\n#])/g, '## Section:$1\n\n$2');
+    
+    // Post-process to ensure ALL articles are hyperlinked (WGO only hyperlinks primary article)
+    if (articles.length > 1) {
+      console.log(`[QUICK STORY] Post-processing to ensure all ${articles.length} articles are hyperlinked`);
+      const articleUrls = articles.map((a: any) => a.url).filter((url: string) => url);
+      const hyperlinkedUrls = new Set<string>();
+      
+      // Find all currently hyperlinked URLs
+      const hyperlinkMatches = story.match(/<a\s+href=["'](https?:\/\/[^"']+)["'][^>]*>/gi) || [];
+      hyperlinkMatches.forEach((match: string) => {
+        const urlMatch = match.match(/href=["'](https?:\/\/[^"']+)["']/i);
+        if (urlMatch) {
+          hyperlinkedUrls.add(urlMatch[1]);
+        }
+      });
+      
+      // For each article URL that's not hyperlinked, find a natural place to add it
+      articleUrls.forEach((articleUrl: string, index: number) => {
+        if (!hyperlinkedUrls.has(articleUrl) && !story.includes(articleUrl)) {
+          const article = articles[index];
+          if (article && article.headline) {
+            // Extract 3 sequential words from headline for hyperlink text
+            const headlineWords = article.headline.split(/\s+/).filter((w: string) => w.length > 2);
+            if (headlineWords.length >= 3) {
+              // Find a good place to insert the hyperlink (prefer paragraphs after the first)
+              const paragraphs = story.split(/\n\n/);
+              if (paragraphs.length > 1) {
+                // Try to find a paragraph that mentions something related to the headline
+                for (let i = 1; i < paragraphs.length; i++) {
+                  const para = paragraphs[i];
+                  // Skip section headers
+                  if (!para.match(/^##\s*Section:/) && para.length > 50) {
+                    // Find a good spot to insert hyperlink (prefer middle of paragraph)
+                    const words = para.split(/\s+/);
+                    if (words.length >= 5) {
+                      // Insert hyperlink in the middle of the paragraph
+                      const insertIndex = Math.floor(words.length / 2);
+                      const threeWords = headlineWords.slice(0, 3).join(' ');
+                      words.splice(insertIndex, 0, `<a href="${articleUrl}">${threeWords}</a>`);
+                      paragraphs[i] = words.join(' ');
+                      story = paragraphs.join('\n\n');
+                      hyperlinkedUrls.add(articleUrl);
+                      console.log(`[QUICK STORY] Added hyperlink for article ${index + 1}: ${articleUrl}`);
+                      break;
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      });
+    }
 
     // Validate hyperlinks: Count how many article URLs are actually hyperlinked
     // Check for both HTML format <a href="url">text</a> and markdown format [text](url)
@@ -1617,9 +2285,40 @@ export async function POST(req: Request) {
     const hyperlinkCount = htmlLinks + markdownLinks;
     const expectedHyperlinks = articles.length;
     
-    console.log(`[QUICK STORY] Hyperlink detection: ${htmlLinks} HTML links, ${markdownLinks} markdown links, total: ${hyperlinkCount}`);
+    console.log(`[QUICK STORY] ===== HYPERLINK VALIDATION =====`);
+    console.log(`[QUICK STORY] Articles array length: ${articles.length}`);
+    console.log(`[QUICK STORY] Expected hyperlinks: ${expectedHyperlinks}`);
+    console.log(`[QUICK STORY] Found HTML links: ${htmlLinks}`);
+    console.log(`[QUICK STORY] Found markdown links: ${markdownLinks}`);
+    console.log(`[QUICK STORY] Total hyperlinks found: ${hyperlinkCount}`);
     
-    console.log(`[QUICK STORY] Hyperlink validation: Found ${hyperlinkCount} hyperlinks, expected ${expectedHyperlinks}`);
+    // Extract all URLs from hyperlinks in the story
+    const htmlLinkMatches = story.match(/<a\s+href=["'](https?:\/\/[^"']+)["'][^>]*>/gi) || [];
+    const markdownLinkMatches = story.match(/\[([^\]]+)\]\((https?:\/\/[^\)]+)\)/gi) || [];
+    const htmlLinkUrls = htmlLinkMatches.map((m: string) => {
+      const urlMatch = m.match(/href=["'](https?:\/\/[^"']+)["']/i);
+      return urlMatch ? urlMatch[1] : 'NO URL';
+    });
+    const markdownLinkUrls = markdownLinkMatches.map((m: string) => {
+      const urlMatch = m.match(/\((https?:\/\/[^\)]+)\)/i);
+      return urlMatch ? urlMatch[1] : 'NO URL';
+    });
+    console.log(`[QUICK STORY] HTML link URLs found:`, htmlLinkUrls);
+    console.log(`[QUICK STORY] Markdown link URLs found:`, markdownLinkUrls);
+    
+    // Check which article URLs are actually hyperlinked
+    const articleUrls = articles.map((a: any) => a.url).filter((url: string) => url);
+    console.log(`[QUICK STORY] Article URLs that should be hyperlinked:`, articleUrls);
+    
+    const hyperlinkedArticleUrls = articleUrls.filter((articleUrl: string) => {
+      return story.includes(articleUrl);
+    });
+    console.log(`[QUICK STORY] Article URLs found in story: ${hyperlinkedArticleUrls.length}/${articleUrls.length}`);
+    const missingUrls = articleUrls.filter((url: string) => !story.includes(url));
+    if (missingUrls.length > 0) {
+      console.warn(`[QUICK STORY] ⚠️ MISSING ARTICLE URLs:`, missingUrls);
+    }
+    console.log(`[QUICK STORY] ===== END HYPERLINK VALIDATION =====`);
     
     // If hyperlinks are missing, retry with stronger instructions (max 2 retries)
     let retryCount = 0;
@@ -1650,7 +2349,10 @@ export async function POST(req: Request) {
         priceData || undefined,
         consensusRatings || undefined,
         customUrlsArrayRetry,
-        Object.keys(customSourceContent).length > 0 ? customSourceContent : undefined
+        Object.keys(customSourceContent).length > 0 ? customSourceContent : undefined,
+        technicalData || undefined,
+        analystActions || undefined,
+        edgeRankings || undefined
       ) + `\n\nCRITICAL VALIDATION REQUIRED BEFORE SUBMITTING:
 CRITICAL WRITING STYLE REMINDER:
 - Write naturally as a journalist - DO NOT explicitly reference articles or reports
@@ -1676,7 +2378,7 @@ CRITICAL VALIDATION REQUIRED BEFORE SUBMITTING:
         [
           {
             role: 'system',
-            content: 'You are a professional financial journalist writing concise, data-dense articles for a financial news website. CRITICAL HYPERLINK RULE: You must hyperlink EVERY article provided - if 5 articles are given, include exactly 5 hyperlinks distributed throughout the story. At least ONE hyperlink MUST appear in the first paragraph. Use HTML format: <a href="URL">text</a> NOT markdown format. Always use HTML <strong> tags to bold company names (not tickers) and prominent people\'s names on their first mention. CRITICAL: On the FIRST mention of ANY company (main or related), you MUST use the FULL company name (e.g., "Microsoft Corporation", "NVIDIA Corporation") with the ticker in parentheses. Use subhead placeholders (## Section:) and bullet points (<ul>/<li>) to break up content and improve readability.',
+            content: 'You are a professional financial journalist writing concise, data-dense articles for a financial news website. CRITICAL HYPERLINK RULE: You must hyperlink EVERY article provided - if 5 articles are given, include exactly 5 hyperlinks distributed throughout the story. CRITICAL LEAD PARAGRAPH RULE: The lead paragraph must focus on WHY the stock moved (context from articles), NOT just restate the price action. At least ONE hyperlink MUST appear in the first paragraph explaining the context. DO NOT repeat the price action details (percentage, price) in the lead - that information is in the price action line at the bottom. Use HTML format: <a href="URL">text</a> NOT markdown format. Always use HTML <strong> tags to bold company names (not tickers) and prominent people\'s names on their first mention. CRITICAL: On the FIRST mention of ANY company (main or related), you MUST use the FULL company name (e.g., "Microsoft Corporation", "NVIDIA Corporation") with the ticker in parentheses. Use subhead placeholders (## Section:) and bullet points (<ul>/<li>) to break up content and improve readability.',
           },
           {
             role: 'user',
@@ -1686,7 +2388,7 @@ CRITICAL VALIDATION REQUIRED BEFORE SUBMITTING:
         {
           model: provider === 'gemini' ? 'gemini-3-pro-preview' : 'gpt-4o',
           temperature: 0.3, // Lower temperature for more consistent instruction following
-          maxTokens: Math.max(wordCount * 3, 2000), // Increased to prevent truncation
+          maxTokens: 8000, // Removed word count limit - allow full story generation
         },
         provider
       );
