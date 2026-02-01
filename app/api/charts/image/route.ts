@@ -44,20 +44,22 @@ export async function GET(request: Request) {
       ? 'RSI Heatmap Timeline' 
       : 'Chart';
 
-    const svg = `<?xml version="1.0" encoding="UTF-8"?>
-<svg width="800" height="400" xmlns="http://www.w3.org/2000/svg">
-  <rect width="800" height="400" fill="#ffffff" stroke="#e5e7eb" stroke-width="2"/>
-  <text x="400" y="200" font-family="Arial, sans-serif" font-size="18" fill="#6b7280" text-anchor="middle">
-    ${chartTitle} - ${symbol}
+    const svg = `<svg width="800" height="400" xmlns="http://www.w3.org/2000/svg">
+  <rect width="800" height="400" fill="#ffffff" stroke="#e5e7eb" stroke-width="2" rx="8"/>
+  <text x="400" y="190" font-family="Arial, sans-serif" font-size="20" font-weight="600" fill="#374151" text-anchor="middle">
+    ${chartTitle}
   </text>
-  <text x="400" y="230" font-family="Arial, sans-serif" font-size="14" fill="#9ca3af" text-anchor="middle">
-    Chart will be generated when chart API is configured
+  <text x="400" y="220" font-family="Arial, sans-serif" font-size="16" fill="#6b7280" text-anchor="middle">
+    ${symbol}
+  </text>
+  <text x="400" y="250" font-family="Arial, sans-serif" font-size="14" fill="#9ca3af" text-anchor="middle">
+    Chart placeholder - Configure chart API for live data
   </text>
 </svg>`;
 
     return new NextResponse(svg, {
       headers: {
-        'Content-Type': 'image/svg+xml',
+        'Content-Type': 'image/svg+xml; charset=utf-8',
         'Cache-Control': 'public, max-age=300',
       },
     });

@@ -159,7 +159,7 @@ export async function POST(request: Request) {
             })());
         const chartImageUrl = `${chartApiBaseUrl}/api/charts/image?symbol=${tickerUpper}&chartType=price-moving-averages`;
         // Insert as HTML img tag wrapped in a div with fallback text
-        const chartImgTag = `\n\n<div style="text-align: center; margin: 20px 0; clear: both; padding: 20px; background-color: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px;"><img src="${chartImageUrl}" alt="Price with Moving Averages" style="max-width: 100%; height: auto; display: block; margin: 0 auto;" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';" /><p style="display: none; color: #6b7280; font-size: 14px; font-weight: 500; margin: 0;">Price with Moving Averages</p></div>\n\n`;
+        const chartImgTag = `\n\n<div style="text-align: center; margin: 20px 0; clear: both;"><img src="${chartImageUrl}" alt="Price with Moving Averages" style="max-width: 100%; height: auto; display: block; margin: 0 auto; border: 1px solid #e5e7eb; border-radius: 8px;" /></div>\n\n`;
         paragraphs.splice(nextIndex, 0, chartImgTag);
         console.log('[CHART INSERTION] ✅ Inserted price-moving-averages chart image at index:', nextIndex);
         console.log('[CHART INSERTION] Chart API URL:', chartImageUrl);
@@ -203,7 +203,7 @@ export async function POST(request: Request) {
             })());
         const chartImageUrl = `${chartApiBaseUrl}/api/charts/image?symbol=${tickerUpper}&chartType=rsi-heatmap`;
         // Insert as HTML img tag wrapped in a div with fallback text
-        const chartImgTag = `\n\n<div style="text-align: center; margin: 20px 0; clear: both; padding: 20px; background-color: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px;"><img src="${chartImageUrl}" alt="RSI Heatmap Timeline" style="max-width: 100%; height: auto; display: block; margin: 0 auto;" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';" /><p style="display: none; color: #6b7280; font-size: 14px; font-weight: 500; margin: 0;">RSI Heatmap Timeline</p></div>\n\n`;
+        const chartImgTag = `\n\n<div style="text-align: center; margin: 20px 0; clear: both;"><img src="${chartImageUrl}" alt="RSI Heatmap Timeline" style="max-width: 100%; height: auto; display: block; margin: 0 auto; border: 1px solid #e5e7eb; border-radius: 8px;" /></div>\n\n`;
         updatedParagraphs.splice(nextIndex, 0, chartImgTag);
         console.log('[CHART INSERTION] ✅ Inserted rsi-heatmap chart image at index:', nextIndex);
         console.log('[CHART INSERTION] Chart API URL:', chartImageUrl);
