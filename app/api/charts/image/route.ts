@@ -18,21 +18,52 @@ export async function GET(request: Request) {
     const externalChartApiUrl = process.env.EXTERNAL_CHART_API_URL;
     
     if (externalChartApiUrl) {
+      // Build query parameters for external chart API
+      const params = new URLSearchParams({
+        symbol: symbol,
+        chartType: chartType,
+      });
+      
+      // Add optional parameters if provided
+      const width = searchParams.get('width');
+      const height = searchParams.get('height');
+      const timeframe = searchParams.get('timeframe');
+      const maPeriod = searchParams.get('maPeriod');
+      
+      if (width) params.append('width', width);
+      if (height) params.append('height', height);
+      if (timeframe) params.append('timeframe', timeframe);
+      if (maPeriod) params.append('maPeriod', maPeriod);
+      
       // Proxy to external chart API
-      const externalUrl = `${externalChartApiUrl}/api/charts/image?symbol=${encodeURIComponent(symbol)}&chartType=${encodeURIComponent(chartType)}`;
+      const externalUrl = `${externalChartApiUrl}/api/charts/image?${params.toString()}`;
+      
+      console.log(`[CHART API] Fetching chart from external API: ${externalUrl}`);
+      
       try {
-        const response = await fetch(externalUrl);
+        const response = await fetch(externalUrl, {
+          // Add timeout for long-running chart generation
+          signal: AbortSignal.timeout(30000), // 30 second timeout
+        });
+        
         if (response.ok) {
           const imageBuffer = await response.arrayBuffer();
+          const contentType = response.headers.get('Content-Type') || 'image/png';
+          
+          console.log(`[CHART API] Successfully fetched chart image (${contentType}, ${imageBuffer.byteLength} bytes)`);
+          
           return new NextResponse(imageBuffer, {
             headers: {
-              'Content-Type': response.headers.get('Content-Type') || 'image/png',
-              'Cache-Control': 'public, max-age=3600',
+              'Content-Type': contentType,
+              'Cache-Control': 'public, max-age=3600', // Cache for 1 hour
             },
           });
+        } else {
+          console.error(`[CHART API] External API returned error: ${response.status} ${response.statusText}`);
+          // Fall through to generate placeholder
         }
-      } catch (error) {
-        console.error('[CHART API] Error fetching from external API:', error);
+      } catch (error: any) {
+        console.error('[CHART API] Error fetching from external API:', error.message || error);
         // Fall through to generate placeholder
       }
     }
