@@ -397,7 +397,7 @@ export async function POST(req: Request) {
     }
     if (ticker && ticker.includes(',')) {
       const tickers = ticker.split(',').map((t: string) => t.trim().toUpperCase()).filter((t: string) => t);
-      tickers.forEach(t => {
+      tickers.forEach((t: string) => {
         if (!allTickers.includes(t)) {
           allTickers.push(t);
         }
