@@ -158,8 +158,8 @@ export async function POST(request: Request) {
               return `${requestUrl.protocol}//${requestUrl.host}`;
             })());
         const chartImageUrl = `${chartApiBaseUrl}/api/charts/image?symbol=${tickerUpper}&chartType=price-moving-averages`;
-        // Insert as HTML img tag
-        const chartImgTag = `<img src="${chartImageUrl}" alt="Price with Moving Averages" style="max-width: 100%; height: auto; display: block; margin: 20px auto;" />`;
+        // Insert as HTML img tag wrapped in a div for proper spacing and display
+        const chartImgTag = `\n\n<div style="text-align: center; margin: 20px 0; clear: both;"><img src="${chartImageUrl}" alt="Price with Moving Averages" style="max-width: 100%; height: auto; display: block; margin: 0 auto;" /></div>\n\n`;
         paragraphs.splice(nextIndex, 0, chartImgTag);
         console.log('[CHART INSERTION] ✅ Inserted price-moving-averages chart image at index:', nextIndex);
         console.log('[CHART INSERTION] Chart API URL:', chartImageUrl);
@@ -202,8 +202,8 @@ export async function POST(request: Request) {
               return `${requestUrl.protocol}//${requestUrl.host}`;
             })());
         const chartImageUrl = `${chartApiBaseUrl}/api/charts/image?symbol=${tickerUpper}&chartType=rsi-heatmap`;
-        // Insert as HTML img tag
-        const chartImgTag = `<img src="${chartImageUrl}" alt="RSI Heatmap Timeline" style="max-width: 100%; height: auto; display: block; margin: 20px auto;" />`;
+        // Insert as HTML img tag wrapped in a div for proper spacing and display
+        const chartImgTag = `\n\n<div style="text-align: center; margin: 20px 0; clear: both;"><img src="${chartImageUrl}" alt="RSI Heatmap Timeline" style="max-width: 100%; height: auto; display: block; margin: 0 auto;" /></div>\n\n`;
         updatedParagraphs.splice(nextIndex, 0, chartImgTag);
         console.log('[CHART INSERTION] ✅ Inserted rsi-heatmap chart image at index:', nextIndex);
         console.log('[CHART INSERTION] Chart API URL:', chartImageUrl);
